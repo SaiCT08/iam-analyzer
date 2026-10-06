@@ -1,0 +1,19 @@
+{
+  "description": "Read-only access does not grant writes; nothing allows PutObject, so it is implicitly denied.",
+  "policies": {
+    "teacher_read_grades.json": {
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": ["s3:Get*", "s3:List*"],
+          "Resource": "arn:aws:s3:::district-student-records/*"
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-student-records/campus-01/grades.csv"
+  },
+  "expected": "IMPLICIT_DENY"
+}

@@ -1,0 +1,25 @@
+{
+  "description": "Even an IT admin with s3:* on everything cannot delete student records when a Deny guards them.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
+    },
+    "deny_student_records_delete.json": {
+      "Statement": [
+        {
+          "Effect": "Deny",
+          "Action": ["s3:DeleteObject", "s3:DeleteObjectVersion", "s3:DeleteBucket"],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/*"
+          ]
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:DeleteObject",
+    "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"
+  },
+  "expected": "EXPLICIT_DENY"
+}

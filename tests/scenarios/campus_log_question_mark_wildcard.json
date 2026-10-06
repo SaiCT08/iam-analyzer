@@ -1,0 +1,19 @@
+{
+  "description": "'campus-??' matches two-character campus numbers only; campus-101 is not covered.",
+  "policies": {
+    "staff_read_only_ec2_and_logs.json": {
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "logs:GetLogEvents",
+          "Resource": "arn:aws:logs:us-east-1:111122223333:log-group:/district/campus-??/*"
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "logs:GetLogEvents",
+    "resource": "arn:aws:logs:us-east-1:111122223333:log-group:/district/campus-101/log-stream:web"
+  },
+  "expected": "IMPLICIT_DENY"
+}

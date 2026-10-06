@@ -1,0 +1,22 @@
+{
+  "description": "The delete guard only covers student records; the admin can still delete in other buckets.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
+    },
+    "deny_student_records_delete.json": {
+      "Statement": [
+        {
+          "Effect": "Deny",
+          "Action": "s3:Delete*",
+          "Resource": "arn:aws:s3:::district-student-records/*"
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:DeleteObject",
+    "resource": "arn:aws:s3:::district-cafeteria-menus/week-40.pdf"
+  },
+  "expected": "ALLOW"
+}

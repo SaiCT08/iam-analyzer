@@ -1,0 +1,14 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "NoDeleteStudentRecords",
+      "Effect": "Deny",
+      "Action": ["s3:DeleteObject", "s3:DeleteObjectVersion", "s3:DeleteBucket"],
+      "Resource": [
+        "arn:aws:s3:::district-student-records",
+        "arn:aws:s3:::district-student-records/*"
+      ]
+    }
+  ]
+}

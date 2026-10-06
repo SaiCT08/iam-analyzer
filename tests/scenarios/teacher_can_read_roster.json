@@ -1,0 +1,20 @@
+{
+  "description": "A teacher's read policy allows reading an object in the student records bucket.",
+  "policies": {
+    "teacher_read_grades.json": {
+      "Statement": [
+        {
+          "Sid": "ReadStudentRecords",
+          "Effect": "Allow",
+          "Action": ["s3:Get*", "s3:List*"],
+          "Resource": "arn:aws:s3:::district-student-records/*"
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-student-records/campus-01/grades.csv"
+  },
+  "expected": "ALLOW"
+}

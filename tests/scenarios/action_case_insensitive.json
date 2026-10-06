@@ -1,0 +1,13 @@
+{
+  "description": "Action names are case-insensitive in IAM.",
+  "policies": {
+    "p.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "S3:getobject", "Resource": "*" }]
+    }
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-student-records/roster.csv"
+  },
+  "expected": "ALLOW"
+}
