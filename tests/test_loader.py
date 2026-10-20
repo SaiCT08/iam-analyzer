@@ -42,6 +42,33 @@ def test_lists_are_kept_and_sid_is_read():
     assert statement.sid == "Read"
 
 
+def test_plain_action_and_resource_are_not_negated():
+    policy = parse_policy(
+        {"Statement": {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}}, name="p"
+    )
+    statement = policy.statements[0]
+    assert not statement.not_action
+    assert not statement.not_resource
+
+
+def test_not_action_and_not_resource_are_read():
+    policy = parse_policy(
+        {
+            "Statement": {
+                "Effect": "Deny",
+                "NotAction": ["s3:Get*", "s3:List*"],
+                "NotResource": "arn:aws:s3:::public/*",
+            }
+        },
+        name="p",
+    )
+    statement = policy.statements[0]
+    assert statement.actions == ("s3:Get*", "s3:List*")
+    assert statement.not_action
+    assert statement.resources == ("arn:aws:s3:::public/*",)
+    assert statement.not_resource
+
+
 def test_load_policy_file_uses_file_name(tmp_path):
     path = tmp_path / "teacher.json"
     path.write_text(json.dumps({"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}))
@@ -66,6 +93,23 @@ def test_missing_file(tmp_path):
         ({"Statement": [{"Effect": "Allow", "Action": [], "Resource": "*"}]}, "'Action' must be"),
         ({"Statement": [{"Effect": "Allow", "Action": [1], "Resource": "*"}]}, "'Action' must be"),
         (
+            {"Statement": [{"Effect": "Allow", "Action": "*", "NotAction": "s3:*", "Resource": "*"}]},
+            "both 'Action' and 'NotAction'",
+        ),
+        (
+            {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*", "NotResource": "*"}]},
+            "both 'Resource' and 'NotResource'",
+        ),
+        ({"Statement": [{"Effect": "Allow", "Resource": "*"}]}, "missing 'Action' or 'NotAction'"),
+        (
+            {"Statement": [{"Effect": "Allow", "NotAction": [], "Resource": "*"}]},
+            "'NotAction' must be",
+        ),
+        (
+            {"Statement": [{"Effect": "Allow", "Action": "*", "NotResource": ""}]},
+            "'NotResource' must be",
+        ),
+        (
             {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*", "Bogus": 1}]},
             "unknown element",
         ),
@@ -85,9 +129,8 @@ def test_invalid_json():
     "element, value",
     [
         ("Condition", {"Bool": {"aws:SecureTransport": "true"}}),
-        ("NotAction", "s3:*"),
-        ("NotResource", "*"),
         ("Principal", "*"),
+        ("NotPrincipal", "*"),
     ],
 )
 def test_unsupported_elements_are_rejected(element, value):

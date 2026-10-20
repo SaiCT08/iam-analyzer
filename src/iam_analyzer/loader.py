@@ -12,8 +12,10 @@ from iam_analyzer.errors import PolicyParseError, UnsupportedPolicyFeature
 from iam_analyzer.models import Effect, Policy, Statement
 
 # Elements the analyzer recognises but can't evaluate yet (later phases).
-UNSUPPORTED_ELEMENTS = ("Condition", "NotAction", "NotResource", "Principal", "NotPrincipal")
-KNOWN_ELEMENTS = {"Sid", "Effect", "Action", "Resource", *UNSUPPORTED_ELEMENTS}
+UNSUPPORTED_ELEMENTS = ("Condition", "Principal", "NotPrincipal")
+KNOWN_ELEMENTS = {
+    "Sid", "Effect", "Action", "NotAction", "Resource", "NotResource", *UNSUPPORTED_ELEMENTS
+}
 
 
 def load_policy_file(path: str | Path) -> Policy:
@@ -72,12 +74,27 @@ def _parse_statement(raw: Any, where: str) -> Statement:
             f"{where}: 'Effect' must be \"Allow\" or \"Deny\", got {raw.get('Effect')!r}"
         ) from None
 
+    actions, not_action = _patterns(raw, "Action", "NotAction", where)
+    resources, not_resource = _patterns(raw, "Resource", "NotResource", where)
     return Statement(
         effect=effect,
-        actions=_string_list(raw, "Action", where),
-        resources=_string_list(raw, "Resource", where),
+        actions=actions,
+        resources=resources,
         sid=sid,
+        not_action=not_action,
+        not_resource=not_resource,
     )
+
+
+def _patterns(raw: dict, key: str, not_key: str, where: str) -> tuple[tuple[str, ...], bool]:
+    """Read exactly one of `key` / `not_key`. Returns (patterns, negated)."""
+    if key in raw and not_key in raw:
+        raise PolicyParseError(f"{where}: cannot have both '{key}' and '{not_key}'")
+    if not_key in raw:
+        return _string_list(raw, not_key, where), True
+    if key not in raw:
+        raise PolicyParseError(f"{where}: missing '{key}' or '{not_key}'")
+    return _string_list(raw, key, where), False
 
 
 def _string_list(raw: dict, key: str, where: str) -> tuple[str, ...]:

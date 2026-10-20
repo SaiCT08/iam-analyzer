@@ -1,0 +1,37 @@
+{
+  "description": "The NotAction guardrail denies any non-read action on student records, even though a broad Allow exists.",
+  "policies": {
+    "broad_s3.json": {
+      "Statement": [
+        {
+          "Sid": "BroadS3",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "substitute_read_only_guardrail.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "SubstitutesReadOnlyStudentRecords",
+          "Effect": "Deny",
+          "NotAction": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/*"
+          ]
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-student-records/campus-01/roster.csv"
+  },
+  "expected": "EXPLICIT_DENY"
+}

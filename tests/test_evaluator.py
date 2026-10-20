@@ -105,6 +105,73 @@ def test_all_matching_allows_are_reported():
     assert [r.statement.sid for r in result.reasons] == ["One", "Two"]
 
 
+# --- NotAction / NotResource -----------------------------------------------------------
+
+
+def statement(effect, sid=None, **elements):
+    return {"Sid": sid, "Effect": effect, **elements}
+
+
+def test_allow_not_action_allows_everything_except_listed():
+    p = policy("p", statement("Allow", NotAction="s3:Delete*", Resource="*"))
+    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    delete = Request(action="s3:DeleteObject", resource=OBJECT)
+    assert evaluate(delete, [p]).decision is Decision.IMPLICIT_DENY
+
+
+def test_deny_not_action_guardrail_blocks_everything_except_listed():
+    guardrail = statement(
+        "Deny", sid="ReadOnly", NotAction=["s3:Get*", "s3:List*"], Resource=f"{BUCKET}/*"
+    )
+    policies = [policy("p", allow("s3:*", "*"), guardrail)]
+    assert evaluate(GET, policies).decision is Decision.ALLOW
+    put = Request(action="s3:PutObject", resource=OBJECT)
+    result = evaluate(put, policies)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert [r.statement.sid for r in result.reasons] == ["ReadOnly"]
+
+
+def test_deny_not_action_only_applies_to_its_resource():
+    guardrail = statement("Deny", NotAction="s3:Get*", Resource=f"{BUCKET}/*")
+    put_elsewhere = Request(action="s3:PutObject", resource="arn:aws:s3:::other/file")
+    p = policy("p", allow("s3:*", "*"), guardrail)
+    assert evaluate(put_elsewhere, [p]).decision is Decision.ALLOW
+
+
+def test_allow_not_resource_allows_everywhere_except_listed():
+    p = policy("p", statement("Allow", Action="s3:GetObject", NotResource=f"{BUCKET}/*"))
+    assert evaluate(GET, [p]).decision is Decision.IMPLICIT_DENY
+    other = Request(action="s3:GetObject", resource="arn:aws:s3:::other/file")
+    assert evaluate(other, [p]).decision is Decision.ALLOW
+
+
+def test_deny_not_resource_blocks_everywhere_except_listed():
+    p = policy(
+        "p",
+        allow("s3:*", "*"),
+        statement("Deny", Action="s3:*", NotResource=[BUCKET, f"{BUCKET}/*"]),
+    )
+    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    other = Request(action="s3:GetObject", resource="arn:aws:s3:::other/file")
+    assert evaluate(other, [p]).decision is Decision.EXPLICIT_DENY
+
+
+def test_not_action_with_not_resource():
+    # Deny anything except reads, anywhere except the public bucket.
+    p = policy(
+        "p",
+        allow("*", "*"),
+        statement("Deny", NotAction="s3:Get*", NotResource="arn:aws:s3:::public/*"),
+    )
+
+    def decide(action, resource):
+        return evaluate(Request(action=action, resource=resource), [p]).decision
+
+    assert decide("s3:GetObject", OBJECT) is Decision.ALLOW  # read: excluded action
+    assert decide("s3:PutObject", "arn:aws:s3:::public/x") is Decision.ALLOW  # excluded resource
+    assert decide("s3:PutObject", OBJECT) is Decision.EXPLICIT_DENY  # neither excluded
+
+
 # --- Data-driven scenarios -------------------------------------------------------------
 
 SCENARIO_DIR = Path(__file__).parent / "scenarios"

@@ -10,10 +10,14 @@ It works entirely on local policy JSON files. No AWS account or credentials are 
 
 ## Status
 
-Phase 1 covers **identity policies**: Allow/Deny statements, explicit deny always winning, default
-(implicit) deny, and `*` / `?` wildcards in actions and resources. Policies that use `Condition`,
-`NotAction`, `NotResource` or `Principal` are rejected with a clear error. Support for these comes
-in later phases.
+The analyzer currently covers **identity policies**:
+- Allow/Deny statements, where an explicit deny always wins and the default is an implicit deny.
+- `*` / `?` wildcards in actions and resources.
+- `NotAction` / `NotResource`, which mean "everything except these". For example, a Deny with
+  `NotAction: ["s3:Get*"]` is a read-only guardrail.
+
+Policies that use `Condition`, `Principal` or `NotPrincipal` are rejected with a clear error. Support
+for these comes in later phases.
 
 ## Setup
 

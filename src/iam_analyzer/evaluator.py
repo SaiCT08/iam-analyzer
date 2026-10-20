@@ -3,6 +3,8 @@
 The logic, in three steps:
   1. Collect: every statement from every policy attached to the principal.
   2. Match:   keep statements whose Action AND Resource both match the request.
+              NotAction / NotResource flip the test: the statement matches when the
+              request is NOT in the list.
   3. Decide:  any matching Deny  -> EXPLICIT_DENY (a Deny always wins)
               else any Allow     -> ALLOW
               else               -> IMPLICIT_DENY (the default is "no")
@@ -23,9 +25,10 @@ from iam_analyzer.models import (
 
 
 def statement_matches(statement: Statement, request: Request) -> bool:
-    return any(match_action(p, request.action) for p in statement.actions) and any(
-        match_resource(p, request.resource) for p in statement.resources
-    )
+    # `!=` with the flag acts as "flip the result when negated".
+    action_ok = any(match_action(p, request.action) for p in statement.actions)
+    resource_ok = any(match_resource(p, request.resource) for p in statement.resources)
+    return (action_ok != statement.not_action) and (resource_ok != statement.not_resource)
 
 
 def evaluate(request: Request, policies: Iterable[Policy]) -> EvaluationResult:

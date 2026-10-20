@@ -23,12 +23,18 @@ class Decision(str, Enum):
 
 @dataclass(frozen=True)
 class Statement:
-    """One normalized policy statement. Action and Resource are always tuples."""
+    """One normalized policy statement. Action and Resource are always tuples.
+
+    `not_action` / `not_resource` mean the statement used NotAction / NotResource: the
+    patterns list what the statement does NOT cover, and it applies to everything else.
+    """
 
     effect: Effect
     actions: tuple[str, ...]
     resources: tuple[str, ...]
     sid: str | None = None
+    not_action: bool = False
+    not_resource: bool = False
 
 
 @dataclass(frozen=True)

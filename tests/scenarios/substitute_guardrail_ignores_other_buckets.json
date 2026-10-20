@@ -1,0 +1,37 @@
+{
+  "description": "The guardrail only covers the student records bucket; writes elsewhere stay allowed.",
+  "policies": {
+    "broad_s3.json": {
+      "Statement": [
+        {
+          "Sid": "BroadS3",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "substitute_read_only_guardrail.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "SubstitutesReadOnlyStudentRecords",
+          "Effect": "Deny",
+          "NotAction": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/*"
+          ]
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-lesson-plans/week1.pdf"
+  },
+  "expected": "ALLOW"
+}
