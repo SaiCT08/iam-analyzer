@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "iam-analyzer"
 version = "0.1.0"
-description = "AWS IAM effective-permissions analyzer for Texas school districts"
+description = "General-purpose AWS IAM effective-permissions analyzer"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []

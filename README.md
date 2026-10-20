@@ -2,8 +2,9 @@
 
 An AWS IAM effective-permissions analyzer, written in Python. Given a set of policies, it answers
 "can this principal perform this action on this resource?" using AWS's policy evaluation logic, and
-explains *which statements* produced the answer. It's built for Texas school districts, with a TEA
-compliance framing.
+explains *which statements* produced the answer. It's general-purpose and works with any AWS account.
+Texas school districts (TEA/FERPA) are the first showcase use case, so the examples use district
+policies. Compliance reporting will support pluggable frameworks.
 
 It works entirely on local policy JSON files. No AWS account or credentials are needed.
 
