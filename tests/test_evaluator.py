@@ -1,3 +1,4 @@
+import dataclasses
 import itertools
 import json
 from pathlib import Path
@@ -103,6 +104,16 @@ def test_all_matching_allows_are_reported():
     ]
     result = evaluate(GET, policies)
     assert [r.statement.sid for r in result.reasons] == ["One", "Two"]
+
+
+def test_via_group_is_carried_into_reasons():
+    direct = policy("Direct", allow("s3:GetObject", OBJECT))
+    inherited = dataclasses.replace(policy("Shared", allow("s3:*", "*")), via_group="Teachers")
+    result = evaluate(GET, [direct, inherited])
+    assert [(r.policy_name, r.via_group) for r in result.reasons] == [
+        ("Direct", None),
+        ("Shared", "Teachers"),
+    ]
 
 
 # --- NotAction / NotResource -----------------------------------------------------------

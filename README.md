@@ -44,6 +44,38 @@ EXPLICIT_DENY
   Deny   deny_student_records_delete.json  Sid=NoDeleteStudentRecords
 ```
 
+### Asking about a user or role
+
+An account file defines policies once, by name, and attaches them to users, groups and roles. See
+[`examples/accounts/district.json`](examples/accounts/district.json) for a full example.
+
+```json
+{
+  "Policies": { "TeacherReadGrades": { "Statement": [ ... ] } },
+  "Groups":   { "Teachers": { "Policies": ["TeacherReadGrades"] } },
+  "Users":    { "jsmith": { "Groups": ["Teachers"], "Policies": [] } },
+  "Roles":    { "ITAdmin": { "Policies": ["..."] } }
+}
+```
+
+Name the principal as `user/NAME` or `role/NAME`:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/jsmith \
+  --action s3:DeleteObject \
+  --resource arn:aws:s3:::district-student-records/2026/roster.csv
+```
+
+```
+EXPLICIT_DENY
+  Deny   DenyStudentRecordsDelete (via group Teachers)  Sid=NoDeleteStudentRecords
+```
+
+A user gets their own policies plus the policies of every group they're in. As in AWS, roles can't
+belong to groups.
+
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 
 ## Tests

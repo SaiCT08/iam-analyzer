@@ -33,7 +33,7 @@ def statement_matches(statement: Statement, request: Request) -> bool:
 
 def evaluate(request: Request, policies: Iterable[Policy]) -> EvaluationResult:
     matched = [
-        MatchedStatement(policy.name, statement)
+        MatchedStatement(policy.name, statement, policy.via_group)
         for policy in policies
         for statement in policy.statements
         if statement_matches(statement, request)

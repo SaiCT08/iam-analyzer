@@ -73,3 +73,62 @@ def test_missing_required_argument_exits_with_usage_error():
     with pytest.raises(SystemExit) as exc:
         main(["check", "--policy", TEACHER, "--action", "s3:GetObject"])
     assert exc.value.code == 2
+
+
+# --- Account mode ----------------------------------------------------------------------
+
+ACCOUNT = str(Path(__file__).parent.parent / "examples" / "accounts" / "district.json")
+
+
+def test_account_allow_shows_group(capsys):
+    code, out, _ = run(
+        capsys, "--account", ACCOUNT, "--principal", "user/jsmith",
+        "--action", "s3:GetObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_ALLOWED
+    assert out.splitlines()[0] == "ALLOW"
+    assert "TeacherReadGrades (via group Teachers)  Sid=ReadStudentRecords" in out
+
+
+def test_account_explicit_deny_inherited_through_group(capsys):
+    code, out, _ = run(
+        capsys, "--account", ACCOUNT, "--principal", "user/jsmith",
+        "--action", "s3:DeleteObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_DENIED
+    assert out.splitlines()[0] == "EXPLICIT_DENY"
+    assert "DenyStudentRecordsDelete (via group Teachers)" in out
+
+
+def test_account_direct_policy_has_no_group_suffix(capsys):
+    code, out, _ = run(
+        capsys, "--account", ACCOUNT, "--principal", "user/alee",
+        "--action", "s3:PutObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_ALLOWED
+    assert "ITAdminFullS3  Sid=FullS3Access" in out
+    assert "via group" not in out
+
+
+def test_account_unknown_principal(capsys):
+    code, out, err = run(
+        capsys, "--account", ACCOUNT, "--principal", "user/nobody",
+        "--action", "s3:GetObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert "no user named 'nobody'" in err
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--account", ACCOUNT],  # no --principal
+        ["--policy", TEACHER, "--principal", "user/jsmith"],  # --principal without --account
+        ["--policy", TEACHER, "--account", ACCOUNT, "--principal", "user/jsmith"],  # both sources
+    ],
+)
+def test_account_argument_misuse_exits_with_usage_error(args):
+    with pytest.raises(SystemExit) as exc:
+        main(["check", *args, "--action", "s3:GetObject", "--resource", ROSTER])
+    assert exc.value.code == 2

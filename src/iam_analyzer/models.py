@@ -39,10 +39,15 @@ class Statement:
 
 @dataclass(frozen=True)
 class Policy:
-    """A named policy: the name is used when explaining results (e.g. the file name)."""
+    """A named policy: the name is used when explaining results (e.g. the file name).
+
+    `via_group` records how a principal got this policy: the group's name when it was
+    inherited through group membership, None when attached directly.
+    """
 
     name: str
     statements: tuple[Statement, ...]
+    via_group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ class MatchedStatement:
 
     policy_name: str
     statement: Statement
+    via_group: str | None = None
 
 
 @dataclass(frozen=True)

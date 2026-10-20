@@ -1,0 +1,138 @@
+{
+  "Policies": {
+    "TeacherReadGrades": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ListStudentRecordsBucket",
+          "Effect": "Allow",
+          "Action": "s3:ListBucket",
+          "Resource": "arn:aws:s3:::district-student-records"
+        },
+        {
+          "Sid": "ReadStudentRecords",
+          "Effect": "Allow",
+          "Action": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": "arn:aws:s3:::district-student-records/*"
+        }
+      ]
+    },
+    "DenyStudentRecordsDelete": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "NoDeleteStudentRecords",
+          "Effect": "Deny",
+          "Action": [
+            "s3:DeleteObject",
+            "s3:DeleteObjectVersion",
+            "s3:DeleteBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/*"
+          ]
+        }
+      ]
+    },
+    "SubstituteReadOnlyGuardrail": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "SubstitutesReadOnlyStudentRecords",
+          "Effect": "Deny",
+          "NotAction": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/*"
+          ]
+        }
+      ]
+    },
+    "ITAdminFullS3": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "FullS3Access",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "StaffReadOnlyEc2AndLogs": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DescribeEc2",
+          "Effect": "Allow",
+          "Action": "ec2:Describe*",
+          "Resource": "*"
+        },
+        {
+          "Sid": "ReadCampusLogs",
+          "Effect": "Allow",
+          "Action": [
+            "logs:GetLogEvents",
+            "logs:FilterLogEvents"
+          ],
+          "Resource": "arn:aws:logs:us-east-1:111122223333:log-group:/district/campus-??/*"
+        }
+      ]
+    }
+  },
+  "Groups": {
+    "Teachers": {
+      "Policies": [
+        "TeacherReadGrades",
+        "DenyStudentRecordsDelete"
+      ]
+    },
+    "Substitutes": {
+      "Policies": [
+        "TeacherReadGrades",
+        "SubstituteReadOnlyGuardrail"
+      ]
+    },
+    "ITStaff": {
+      "Policies": [
+        "StaffReadOnlyEc2AndLogs",
+        "DenyStudentRecordsDelete"
+      ]
+    }
+  },
+  "Users": {
+    "jsmith": {
+      "Groups": [
+        "Teachers"
+      ]
+    },
+    "mgarcia": {
+      "Groups": [
+        "Substitutes"
+      ]
+    },
+    "alee": {
+      "Groups": [
+        "ITStaff"
+      ],
+      "Policies": [
+        "ITAdminFullS3"
+      ]
+    }
+  },
+  "Roles": {
+    "ITAdmin": {
+      "Policies": [
+        "ITAdminFullS3",
+        "DenyStudentRecordsDelete"
+      ]
+    }
+  }
+}

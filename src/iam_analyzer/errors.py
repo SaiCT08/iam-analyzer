@@ -15,3 +15,7 @@ class UnsupportedPolicyFeature(PolicyError):
     The analyzer refuses rather than ignores: silently skipping, say, a conditional Deny would
     make it report access as allowed when AWS might deny it.
     """
+
+
+class AccountError(PolicyError):
+    """The account file is malformed, or a principal, group or policy it names does not exist."""
