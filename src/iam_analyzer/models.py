@@ -21,6 +21,13 @@ class Decision(str, Enum):
         return self is Decision.ALLOW
 
 
+class PolicyType(str, Enum):
+    """The kinds of policy AWS evaluates, named as in the AWS docs."""
+
+    IDENTITY = "identity"
+    PERMISSIONS_BOUNDARY = "permissions boundary"
+
+
 @dataclass(frozen=True)
 class Statement:
     """One normalized policy statement. Action and Resource are always tuples.
@@ -59,20 +66,34 @@ class Request:
 
 
 @dataclass(frozen=True)
+class Layer:
+    """One layer of evaluation: the identity policies, or the permissions boundary.
+
+    A request needs a matching Allow in every layer that applies, and a matching Deny in
+    any layer denies it.
+    """
+
+    policy_type: PolicyType
+
+
+@dataclass(frozen=True)
 class MatchedStatement:
-    """A statement that matched the request, plus the policy it came from."""
+    """A statement that matched the request, plus the policy and layer it came from."""
 
     policy_name: str
     statement: Statement
     via_group: str | None = None
+    layer: Layer = Layer(PolicyType.IDENTITY)
 
 
 @dataclass(frozen=True)
 class EvaluationResult:
     decision: Decision
     # Statements that determined the decision: the matching Denies for EXPLICIT_DENY,
-    # the matching Allows for ALLOW, and empty for IMPLICIT_DENY.
+    # the matching Allows from every layer for ALLOW, and empty for IMPLICIT_DENY.
     reasons: tuple[MatchedStatement, ...] = field(default_factory=tuple)
+    # For IMPLICIT_DENY: each layer that had no matching Allow. Empty otherwise.
+    not_allowed_by: tuple[Layer, ...] = field(default_factory=tuple)
 
     @property
     def allowed(self) -> bool:

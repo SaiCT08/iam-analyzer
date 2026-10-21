@@ -1,0 +1,20 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GradebookAppBucketOnly",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::district-gradebook-app",
+        "arn:aws:s3:::district-gradebook-app/*"
+      ]
+    },
+    {
+      "Sid": "NoBucketDeletion",
+      "Effect": "Deny",
+      "Action": "s3:DeleteBucket",
+      "Resource": "*"
+    }
+  ]
+}

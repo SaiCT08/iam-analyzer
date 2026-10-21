@@ -85,6 +85,43 @@
           "Resource": "arn:aws:logs:us-east-1:111122223333:log-group:/district/campus-??/*"
         }
       ]
+    },
+    "GradebookVendorBoundary": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "GradebookAppBucketOnly",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": [
+            "arn:aws:s3:::district-gradebook-app",
+            "arn:aws:s3:::district-gradebook-app/*"
+          ]
+        },
+        {
+          "Sid": "NoBucketDeletion",
+          "Effect": "Deny",
+          "Action": "s3:DeleteBucket",
+          "Resource": "*"
+        }
+      ]
+    },
+    "StudentTeacherBoundary": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "Campus01RecordsOnly",
+          "Effect": "Allow",
+          "Action": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/campus-01/*"
+          ]
+        }
+      ]
     }
   },
   "Groups": {
@@ -125,6 +162,12 @@
       "Policies": [
         "ITAdminFullS3"
       ]
+    },
+    "dpatel": {
+      "Groups": [
+        "Teachers"
+      ],
+      "PermissionsBoundary": "StudentTeacherBoundary"
     }
   },
   "Roles": {
@@ -133,6 +176,12 @@
         "ITAdminFullS3",
         "DenyStudentRecordsDelete"
       ]
+    },
+    "GradebookVendor": {
+      "Policies": [
+        "ITAdminFullS3"
+      ],
+      "PermissionsBoundary": "GradebookVendorBoundary"
     }
   }
 }

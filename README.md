@@ -10,14 +10,18 @@ It works entirely on local policy JSON files. No AWS account or credentials are 
 
 ## Status
 
-The analyzer currently covers **identity policies**:
+The analyzer currently covers **identity policies** and **permissions boundaries**:
 - Allow/Deny statements, where an explicit deny always wins and the default is an implicit deny.
 - `*` / `?` wildcards in actions and resources.
 - `NotAction` / `NotResource`, which mean "everything except these". For example, a Deny with
   `NotAction: ["s3:Get*"]` is a read-only guardrail.
+- Permissions boundaries. A boundary caps what a user or role can do: a request needs an Allow in
+  an identity policy **and** in the boundary, and a Deny in either one wins. A boundary never
+  grants access on its own.
 
-Policies that use `Condition`, `Principal` or `NotPrincipal` are rejected with a clear error. Support
-for these comes in later phases.
+Policies that use `Condition`, `Principal` or `NotPrincipal` are rejected with a clear error.
+Resource-based policies (such as S3 bucket policies) aren't evaluated yet. Support for these comes
+in later phases.
 
 ## Setup
 
@@ -44,6 +48,27 @@ EXPLICIT_DENY
   Deny   deny_student_records_delete.json  Sid=NoDeleteStudentRecords
 ```
 
+### Permissions boundaries
+
+`--boundary FILE` adds a permissions boundary. Here a gradebook vendor's role has full S3 access,
+but its boundary only covers the gradebook app's own bucket, so it can't read student records:
+
+```sh
+iam-analyzer check \
+  --policy examples/policies/it_admin_full_s3.json \
+  --boundary examples/policies/gradebook_vendor_boundary.json \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::district-student-records/2026/roster.csv
+```
+
+```
+IMPLICIT_DENY
+  The permissions boundary does not allow this.
+```
+
+When a request is allowed, the output lists the Allow from each layer, and boundary statements are
+marked `(permissions boundary)`.
+
 ### Asking about a user or role
 
 An account file defines policies once, by name, and attaches them to users, groups and roles. See
@@ -54,7 +79,7 @@ An account file defines policies once, by name, and attaches them to users, grou
   "Policies": { "TeacherReadGrades": { "Statement": [ ... ] } },
   "Groups":   { "Teachers": { "Policies": ["TeacherReadGrades"] } },
   "Users":    { "jsmith": { "Groups": ["Teachers"], "Policies": [] } },
-  "Roles":    { "ITAdmin": { "Policies": ["..."] } }
+  "Roles":    { "ITAdmin": { "Policies": ["..."], "PermissionsBoundary": "..." } }
 }
 ```
 
@@ -75,6 +100,11 @@ EXPLICIT_DENY
 
 A user gets their own policies plus the policies of every group they're in. As in AWS, roles can't
 belong to groups.
+
+Users and roles can name one policy as their `PermissionsBoundary`. The boundary limits every policy
+they have, including the ones that come from their groups. As in AWS, groups can't have a boundary.
+In the example account, student teacher `dpatel` is in the Teachers group, but a boundary limits
+them to campus-01 records.
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 

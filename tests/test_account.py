@@ -100,6 +100,15 @@ def test_unknown_principal(principal, message):
         ({"Policies": {}, "Users": {"u": {"Policies": ["Missing"]}}}, "unknown policy 'Missing'"),
         ({"Policies": {}, "Users": {"u": {"Groups": ["Missing"]}}}, "unknown group 'Missing'"),
         ({"Policies": {}, "Groups": {"g": {"Policies": ["Missing"]}}}, "unknown policy 'Missing'"),
+        (
+            {"Policies": {}, "Users": {"u": {"PermissionsBoundary": ["B"]}}},
+            "'PermissionsBoundary' must be a policy name",
+        ),
+        (
+            {"Policies": {}, "Roles": {"r": {"PermissionsBoundary": "Missing"}}},
+            "role 'r': unknown policy 'Missing'",
+        ),
+        ({"Policies": {}, "Groups": {"g": {"PermissionsBoundary": "B"}}}, "group 'g': unknown key"),
     ],
 )
 def test_invalid_accounts(document, message):
@@ -136,3 +145,41 @@ def test_example_account_loads():
         ("TeacherReadGrades", "Teachers"),
         ("DenyStudentRecordsDelete", "Teachers"),
     ]
+
+
+# --- Permissions boundaries ------------------------------------------------------------
+
+
+def test_boundary_for_user_and_role():
+    acct = account(
+        Users={"jsmith": {"Policies": ["Read"], "PermissionsBoundary": "Write"}},
+        Roles={"Vendor": {"PermissionsBoundary": "Read"}},
+    )
+    assert acct.boundary_for("user/jsmith").name == "Write"
+    assert acct.boundary_for("role/Vendor").name == "Read"
+
+
+def test_boundary_is_not_an_identity_policy():
+    acct = account(Users={"jsmith": {"Policies": ["Read"], "PermissionsBoundary": "Write"}})
+    assert summary(acct.policies_for("user/jsmith")) == [("Read", None)]
+
+
+def test_principal_without_boundary():
+    acct = account(Users={"jsmith": {"Policies": ["Read"]}}, Roles={"r": {}})
+    assert acct.boundary_for("user/jsmith") is None
+    assert acct.boundary_for("role/r") is None
+
+
+def test_boundary_for_unknown_principal():
+    acct = account(Users={"jsmith": {}})
+    with pytest.raises(AccountError, match="no user named 'nobody'"):
+        acct.boundary_for("user/nobody")
+    with pytest.raises(AccountError, match="must be 'user/NAME' or 'role/NAME'"):
+        acct.boundary_for("group/Teachers")
+
+
+def test_example_account_boundaries():
+    acct = load_account_file(EXAMPLE)
+    assert acct.boundary_for("user/dpatel").name == "StudentTeacherBoundary"
+    assert acct.boundary_for("role/GradebookVendor").name == "GradebookVendorBoundary"
+    assert acct.boundary_for("user/jsmith") is None

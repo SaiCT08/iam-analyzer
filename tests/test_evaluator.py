@@ -7,7 +7,7 @@ import pytest
 
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import Decision, Request
+from iam_analyzer.models import Decision, Layer, PolicyType, Request
 
 BUCKET = "arn:aws:s3:::district-student-records"
 OBJECT = f"{BUCKET}/2026/roster.csv"
@@ -183,6 +183,90 @@ def test_not_action_with_not_resource():
     assert decide("s3:PutObject", OBJECT) is Decision.EXPLICIT_DENY  # neither excluded
 
 
+# --- Permissions boundaries ------------------------------------------------------------
+
+IDENTITY = Layer(PolicyType.IDENTITY)
+BOUNDARY = Layer(PolicyType.PERMISSIONS_BOUNDARY)
+
+
+def reasons(result):
+    return [(r.policy_name, r.statement.sid, r.layer) for r in result.reasons]
+
+
+def test_without_boundary_implicit_deny_names_identity_layer():
+    result = evaluate(GET, [policy("p", allow("s3:PutObject", OBJECT))])
+    assert result.not_allowed_by == (IDENTITY,)
+
+
+def test_identity_and_boundary_both_allow():
+    identity = policy("identity", allow("s3:*", "*", sid="BroadS3"))
+    boundary = policy("boundary", allow("s3:GetObject", f"{BUCKET}/*", sid="ReadRecords"))
+    result = evaluate(GET, [identity], boundary=boundary)
+    assert result.decision is Decision.ALLOW
+    assert result.not_allowed_by == ()
+    assert reasons(result) == [
+        ("identity", "BroadS3", IDENTITY),
+        ("boundary", "ReadRecords", BOUNDARY),
+    ]
+
+
+def test_boundary_blocks_what_identity_allows():
+    identity = policy("identity", allow("s3:*", "*"))
+    boundary = policy("boundary", allow("s3:*", "arn:aws:s3:::district-gradebook-app/*"))
+    result = evaluate(GET, [identity], boundary=boundary)
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.reasons == ()
+    assert result.not_allowed_by == (BOUNDARY,)
+
+
+def test_boundary_never_grants_access():
+    identity = policy("identity", allow("s3:PutObject", OBJECT))
+    boundary = policy("boundary", allow("*", "*"))
+    result = evaluate(GET, [identity], boundary=boundary)
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.not_allowed_by == (IDENTITY,)
+
+
+def test_every_layer_without_an_allow_is_listed_in_order():
+    boundary = policy("boundary", allow("ec2:*", "*"))
+    result = evaluate(GET, [], boundary=boundary)
+    assert result.not_allowed_by == (IDENTITY, BOUNDARY)
+
+
+def test_deny_in_boundary_is_an_explicit_deny():
+    identity = policy("identity", allow("s3:*", "*"))
+    boundary = policy("boundary", allow("s3:*", "*"), deny("s3:GetObject", OBJECT, sid="NoGet"))
+    result = evaluate(GET, [identity], boundary=boundary)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert reasons(result) == [("boundary", "NoGet", BOUNDARY)]
+
+
+def test_denies_from_every_layer_are_reported():
+    identity = policy("identity", allow("s3:*", "*"), deny("s3:Get*", "*", sid="IdentityDeny"))
+    boundary = policy("boundary", deny("s3:GetObject", OBJECT, sid="BoundaryDeny"))
+    result = evaluate(GET, [identity], boundary=boundary)
+    assert reasons(result) == [
+        ("identity", "IdentityDeny", IDENTITY),
+        ("boundary", "BoundaryDeny", BOUNDARY),
+    ]
+
+
+def test_boundary_with_only_denies_allows_nothing():
+    identity = policy("identity", allow("s3:*", "*"))
+    boundary = policy("boundary", deny("iam:*", "*"))
+    result = evaluate(GET, [identity], boundary=boundary)
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.not_allowed_by == (BOUNDARY,)
+
+
+def test_boundary_limits_group_policies_too():
+    inherited = dataclasses.replace(policy("Shared", allow("s3:*", "*")), via_group="Teachers")
+    boundary = policy("boundary", allow("s3:GetObject", "arn:aws:s3:::other/*"))
+    result = evaluate(GET, [inherited], boundary=boundary)
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.not_allowed_by == (BOUNDARY,)
+
+
 # --- Data-driven scenarios -------------------------------------------------------------
 
 SCENARIO_DIR = Path(__file__).parent / "scenarios"
@@ -193,6 +277,9 @@ SCENARIOS = sorted(SCENARIO_DIR.glob("*.json"))
 def test_scenario(path):
     scenario = json.loads(path.read_text())
     policies = [parse_policy(doc, name=name) for name, doc in scenario["policies"].items()]
+    boundary = None
+    if "boundary" in scenario:
+        boundary = parse_policy(scenario["boundary"], name="boundary")
     request = Request(**scenario["request"])
-    result = evaluate(request, policies)
+    result = evaluate(request, policies, boundary=boundary)
     assert result.decision is Decision(scenario["expected"]), scenario.get("description")

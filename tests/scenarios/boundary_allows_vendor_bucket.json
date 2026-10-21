@@ -1,0 +1,25 @@
+{
+  "description": "Inside its boundary, the vendor role's full S3 access works: it can write to the gradebook app's bucket.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
+    }
+  },
+  "boundary": {
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "s3:*",
+        "Resource": [
+          "arn:aws:s3:::district-gradebook-app",
+          "arn:aws:s3:::district-gradebook-app/*"
+        ]
+      }
+    ]
+  },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-gradebook-app/exports/grades.csv"
+  },
+  "expected": "ALLOW"
+}

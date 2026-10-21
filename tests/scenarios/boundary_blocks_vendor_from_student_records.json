@@ -1,0 +1,25 @@
+{
+  "description": "A vendor role with full S3 access still cannot read student records: its permissions boundary only covers the gradebook app's bucket.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
+    }
+  },
+  "boundary": {
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "s3:*",
+        "Resource": [
+          "arn:aws:s3:::district-gradebook-app",
+          "arn:aws:s3:::district-gradebook-app/*"
+        ]
+      }
+    ]
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"
+  },
+  "expected": "IMPLICIT_DENY"
+}

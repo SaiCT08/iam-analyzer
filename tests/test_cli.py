@@ -7,6 +7,8 @@ from iam_analyzer.cli import EXIT_ALLOWED, EXIT_DENIED, EXIT_INPUT_ERROR, main
 POLICIES = Path(__file__).parent.parent / "examples" / "policies"
 TEACHER = str(POLICIES / "teacher_read_grades.json")
 NO_DELETE = str(POLICIES / "deny_student_records_delete.json")
+IT_ADMIN = str(POLICIES / "it_admin_full_s3.json")
+VENDOR_BOUNDARY = str(POLICIES / "gradebook_vendor_boundary.json")
 ROSTER = "arn:aws:s3:::district-student-records/2026/roster.csv"
 
 
@@ -126,9 +128,61 @@ def test_account_unknown_principal(capsys):
         ["--account", ACCOUNT],  # no --principal
         ["--policy", TEACHER, "--principal", "user/jsmith"],  # --principal without --account
         ["--policy", TEACHER, "--account", ACCOUNT, "--principal", "user/jsmith"],  # both sources
+        ["--account", ACCOUNT, "--principal", "user/jsmith", "--boundary", VENDOR_BOUNDARY],
     ],
 )
 def test_account_argument_misuse_exits_with_usage_error(args):
     with pytest.raises(SystemExit) as exc:
         main(["check", *args, "--action", "s3:GetObject", "--resource", ROSTER])
     assert exc.value.code == 2
+
+
+# --- Permissions boundaries ------------------------------------------------------------
+
+
+def test_boundary_blocks_what_identity_allows(capsys):
+    code, out, _ = run(
+        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY,
+        "--action", "s3:GetObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_DENIED
+    assert out.splitlines() == ["IMPLICIT_DENY", "  The permissions boundary does not allow this."]
+
+
+def test_boundary_allow_lists_both_layers(capsys):
+    code, out, _ = run(
+        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY,
+        "--action", "s3:PutObject", "--resource", "arn:aws:s3:::district-gradebook-app/grades.csv",
+    )
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        "  Allow  it_admin_full_s3.json  Sid=FullS3Access",
+        "  Allow  gradebook_vendor_boundary.json (permissions boundary)  Sid=GradebookAppBucketOnly",
+    ]
+
+
+def test_boundary_deny_is_explicit(capsys):
+    code, out, _ = run(
+        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY,
+        "--action", "s3:DeleteBucket", "--resource", "arn:aws:s3:::district-gradebook-app",
+    )
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "EXPLICIT_DENY",
+        "  Deny   gradebook_vendor_boundary.json (permissions boundary)  Sid=NoBucketDeletion",
+    ]
+
+
+def test_account_boundary_limits_group_policies(capsys):
+    campus = "arn:aws:s3:::district-student-records/{}/grades.csv"
+    args = ["--account", ACCOUNT, "--principal", "user/dpatel", "--action", "s3:GetObject"]
+
+    code, out, _ = run(capsys, *args, "--resource", campus.format("campus-01"))
+    assert code == EXIT_ALLOWED
+    assert "TeacherReadGrades (via group Teachers)  Sid=ReadStudentRecords" in out
+    assert "StudentTeacherBoundary (permissions boundary)  Sid=Campus01RecordsOnly" in out
+
+    code, out, _ = run(capsys, *args, "--resource", campus.format("campus-02"))
+    assert code == EXIT_DENIED
+    assert out.splitlines() == ["IMPLICIT_DENY", "  The permissions boundary does not allow this."]
