@@ -80,6 +80,7 @@ def test_missing_required_argument_exits_with_usage_error():
 # --- Account mode ----------------------------------------------------------------------
 
 ACCOUNT = str(Path(__file__).parent.parent / "examples" / "accounts" / "district.json")
+ORG = str(Path(__file__).parent.parent / "examples" / "organizations" / "district.json")
 
 
 def test_account_allow_shows_group(capsys):
@@ -129,6 +130,7 @@ def test_account_unknown_principal(capsys):
         ["--policy", TEACHER, "--principal", "user/jsmith"],  # --principal without --account
         ["--policy", TEACHER, "--account", ACCOUNT, "--principal", "user/jsmith"],  # both sources
         ["--account", ACCOUNT, "--principal", "user/jsmith", "--boundary", VENDOR_BOUNDARY],
+        ["--policy", TEACHER, "--org", ORG],  # --org needs --account
     ],
 )
 def test_account_argument_misuse_exits_with_usage_error(args):
@@ -186,3 +188,71 @@ def test_account_boundary_limits_group_policies(capsys):
     code, out, _ = run(capsys, *args, "--resource", campus.format("campus-02"))
     assert code == EXIT_DENIED
     assert out.splitlines() == ["IMPLICIT_DENY", "  The permissions boundary does not allow this."]
+
+
+# --- Organizations and SCPs ------------------------------------------------------------
+
+
+def test_scp_deny_overrides_identity_allow(capsys):
+    args = [
+        "--account", ACCOUNT, "--principal", "role/ITAdmin",
+        "--action", "s3:PutBucketPolicy", "--resource", "arn:aws:s3:::district-student-records",
+    ]
+    code, _, _ = run(capsys, *args)
+    assert code == EXIT_ALLOWED  # IAM alone allows it
+    code, out, _ = run(capsys, *args, "--org", ORG)
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "EXPLICIT_DENY",
+        "  Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges",
+    ]
+
+
+def test_scp_allow_list_blocks_unlisted_service(capsys):
+    args = [
+        "--account", ACCOUNT, "--principal", "user/alee",
+        "--action", "ec2:DescribeInstances", "--resource", "*",
+    ]
+    code, _, _ = run(capsys, *args)
+    assert code == EXIT_ALLOWED
+    code, out, _ = run(capsys, *args, "--org", ORG)
+    assert code == EXIT_DENIED
+    assert out.splitlines() == ["IMPLICIT_DENY", "  No SCP attached to OU Schools allows this."]
+
+
+def test_scp_allows_are_listed_for_every_level(capsys):
+    code, out, _ = run(
+        capsys, "--account", ACCOUNT, "--org", ORG, "--principal", "user/jsmith",
+        "--action", "s3:GetObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        "  Allow  TeacherReadGrades (via group Teachers)  Sid=ReadStudentRecords",
+        "  Allow  FullAWSAccess (SCP on the root)  Sid=(no Sid)",
+        "  Allow  SchoolServicesOnly (SCP on OU Schools)  Sid=AllowApprovedServices",
+        "  Allow  FullAWSAccess (SCP on account 111122223333)  Sid=(no Sid)",
+    ]
+
+
+def test_org_needs_account_id(capsys, tmp_path):
+    path = tmp_path / "no_id.json"
+    path.write_text('{"Policies": {}, "Users": {"u": {}}}')
+    code, out, err = run(
+        capsys, "--account", str(path), "--org", ORG, "--principal", "user/u",
+        "--action", "s3:GetObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert "needs an 'AccountId'" in err
+
+
+def test_account_missing_from_org(capsys, tmp_path):
+    path = tmp_path / "other.json"
+    path.write_text('{"AccountId": "444455556666", "Policies": {}, "Users": {"u": {}}}')
+    code, _, err = run(
+        capsys, "--account", str(path), "--org", ORG, "--principal", "user/u",
+        "--action", "s3:GetObject", "--resource", ROSTER,
+    )
+    assert code == EXIT_INPUT_ERROR
+    assert "no account '444455556666'" in err

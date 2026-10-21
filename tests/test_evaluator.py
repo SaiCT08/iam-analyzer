@@ -7,7 +7,8 @@ import pytest
 
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import Decision, Layer, PolicyType, Request
+from iam_analyzer.models import Decision, Layer, OrgTarget, PolicyType, Request, ScpLevel, TargetType
+from iam_analyzer.organization import parse_organization
 
 BUCKET = "arn:aws:s3:::district-student-records"
 OBJECT = f"{BUCKET}/2026/roster.csv"
@@ -267,6 +268,91 @@ def test_boundary_limits_group_policies_too():
     assert result.not_allowed_by == (BOUNDARY,)
 
 
+# --- Service control policies (SCPs) ---------------------------------------------------
+
+ROOT = OrgTarget(TargetType.ROOT, "Root")
+SCHOOLS = OrgTarget(TargetType.ORGANIZATIONAL_UNIT, "Schools")
+DISTRICT = OrgTarget(TargetType.ACCOUNT, "111122223333")
+FULL_ACCESS = policy("FullAWSAccess", allow("*", "*"))
+BROAD_S3 = policy("identity", allow("s3:*", "*", sid="BroadS3"))
+
+
+def scp(target):
+    return Layer(PolicyType.SCP, target)
+
+
+def org_path(root=(FULL_ACCESS,), ou=(FULL_ACCESS,), account=(FULL_ACCESS,)):
+    """SCP levels from the root, through OU Schools, down to the district account."""
+    return [
+        ScpLevel(ROOT, tuple(root)),
+        ScpLevel(SCHOOLS, tuple(ou)),
+        ScpLevel(DISTRICT, tuple(account)),
+    ]
+
+
+def test_scps_allowing_at_every_level():
+    result = evaluate(GET, [BROAD_S3], scps=org_path())
+    assert result.decision is Decision.ALLOW
+    assert reasons(result) == [
+        ("identity", "BroadS3", IDENTITY),
+        ("FullAWSAccess", None, scp(ROOT)),
+        ("FullAWSAccess", None, scp(SCHOOLS)),
+        ("FullAWSAccess", None, scp(DISTRICT)),
+    ]
+
+
+def test_scp_level_without_an_allow_blocks():
+    ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
+    result = evaluate(GET, [BROAD_S3], scps=org_path(ou=[ec2_only]))
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.reasons == ()
+    assert result.not_allowed_by == (scp(SCHOOLS),)
+
+
+def test_scp_levels_intersect():
+    # The root allows only S3 and the OU allows only EC2, so nothing gets through both.
+    s3_only = policy("S3Only", allow("s3:*", "*"))
+    ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
+    identity = policy("identity", allow("*", "*"))
+    scps = org_path(root=[s3_only], ou=[ec2_only])
+    s3 = evaluate(GET, [identity], scps=scps)
+    assert s3.not_allowed_by == (scp(SCHOOLS),)
+    ec2 = evaluate(Request(action="ec2:RunInstances", resource="*"), [identity], scps=scps)
+    assert ec2.not_allowed_by == (scp(ROOT),)
+
+
+def test_any_scp_at_a_level_can_allow():
+    ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
+    s3_only = policy("S3Only", allow("s3:*", "*", sid="S3"))
+    result = evaluate(GET, [BROAD_S3], scps=org_path(ou=[ec2_only, s3_only]))
+    assert result.decision is Decision.ALLOW
+    assert ("S3Only", "S3", scp(SCHOOLS)) in reasons(result)
+
+
+def test_scp_deny_beats_every_allow():
+    protect = policy("ProtectRecords", deny("s3:*", f"{BUCKET}/*", sid="NoRecords"))
+    result = evaluate(GET, [BROAD_S3], scps=org_path(ou=[FULL_ACCESS, protect]))
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert reasons(result) == [("ProtectRecords", "NoRecords", scp(SCHOOLS))]
+
+
+def test_scps_never_grant_access():
+    result = evaluate(GET, [], scps=org_path())
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.not_allowed_by == (IDENTITY,)
+
+
+def test_scp_level_with_no_policies_denies():
+    result = evaluate(GET, [BROAD_S3], scps=org_path(account=[]))
+    assert result.not_allowed_by == (scp(DISTRICT),)
+
+
+def test_boundary_and_scps_are_both_checked_in_order():
+    ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
+    result = evaluate(GET, [BROAD_S3], boundary=ec2_only, scps=org_path(root=[ec2_only]))
+    assert result.not_allowed_by == (BOUNDARY, scp(ROOT))
+
+
 # --- Data-driven scenarios -------------------------------------------------------------
 
 SCENARIO_DIR = Path(__file__).parent / "scenarios"
@@ -280,6 +366,10 @@ def test_scenario(path):
     boundary = None
     if "boundary" in scenario:
         boundary = parse_policy(scenario["boundary"], name="boundary")
+    scps = ()
+    if "organization" in scenario:
+        organization = parse_organization(scenario["organization"], name="organization")
+        scps = organization.scp_levels_for(scenario["account_id"])
     request = Request(**scenario["request"])
-    result = evaluate(request, policies, boundary=boundary)
+    result = evaluate(request, policies, boundary=boundary, scps=scps)
     assert result.decision is Decision(scenario["expected"]), scenario.get("description")

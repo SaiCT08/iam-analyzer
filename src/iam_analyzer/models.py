@@ -26,6 +26,15 @@ class PolicyType(str, Enum):
 
     IDENTITY = "identity"
     PERMISSIONS_BOUNDARY = "permissions boundary"
+    SCP = "SCP"
+
+
+class TargetType(str, Enum):
+    """What an SCP can be attached to, using AWS Organizations' names."""
+
+    ROOT = "ROOT"
+    ORGANIZATIONAL_UNIT = "ORGANIZATIONAL_UNIT"
+    ACCOUNT = "ACCOUNT"
 
 
 @dataclass(frozen=True)
@@ -66,14 +75,35 @@ class Request:
 
 
 @dataclass(frozen=True)
+class OrgTarget:
+    """A place in an AWS organization that SCPs attach to: the root, an OU, or an account."""
+
+    type: TargetType
+    name: str  # "Root", the OU's name, or the 12-digit account ID
+
+
+@dataclass(frozen=True)
+class ScpLevel:
+    """One step on the path from the organization root down to an account, with the SCPs
+    attached there. Any SCP at a level can allow a request, but every level must allow it.
+    """
+
+    target: OrgTarget
+    policies: tuple[Policy, ...]
+
+
+@dataclass(frozen=True)
 class Layer:
-    """One layer of evaluation: the identity policies, or the permissions boundary.
+    """One layer of evaluation: the identity policies, the permissions boundary, or the
+    SCPs at one level of the organization.
 
     A request needs a matching Allow in every layer that applies, and a matching Deny in
-    any layer denies it.
+    any layer denies it. SCPs apply level by level (the root, each OU, then the account),
+    so each level is its own layer and `org_target` says which one.
     """
 
     policy_type: PolicyType
+    org_target: OrgTarget | None = None
 
 
 @dataclass(frozen=True)

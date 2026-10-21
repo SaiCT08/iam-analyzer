@@ -109,6 +109,8 @@ def test_unknown_principal(principal, message):
             "role 'r': unknown policy 'Missing'",
         ),
         ({"Policies": {}, "Groups": {"g": {"PermissionsBoundary": "B"}}}, "group 'g': unknown key"),
+        ({"Policies": {}, "AccountId": 111122223333}, "111122223333 is not an AWS account ID"),
+        ({"Policies": {}, "AccountId": "1111-2222-3333"}, "is not an AWS account ID"),
     ],
 )
 def test_invalid_accounts(document, message):
@@ -183,3 +185,16 @@ def test_example_account_boundaries():
     assert acct.boundary_for("user/dpatel").name == "StudentTeacherBoundary"
     assert acct.boundary_for("role/GradebookVendor").name == "GradebookVendorBoundary"
     assert acct.boundary_for("user/jsmith") is None
+
+
+# --- Account ID ------------------------------------------------------------------------
+
+
+def test_account_id_is_optional():
+    assert account().account_id is None
+    # A string keeps the leading zero that some account IDs have.
+    assert account(AccountId="012345678901").account_id == "012345678901"
+
+
+def test_example_account_has_an_id():
+    assert load_account_file(EXAMPLE).account_id == "111122223333"

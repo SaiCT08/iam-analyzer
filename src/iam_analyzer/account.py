@@ -1,6 +1,7 @@
 """A local "account" file: named policies plus the users, groups and roles they attach to.
 
     {
+      "AccountId": "111122223333",
       "Policies": {"TeacherReadGrades": {"Statement": [...]}},
       "Groups":   {"Teachers": {"Policies": ["TeacherReadGrades"]}},
       "Users":    {"jsmith":   {"Groups": ["Teachers"], "Policies": []}},
@@ -10,19 +11,29 @@
 Policies are defined once and attached by name, like AWS managed policies. Users can be
 in groups; roles cannot (same as AWS). Users and roles can also name one policy as their
 permissions boundary; groups cannot. Principals are named `user/NAME` or `role/NAME`,
-so a user and a role may share a name.
+so a user and a role may share a name. `AccountId` is optional; it is only needed to
+look up the account's SCPs in an organization file.
 """
 
 import json
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
+from iam_analyzer import _validation
 from iam_analyzer.errors import AccountError
 from iam_analyzer.loader import parse_policy
 from iam_analyzer.models import Policy
 
-TOP_LEVEL_KEYS = {"Policies", "Groups", "Users", "Roles"}
+TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles"}
+
+# The shared shape checks, reporting problems as AccountError.
+_section = partial(_validation.section, error=AccountError)
+_entry = partial(_validation.entry, error=AccountError)
+_refs = partial(_validation.refs, error=AccountError)
+_ref = partial(_validation.ref, error=AccountError)
+_account_id = partial(_validation.account_id, error=AccountError)
 
 
 @dataclass(frozen=True)
@@ -50,6 +61,7 @@ class Account:
     groups: dict[str, Group]
     users: dict[str, User]
     roles: dict[str, Role]
+    account_id: str | None = None
 
     def policies_for(self, principal: str) -> list[Policy]:
         """Every identity policy that applies to `principal` (`user/NAME` or `role/NAME`).
@@ -106,6 +118,9 @@ def parse_account(document: Any, name: str) -> Account:
         raise AccountError(f"{name}: unknown key(s): {', '.join(sorted(unknown))}")
     if "Policies" not in document:
         raise AccountError(f"{name}: account has no 'Policies'")
+    account_id = None
+    if "AccountId" in document:
+        account_id = _account_id(document["AccountId"], f"{name} 'AccountId'")
 
     policies = {
         policy_name: parse_policy(doc, name=policy_name)
@@ -137,43 +152,11 @@ def parse_account(document: Any, name: str) -> Account:
             boundary=_ref(fields, "PermissionsBoundary", policies, "policy", where),
         )
 
-    return Account(name=name, policies=policies, groups=groups, users=users, roles=roles)
-
-
-def _section(document: dict, key: str, name: str) -> dict:
-    section = document.get(key, {})
-    if not isinstance(section, dict):
-        raise AccountError(f"{name}: '{key}' must be a JSON object keyed by name")
-    return section
-
-
-def _entry(raw: Any, allowed: set[str], where: str) -> dict:
-    if not isinstance(raw, dict):
-        raise AccountError(f"{where}: must be a JSON object")
-    unknown = set(raw) - allowed
-    if unknown:
-        raise AccountError(f"{where}: unknown key(s): {', '.join(sorted(unknown))}")
-    return raw
-
-
-def _refs(fields: dict, key: str, defined: dict, kind: str, where: str) -> tuple[str, ...]:
-    """Read a list of names under `key` and check each one is defined."""
-    values = fields.get(key, [])
-    if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-        raise AccountError(f"{where}: '{key}' must be a list of names")
-    for value in values:
-        if value not in defined:
-            raise AccountError(f"{where}: unknown {kind} {value!r}")
-    return tuple(values)
-
-
-def _ref(fields: dict, key: str, defined: dict, kind: str, where: str) -> str | None:
-    """Read an optional single name under `key` and check it is defined."""
-    if key not in fields:
-        return None
-    value = fields[key]
-    if not isinstance(value, str):
-        raise AccountError(f"{where}: '{key}' must be a {kind} name")
-    if value not in defined:
-        raise AccountError(f"{where}: unknown {kind} {value!r}")
-    return value
+    return Account(
+        name=name,
+        policies=policies,
+        groups=groups,
+        users=users,
+        roles=roles,
+        account_id=account_id,
+    )

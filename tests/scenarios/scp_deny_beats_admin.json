@@ -1,0 +1,41 @@
+{
+  "description": "An SCP on the Schools OU stops even an admin with s3:* from changing the student records bucket policy.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
+    }
+  },
+  "organization": {
+    "ManagementAccountId": "999988887777",
+    "ServiceControlPolicies": {
+      "FullAWSAccess": {
+        "Statement": [{ "Effect": "Allow", "Action": "*", "Resource": "*" }]
+      },
+      "ProtectStudentRecords": {
+        "Statement": [
+          {
+            "Effect": "Deny",
+            "Action": ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"],
+            "Resource": "arn:aws:s3:::district-student-records"
+          }
+        ]
+      }
+    },
+    "Root": {
+      "ServiceControlPolicies": ["FullAWSAccess"],
+      "OrganizationalUnits": {
+        "Schools": {
+          "ServiceControlPolicies": ["FullAWSAccess", "ProtectStudentRecords"],
+          "Accounts": { "111122223333": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+        }
+      },
+      "Accounts": { "999988887777": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+    }
+  },
+  "account_id": "111122223333",
+  "request": {
+    "action": "s3:PutBucketPolicy",
+    "resource": "arn:aws:s3:::district-student-records"
+  },
+  "expected": "EXPLICIT_DENY"
+}

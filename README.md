@@ -10,7 +10,8 @@ It works entirely on local policy JSON files. No AWS account or credentials are 
 
 ## Status
 
-The analyzer currently covers **identity policies** and **permissions boundaries**:
+The analyzer currently covers **identity policies**, **permissions boundaries** and **service control
+policies (SCPs)**:
 - Allow/Deny statements, where an explicit deny always wins and the default is an implicit deny.
 - `*` / `?` wildcards in actions and resources.
 - `NotAction` / `NotResource`, which mean "everything except these". For example, a Deny with
@@ -18,10 +19,15 @@ The analyzer currently covers **identity policies** and **permissions boundaries
 - Permissions boundaries. A boundary caps what a user or role can do: a request needs an Allow in
   an identity policy **and** in the boundary, and a Deny in either one wins. A boundary never
   grants access on its own.
+- SCPs from AWS Organizations. A request must be allowed at every level from the organization root
+  down to the account, and a Deny in any SCP wins. Like boundaries, SCPs never grant access.
 
-Policies that use `Condition`, `Principal` or `NotPrincipal` are rejected with a clear error.
-Resource-based policies (such as S3 bucket policies) aren't evaluated yet. Support for these comes
-in later phases.
+Not supported yet:
+- `Condition`, `Principal` and `NotPrincipal` are rejected with a clear error. Most real-world SCPs
+  use conditions, so many of them can't be loaded yet.
+- Resource-based policies, such as S3 bucket policies, aren't evaluated.
+- AWS doesn't apply SCPs to service-linked roles, but the account file can't mark a role as
+  service-linked yet.
 
 ## Setup
 
@@ -105,6 +111,63 @@ Users and roles can name one policy as their `PermissionsBoundary`. The boundary
 they have, including the ones that come from their groups. As in AWS, groups can't have a boundary.
 In the example account, student teacher `dpatel` is in the Teachers group, but a boundary limits
 them to campus-01 records.
+
+### Organizations and SCPs
+
+SCPs go in a separate organization file, because in AWS they belong to the organization, not to any
+one account. The file defines SCPs by name and attaches them to the root, to OUs (which can contain
+more OUs) and to accounts. See
+[`examples/organizations/district.json`](examples/organizations/district.json).
+
+```json
+{
+  "ManagementAccountId": "999988887777",
+  "ServiceControlPolicies": { "FullAWSAccess": { "Statement": [ ... ] }, "...": { ... } },
+  "Root": {
+    "ServiceControlPolicies": ["FullAWSAccess"],
+    "OrganizationalUnits": {
+      "Schools": {
+        "ServiceControlPolicies": ["SchoolServicesOnly", "ProtectStudentRecords"],
+        "Accounts": { "111122223333": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+      }
+    },
+    "Accounts": { "999988887777": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+  }
+}
+```
+
+Add `--org FILE` to an `--account` check. The account file's `AccountId` says where the account sits
+in the organization. The IT admin role's own policies allow `s3:*`, but an SCP on the Schools OU
+stops anyone in that OU from changing the student records bucket policy:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --org examples/organizations/district.json \
+  --principal role/ITAdmin \
+  --action s3:PutBucketPolicy \
+  --resource arn:aws:s3:::district-student-records
+```
+
+```
+EXPLICIT_DENY
+  Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges
+```
+
+The rules follow AWS:
+- Every level must allow the request: the root, each OU on the way down, and the account itself.
+  The SCPs at one level combine, so any one of them can allow it.
+- A Deny in any SCP wins.
+- Every root, OU and account needs at least one SCP. AWS attaches `FullAWSAccess` by default.
+- SCPs never apply to the management account.
+
+The Schools OU's `SchoolServicesOnly` SCP is an allow list that leaves out EC2. So `user/alee` can't
+call `ec2:DescribeInstances` in that account, even though their IAM policy allows it:
+
+```
+IMPLICIT_DENY
+  No SCP attached to OU Schools allows this.
+```
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 

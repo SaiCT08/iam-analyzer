@@ -1,0 +1,37 @@
+{
+  "description": "IT staff can describe EC2 instances under their IAM policy, but the Schools OU's allow-list SCP leaves EC2 out.",
+  "policies": {
+    "staff_read_only_ec2_and_logs.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "ec2:Describe*", "Resource": "*" }]
+    }
+  },
+  "organization": {
+    "ManagementAccountId": "999988887777",
+    "ServiceControlPolicies": {
+      "FullAWSAccess": {
+        "Statement": [{ "Effect": "Allow", "Action": "*", "Resource": "*" }]
+      },
+      "SchoolServicesOnly": {
+        "Statement": [
+          { "Effect": "Allow", "Action": ["s3:*", "logs:*", "iam:*", "sts:*"], "Resource": "*" }
+        ]
+      }
+    },
+    "Root": {
+      "ServiceControlPolicies": ["FullAWSAccess"],
+      "OrganizationalUnits": {
+        "Schools": {
+          "ServiceControlPolicies": ["SchoolServicesOnly"],
+          "Accounts": { "111122223333": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+        }
+      },
+      "Accounts": { "999988887777": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+    }
+  },
+  "account_id": "111122223333",
+  "request": {
+    "action": "ec2:DescribeInstances",
+    "resource": "*"
+  },
+  "expected": "IMPLICIT_DENY"
+}

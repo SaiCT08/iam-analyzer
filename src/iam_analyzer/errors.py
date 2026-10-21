@@ -19,3 +19,7 @@ class UnsupportedPolicyFeature(PolicyError):
 
 class AccountError(PolicyError):
     """The account file is malformed, or a principal, group or policy it names does not exist."""
+
+
+class OrganizationError(PolicyError):
+    """The organization file is malformed, or an account or SCP it names does not exist."""

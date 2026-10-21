@@ -1,8 +1,10 @@
-"""AWS policy evaluation for identity policies and permissions boundaries.
+"""AWS policy evaluation for identity policies, permissions boundaries and SCPs.
 
 A request is checked against one or more layers of policy:
-  - the identity policies attached to the principal (always), and
-  - the principal's permissions boundary, if it has one.
+  - the identity policies attached to the principal (always),
+  - the principal's permissions boundary, if it has one, and
+  - the SCPs of the principal's AWS organization, if it is in one. Each level of the
+    organization (the root, each OU, then the account) is a layer of its own.
 
 The logic, in three steps:
   1. Match:   in each layer, keep statements whose Action AND Resource both match the
@@ -12,10 +14,11 @@ The logic, in three steps:
   3. Allow:   a matching Allow in EVERY layer -> ALLOW
               otherwise                       -> IMPLICIT_DENY (the default is "no")
 
-So a boundary never grants anything by itself; it only limits what identity policies allow.
+So boundaries and SCPs never grant anything by themselves; they only limit what identity
+policies allow.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from iam_analyzer.matching import match_action, match_resource
 from iam_analyzer.models import (
@@ -27,6 +30,7 @@ from iam_analyzer.models import (
     Policy,
     PolicyType,
     Request,
+    ScpLevel,
     Statement,
 )
 
@@ -39,12 +43,19 @@ def statement_matches(statement: Statement, request: Request) -> bool:
 
 
 def evaluate(
-    request: Request, policies: Iterable[Policy], *, boundary: Policy | None = None
+    request: Request,
+    policies: Iterable[Policy],
+    *,
+    boundary: Policy | None = None,
+    scps: Sequence[ScpLevel] = (),
 ) -> EvaluationResult:
-    """Evaluate `request` against identity `policies` and an optional permissions boundary."""
+    """Evaluate `request` against identity `policies`, an optional permissions boundary,
+    and the SCP levels from the organization root down to the principal's account."""
     layers = [(Layer(PolicyType.IDENTITY), tuple(policies))]
     if boundary is not None:
         layers.append((Layer(PolicyType.PERMISSIONS_BOUNDARY), (boundary,)))
+    # A level with no SCPs has no Allow, so it denies: the safe default.
+    layers += [(Layer(PolicyType.SCP, level.target), level.policies) for level in scps]
 
     matched = [
         (layer, _matching(request, layer, layer_policies)) for layer, layer_policies in layers

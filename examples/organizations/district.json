@@ -1,0 +1,78 @@
+{
+  "ManagementAccountId": "999988887777",
+  "ServiceControlPolicies": {
+    "FullAWSAccess": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "SchoolServicesOnly": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowApprovedServices",
+          "Effect": "Allow",
+          "Action": [
+            "s3:*",
+            "logs:*",
+            "iam:*",
+            "sts:*"
+          ],
+          "Resource": "*"
+        }
+      ]
+    },
+    "ProtectStudentRecords": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "NoDeletesOrPolicyChanges",
+          "Effect": "Deny",
+          "Action": [
+            "s3:DeleteObject",
+            "s3:DeleteObjectVersion",
+            "s3:DeleteBucket",
+            "s3:PutBucketPolicy",
+            "s3:DeleteBucketPolicy"
+          ],
+          "Resource": [
+            "arn:aws:s3:::district-student-records",
+            "arn:aws:s3:::district-student-records/*"
+          ]
+        }
+      ]
+    }
+  },
+  "Root": {
+    "ServiceControlPolicies": [
+      "FullAWSAccess"
+    ],
+    "OrganizationalUnits": {
+      "Schools": {
+        "ServiceControlPolicies": [
+          "SchoolServicesOnly",
+          "ProtectStudentRecords"
+        ],
+        "Accounts": {
+          "111122223333": {
+            "ServiceControlPolicies": [
+              "FullAWSAccess"
+            ]
+          }
+        }
+      }
+    },
+    "Accounts": {
+      "999988887777": {
+        "ServiceControlPolicies": [
+          "FullAWSAccess"
+        ]
+      }
+    }
+  }
+}

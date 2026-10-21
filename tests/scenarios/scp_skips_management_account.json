@@ -1,0 +1,35 @@
+{
+  "description": "SCPs never apply to the management account, not even a Deny attached at the root.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
+    }
+  },
+  "organization": {
+    "ManagementAccountId": "999988887777",
+    "ServiceControlPolicies": {
+      "FullAWSAccess": {
+        "Statement": [{ "Effect": "Allow", "Action": "*", "Resource": "*" }]
+      },
+      "ProtectStudentRecords": {
+        "Statement": [
+          {
+            "Effect": "Deny",
+            "Action": "s3:Delete*",
+            "Resource": "arn:aws:s3:::district-student-records/*"
+          }
+        ]
+      }
+    },
+    "Root": {
+      "ServiceControlPolicies": ["FullAWSAccess", "ProtectStudentRecords"],
+      "Accounts": { "999988887777": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+    }
+  },
+  "account_id": "999988887777",
+  "request": {
+    "action": "s3:DeleteObject",
+    "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"
+  },
+  "expected": "ALLOW"
+}
