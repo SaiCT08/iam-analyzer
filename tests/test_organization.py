@@ -159,6 +159,28 @@ def test_load_organization_file_errors(tmp_path):
         load_organization_file(bad)
 
 
+def test_account_listed_twice_under_one_parent_is_rejected(tmp_path):
+    # json.loads would keep only the second copy, silently dropping the DenyAll SCP.
+    path = tmp_path / "org.json"
+    path.write_text("""{
+      "ManagementAccountId": "999988887777",
+      "ServiceControlPolicies": {
+        "Full": {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+        "DenyAll": {"Statement": [{"Effect": "Deny", "Action": "*", "Resource": "*"}]}
+      },
+      "Root": {
+        "ServiceControlPolicies": ["Full"],
+        "Accounts": {
+          "999988887777": {"ServiceControlPolicies": ["Full"]},
+          "111122223333": {"ServiceControlPolicies": ["Full", "DenyAll"]},
+          "111122223333": {"ServiceControlPolicies": ["Full"]}
+        }
+      }
+    }""")
+    with pytest.raises(OrganizationError, match="org.json: duplicate key '111122223333'"):
+        load_organization_file(path)
+
+
 def test_example_organization():
     org = load_organization_file(EXAMPLE)
     assert summary(org.scp_levels_for(DISTRICT)) == [

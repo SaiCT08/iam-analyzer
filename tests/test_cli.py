@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -256,3 +257,73 @@ def test_account_missing_from_org(capsys, tmp_path):
     )
     assert code == EXIT_INPUT_ERROR
     assert "no account '444455556666'" in err
+
+
+# --- Input the analyzer refuses --------------------------------------------------------
+
+
+def account_file(tmp_path, document):
+    path = tmp_path / "acct.json"
+    path.write_text(json.dumps(document))
+    return str(path)
+
+
+def test_policy_variables_are_refused_until_supported(capsys, tmp_path):
+    # AWS fills in ${aws:username} with "jsmith" and allows this. Matching it as literal
+    # text would wrongly deny it, so the analyzer refuses until variables are supported.
+    own_password = {"Version": "2012-10-17", "Statement": [{
+        "Effect": "Allow", "Action": "iam:ChangePassword",
+        "Resource": "arn:aws:iam::*:user/${aws:username}"}]}
+    path = account_file(tmp_path, {"Policies": {"ChangeOwnPassword": own_password},
+                                   "Users": {"jsmith": {"Policies": ["ChangeOwnPassword"]}}})
+    code, out, err = run(capsys, "--account", path, "--principal", "user/jsmith",
+                         "--action", "iam:ChangePassword",
+                         "--resource", "arn:aws:iam::111122223333:user/jsmith")
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert "policy variable '${aws:username}' in 'Resource' is not supported yet" in err
+
+
+def test_deny_with_a_policy_variable_is_refused_not_ignored(capsys, tmp_path):
+    # Matched as literal text, this Deny would never apply and the request would be allowed.
+    path = account_file(tmp_path, {
+        "Policies": {
+            "AdminAll": {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+            "NoSelfDelete": {"Version": "2012-10-17", "Statement": [{
+                "Effect": "Deny", "Action": "iam:DeleteUser",
+                "Resource": "arn:aws:iam::*:user/${aws:username}"}]},
+        },
+        "Users": {"alee": {"Policies": ["AdminAll", "NoSelfDelete"]}},
+    })
+    code, _, err = run(capsys, "--account", path, "--principal", "user/alee",
+                       "--action", "iam:DeleteUser",
+                       "--resource", "arn:aws:iam::111122223333:user/alee")
+    assert code == EXIT_INPUT_ERROR
+    assert "NoSelfDelete statement 0: policy variable '${aws:username}'" in err
+
+
+def test_wildcard_action_is_refused(capsys):
+    # s3:DeleteObject on the roster is an EXPLICIT_DENY, so "s3:*" must not come back ALLOW.
+    code, out, err = run(
+        capsys, "--policy", IT_ADMIN, "--policy", NO_DELETE,
+        "--action", "s3:*", "--resource", ROSTER,
+    )
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert "the action must be one AWS action such as 's3:GetObject'" in err
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY, "--boundary", IT_ADMIN],
+        ["--policy", IT_ADMIN, "--resource", ROSTER],  # --resource is given again below
+        ["--account", ACCOUNT, "--account", ACCOUNT, "--principal", "user/jsmith"],
+        ["--account", ACCOUNT, "--principal", "user/jsmith", "--principal", "user/alee"],
+    ],
+)
+def test_single_value_options_cannot_be_repeated(args, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["check", *args, "--action", "s3:GetObject", "--resource", ROSTER])
+    assert exc.value.code == 2
+    assert "can only be given once" in capsys.readouterr().err

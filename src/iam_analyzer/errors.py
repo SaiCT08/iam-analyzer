@@ -23,3 +23,7 @@ class AccountError(PolicyError):
 
 class OrganizationError(PolicyError):
     """The organization file is malformed, or an account or SCP it names does not exist."""
+
+
+class RequestError(PolicyError):
+    """The request is not one AWS could receive, such as an action with a wildcard in it."""

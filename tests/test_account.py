@@ -141,6 +141,18 @@ def test_load_account_file_errors(tmp_path):
         load_account_file(bad)
 
 
+def test_user_listed_twice_is_rejected(tmp_path):
+    # json.loads would keep only the second "jsmith" and silently drop their boundary.
+    path = tmp_path / "acct.json"
+    path.write_text(
+        '{"Policies": {"Read": %s},'
+        ' "Users": {"jsmith": {"PermissionsBoundary": "Read"}, "jsmith": {}}}'
+        % json.dumps(policy_doc("R"))
+    )
+    with pytest.raises(AccountError, match="acct.json: duplicate key 'jsmith'"):
+        load_account_file(path)
+
+
 def test_example_account_loads():
     acct = load_account_file(EXAMPLE)
     assert summary(acct.policies_for("user/jsmith")) == [

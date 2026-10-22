@@ -1,7 +1,13 @@
 """Plain data types shared by the loader, evaluator and CLI."""
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
+
+from iam_analyzer.errors import RequestError
+
+# One concrete action: a service prefix, a colon, and a name with no wildcards.
+_CONCRETE_ACTION = re.compile(r"[A-Za-z0-9-]+:[^*?]+")
 
 
 class Effect(str, Enum):
@@ -68,10 +74,22 @@ class Policy:
 
 @dataclass(frozen=True)
 class Request:
-    """The question being asked: can the principal perform `action` on `resource`?"""
+    """The question being asked: can the principal perform `action` on `resource`?
+
+    Like a real AWS request, it names one concrete action ("s3:GetObject"), never a pattern
+    such as "s3:*". A pattern would be matched as literal text, so a policy's "s3:*" would
+    match it while a Deny on "s3:DeleteObject" would not: a wrong answer.
+    """
 
     action: str
     resource: str
+
+    def __post_init__(self) -> None:
+        if not _CONCRETE_ACTION.fullmatch(self.action):
+            raise RequestError(
+                "the action must be one AWS action such as 's3:GetObject', with no wildcards; "
+                f"got {self.action!r}"
+            )
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,19 @@ EXIT_DENIED = 1
 EXIT_INPUT_ERROR = 2
 
 
+class _StoreOnce(argparse.Action):
+    """Store an option's value, but make giving the option twice a usage error.
+
+    argparse normally keeps the last value, so `--boundary A --boundary B` would silently
+    evaluate only B.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if getattr(namespace, self.dest) is not None:
+            parser.error(f"{option_string} can only be given once")
+        setattr(namespace, self.dest, values)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="iam-analyzer", description="Evaluate AWS IAM policies locally."
@@ -51,24 +64,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     source.add_argument(
         "--account",
+        action=_StoreOnce,
         metavar="FILE",
         help="account JSON file with users, groups and roles (use with --principal)",
     )
-    check.add_argument("--principal", help="user/NAME or role/NAME from the --account file")
+    check.add_argument(
+        "--principal", action=_StoreOnce, help="user/NAME or role/NAME from the --account file"
+    )
     check.add_argument(
         "--boundary",
+        action=_StoreOnce,
         metavar="FILE",
         help="permissions boundary policy JSON file (with --policy; account files set "
         "PermissionsBoundary on the user or role instead)",
     )
     check.add_argument(
         "--org",
+        action=_StoreOnce,
         metavar="FILE",
         help="organization JSON file with SCPs (with --account; the account file needs an "
         "AccountId)",
     )
-    check.add_argument("--action", required=True, help="e.g. s3:GetObject")
-    check.add_argument("--resource", required=True, help="e.g. arn:aws:s3:::bucket/key")
+    check.add_argument("--action", action=_StoreOnce, required=True, help="e.g. s3:GetObject")
+    check.add_argument(
+        "--resource", action=_StoreOnce, required=True, help="e.g. arn:aws:s3:::bucket/key"
+    )
     return parser
 
 
@@ -123,6 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--org only works with --account")
 
     try:
+        request = Request(action=args.action, resource=args.resource)
         if args.account:
             account = load_account_file(args.account)
             policies = account.policies_for(args.principal)
@@ -136,7 +157,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
 
-    request = Request(action=args.action, resource=args.resource)
     result = evaluate(request, policies, boundary=boundary, scps=scps)
     print(format_result(result))
     return EXIT_ALLOWED if result.allowed else EXIT_DENIED

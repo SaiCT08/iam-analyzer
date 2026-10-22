@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from iam_analyzer.errors import RequestError
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import parse_policy
 from iam_analyzer.models import Decision, Layer, OrgTarget, PolicyType, Request, ScpLevel, TargetType
@@ -25,6 +26,24 @@ def allow(action, resource, sid=None):
 
 def deny(action, resource, sid=None):
     return {"Sid": sid, "Effect": "Deny", "Action": action, "Resource": resource}
+
+
+@pytest.mark.parametrize(
+    "action", ["s3:*", "s3:Get*", "s3:GetObjec?", "*", "GetObject", "s3:", ":GetObject"]
+)
+def test_request_names_one_concrete_action(action):
+    # A real AWS request is for one action; a pattern here would be matched as literal text.
+    with pytest.raises(RequestError, match="one AWS action"):
+        Request(action=action, resource=OBJECT)
+
+
+def test_policy_variable_without_version_is_plain_text():
+    # Without "Version": "2012-10-17", AWS treats ${aws:username} as literal text.
+    p = policy("p", allow("s3:GetObject", "arn:aws:s3:::home/${aws:username}/*"))
+    literal = Request(action="s3:GetObject", resource="arn:aws:s3:::home/${aws:username}/a.txt")
+    named = Request(action="s3:GetObject", resource="arn:aws:s3:::home/jsmith/a.txt")
+    assert evaluate(literal, [p]).decision is Decision.ALLOW
+    assert evaluate(named, [p]).decision is Decision.IMPLICIT_DENY
 
 
 def test_no_policies_is_implicit_deny():

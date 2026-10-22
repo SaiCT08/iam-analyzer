@@ -1,10 +1,13 @@
 import json
+import re
 
 import pytest
 
 from iam_analyzer.errors import PolicyParseError, UnsupportedPolicyFeature
 from iam_analyzer.loader import load_policy, load_policy_file, parse_policy
 from iam_analyzer.models import Effect
+
+READ = {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}
 
 
 def test_single_values_are_normalized_to_tuples():
@@ -113,6 +116,23 @@ def test_missing_file(tmp_path):
             {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*", "Bogus": 1}]},
             "unknown element",
         ),
+        # Rules AWS checks when a policy is saved.
+        ({"Version": "2012-10-18", "Statement": [READ]}, "'Version'"),
+        ({"Version": 2012, "Statement": [READ]}, "'Version'"),
+        ({"Version": "2012-10-17", "Statement": []}, "'Statement'"),
+        ({"Statment": [READ]}, "unknown top-level key.*Statment"),
+        ({"Version": "2012-10-17", "Statement": [{**READ, "Action": "s3*"}]}, "'Action'"),
+        ({"Statement": [{**READ, "Action": ["s3:GetObject", "*Object"]}]}, "needs a service prefix"),
+        (
+            {"Statement": [{"Effect": "Allow", "NotAction": "s3*", "Resource": "*"}]},
+            "'NotAction' entry 's3.' needs a service prefix",
+        ),
+        ({"Statement": [{**READ, "Sid": "Read records"}]}, "'Sid' must be a string of ASCII"),
+        ({"Statement": [{**READ, "Sid": 7}]}, "'Sid' must be a string of ASCII"),
+        (
+            {"Statement": [{**READ, "Sid": "Read"}, {**READ, "Sid": "Read"}]},
+            "Sid 'Read' is used more than once",
+        ),
     ],
 )
 def test_invalid_policies(document, message):
@@ -123,6 +143,56 @@ def test_invalid_policies(document, message):
 def test_invalid_json():
     with pytest.raises(PolicyParseError, match="invalid JSON"):
         load_policy("{not json", name="p")
+
+
+def test_duplicate_key_in_a_statement_is_rejected():
+    # json.loads would keep only the last "Effect" and load this Deny as an Allow.
+    text = '{"Statement": [{"Effect": "Deny", "Action": "s3:*", "Resource": "*", "Effect": "Allow"}]}'
+    with pytest.raises(PolicyParseError, match="p: duplicate key 'Effect'"):
+        load_policy(text, name="p")
+
+
+def test_empty_sid_counts_as_no_sid():
+    # Tools such as Terraform write "Sid": "" for statements without one, and IAM accepts it.
+    policy = parse_policy({"Statement": [{**READ, "Sid": ""}, {**READ, "Sid": ""}]}, name="p")
+    assert [statement.sid for statement in policy.statements] == [None, None]
+
+
+def test_both_policy_language_versions_are_accepted():
+    for version in ("2012-10-17", "2008-10-17"):
+        assert parse_policy({"Version": version, "Statement": [READ]}, name="p").statements
+
+
+@pytest.mark.parametrize("key", ["Resource", "NotResource"])
+@pytest.mark.parametrize(
+    "variable", ["${aws:username}", "${*}", "${aws:PrincipalTag/team, 'staff'}"]
+)
+def test_policy_variables_are_refused_with_version_2012_10_17(key, variable):
+    statement = {"Effect": "Allow", "Action": "s3:GetObject", key: f"arn:aws:s3:::home/{variable}/*"}
+    document = {"Version": "2012-10-17", "Statement": [statement]}
+    message = f"p statement 0: policy variable {variable!r} in '{key}' is not supported yet"
+    with pytest.raises(UnsupportedPolicyFeature, match=re.escape(message)):
+        parse_policy(document, name="p")
+
+
+@pytest.mark.parametrize("version", [None, "2008-10-17"])
+def test_policy_variables_are_plain_text_without_version_2012_10_17(version):
+    resource = "arn:aws:s3:::home/${aws:username}/*"
+    document = {"Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": resource}]}
+    if version is not None:
+        document["Version"] = version
+    assert parse_policy(document, name="p").statements[0].resources == (resource,)
+
+
+def test_id_is_only_for_resource_based_policies():
+    with pytest.raises(UnsupportedPolicyFeature, match="'Id' is only allowed in resource-based"):
+        parse_policy({"Id": "cd3ad3d9-2776-4ef1-a904-4c229d1642ee", "Statement": [READ]}, name="p")
+
+
+@pytest.mark.parametrize("element", ["Principal", "NotPrincipal"])
+def test_principal_is_only_for_resource_based_policies(element):
+    with pytest.raises(UnsupportedPolicyFeature, match=f"'{element}' is only allowed in resource-based"):
+        parse_policy({"Statement": [{**READ, element: "*"}]}, name="p")
 
 
 @pytest.mark.parametrize(

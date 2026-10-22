@@ -22,7 +22,6 @@ hold more OUs. The rules follow AWS:
   - SCPs never apply to the management account.
 """
 
-import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import partial
@@ -37,7 +36,8 @@ from iam_analyzer.models import OrgTarget, Policy, ScpLevel, TargetType
 SCPS = "ServiceControlPolicies"
 TOP_LEVEL_KEYS = {"ManagementAccountId", SCPS, "Root"}
 
-# The shared shape checks, reporting problems as OrganizationError.
+# The shared checks, reporting problems as OrganizationError.
+_load_json = partial(_validation.load_json, error=OrganizationError)
 _section = partial(_validation.section, error=OrganizationError)
 _entry = partial(_validation.entry, error=OrganizationError)
 _refs = partial(_validation.refs, error=OrganizationError)
@@ -68,12 +68,10 @@ def load_organization_file(path: str | Path) -> Organization:
     """Load an organization from a JSON file."""
     path = Path(path)
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise OrganizationError(f"{path}: cannot read file: {exc.strerror}") from exc
-    except json.JSONDecodeError as exc:
-        raise OrganizationError(f"{path.name}: invalid JSON: {exc}") from exc
-    return parse_organization(document, name=path.name)
+    return parse_organization(_load_json(text, path.name), name=path.name)
 
 
 def parse_organization(document: Any, name: str) -> Organization:

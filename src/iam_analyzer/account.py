@@ -15,7 +15,6 @@ so a user and a role may share a name. `AccountId` is optional; it is only neede
 look up the account's SCPs in an organization file.
 """
 
-import json
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
@@ -28,7 +27,8 @@ from iam_analyzer.models import Policy
 
 TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles"}
 
-# The shared shape checks, reporting problems as AccountError.
+# The shared checks, reporting problems as AccountError.
+_load_json = partial(_validation.load_json, error=AccountError)
 _section = partial(_validation.section, error=AccountError)
 _entry = partial(_validation.entry, error=AccountError)
 _refs = partial(_validation.refs, error=AccountError)
@@ -101,12 +101,10 @@ def load_account_file(path: str | Path) -> Account:
     """Load an account from a JSON file."""
     path = Path(path)
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise AccountError(f"{path}: cannot read file: {exc.strerror}") from exc
-    except json.JSONDecodeError as exc:
-        raise AccountError(f"{path.name}: invalid JSON: {exc}") from exc
-    return parse_account(document, name=path.name)
+    return parse_account(_load_json(text, path.name), name=path.name)
 
 
 def parse_account(document: Any, name: str) -> Account:

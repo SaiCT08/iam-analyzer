@@ -1,15 +1,39 @@
-"""Shape checks shared by the account and organization file loaders.
+"""Checks shared by the file loaders (policy, account and organization files).
 
-Both files are JSON objects keyed by name, whose entries refer to each other by name. Each
-check raises the `error` class it is given, so each loader reports its own error type.
+Account and organization files are JSON objects keyed by name, whose entries refer to each
+other by name. Each check raises the `error` class it is given, so each loader reports its
+own error type.
 """
 
+import json
 import re
 from typing import Any
 
 from iam_analyzer.errors import PolicyError
 
 _ACCOUNT_ID = re.compile(r"[0-9]{12}")
+
+
+def load_json(text: str, where: str, *, error: type[PolicyError]) -> Any:
+    """Decode JSON text, refusing any object that repeats a key.
+
+    Python's json module silently keeps the last copy of a repeated key, which could drop a
+    Deny (a second "Effect") or an SCP (an account listed twice). AWS rejects such
+    documents, so the analyzer does too.
+    """
+
+    def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise error(f"{where}: duplicate key {key!r}")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(text, object_pairs_hook=unique_keys)
+    except json.JSONDecodeError as exc:
+        raise error(f"{where}: invalid JSON: {exc}") from exc
 
 
 def section(document: dict, key: str, where: str, *, error: type[PolicyError]) -> dict:

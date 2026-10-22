@@ -21,10 +21,17 @@ policies (SCPs)**:
   grants access on its own.
 - SCPs from AWS Organizations. A request must be allowed at every level from the organization root
   down to the account, and a Deny in any SCP wins. Like boundaries, SCPs never grant access.
+- Policies are checked the way AWS checks them when they're saved. A policy AWS would reject is
+  refused with a clear error instead of being evaluated. Examples: a repeated JSON key, an unknown
+  `Version`, a `Sid` with characters other than letters and digits, or an action without a service
+  prefix.
 
 Not supported yet:
 - `Condition`, `Principal` and `NotPrincipal` are rejected with a clear error. Most real-world SCPs
   use conditions, so many of them can't be loaded yet.
+- Policy variables such as `${aws:username}` are rejected in policies with
+  `"Version": "2012-10-17"`, where AWS fills them in from the request. Without that `Version`, AWS
+  treats them as plain text, and so does the analyzer.
 - Resource-based policies, such as S3 bucket policies, aren't evaluated.
 - AWS doesn't apply SCPs to service-linked roles, but the account file can't mark a role as
   service-linked yet.
@@ -53,6 +60,9 @@ Output:
 EXPLICIT_DENY
   Deny   deny_student_records_delete.json  Sid=NoDeleteStudentRecords
 ```
+
+`--action` names one action, as a real AWS request does. A wildcard such as `s3:*` is an input
+error.
 
 ### Permissions boundaries
 
