@@ -1,0 +1,16 @@
+{
+  "description": "AWS completes \"arn:aws:s3\" to \"arn:aws:s3:*:*:*\", so this Deny covers every S3 object.",
+  "policies": {
+    "admin.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "*", "Resource": "*" }]
+    },
+    "no_s3.json": {
+      "Statement": [{ "Effect": "Deny", "Action": "s3:*", "Resource": "arn:aws:s3" }]
+    }
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"
+  },
+  "expected": "EXPLICIT_DENY"
+}

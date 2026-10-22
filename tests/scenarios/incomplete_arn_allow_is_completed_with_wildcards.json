@@ -1,0 +1,13 @@
+{
+  "description": "AWS completes \"arn:aws:sqs\" to \"arn:aws:sqs:*:*:*\", so this Allow covers every SQS queue.",
+  "policies": {
+    "send_alerts.json": {
+      "Statement": [{ "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs" }]
+    }
+  },
+  "request": {
+    "action": "sqs:SendMessage",
+    "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"
+  },
+  "expected": "ALLOW"
+}
