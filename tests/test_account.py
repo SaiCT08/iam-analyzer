@@ -65,6 +65,29 @@ def test_users_and_roles_are_separate_namespaces():
     assert summary(acct.policies_for("role/admin")) == [("Write", None)]
 
 
+def test_role_path_defaults_to_root():
+    acct = account(Roles={"ITAdmin": {}})
+    assert acct.roles["ITAdmin"].path == "/"
+    assert not acct.is_service_linked("role/ITAdmin")
+
+
+def test_service_linked_roles_are_marked_by_their_path():
+    acct = account(
+        Roles={
+            "AWSServiceRoleForSupport": {"Path": "/aws-service-role/support.amazonaws.com/"},
+            "CampusApp": {"Path": "/district/"},
+            # The name alone doesn't make a role service-linked.
+            "AWSServiceRoleForLookalike": {},
+        },
+        Users={"jsmith": {}},
+    )
+    assert acct.roles["AWSServiceRoleForSupport"].path == "/aws-service-role/support.amazonaws.com/"
+    assert acct.is_service_linked("role/AWSServiceRoleForSupport")
+    assert not acct.is_service_linked("role/CampusApp")
+    assert not acct.is_service_linked("role/AWSServiceRoleForLookalike")
+    assert not acct.is_service_linked("user/jsmith")
+
+
 def test_principal_with_no_policies():
     acct = account(Users={"newhire": {}})
     assert acct.policies_for("user/newhire") == []
@@ -111,6 +134,15 @@ def test_unknown_principal(principal, message):
         ({"Policies": {}, "Groups": {"g": {"PermissionsBoundary": "B"}}}, "group 'g': unknown key"),
         ({"Policies": {}, "AccountId": 111122223333}, "111122223333 is not an AWS account ID"),
         ({"Policies": {}, "AccountId": "1111-2222-3333"}, "is not an AWS account ID"),
+        ({"Policies": {}, "Roles": {"r": {"Path": 1}}}, "role 'r': 'Path' must be a string"),
+        (
+            {"Policies": {}, "Roles": {"r": {"Path": "aws-service-role/"}}},
+            "'Path' must be a string that starts and ends with '/'",
+        ),
+        (
+            {"Policies": {}, "Roles": {"r": {"Path": "/district"}}},
+            "'Path' must be a string that starts and ends with '/'",
+        ),
     ],
 )
 def test_invalid_accounts(document, message):

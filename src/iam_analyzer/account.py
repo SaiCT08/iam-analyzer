@@ -13,6 +13,9 @@ in groups; roles cannot (same as AWS). Users and roles can also name one policy 
 permissions boundary; groups cannot. Principals are named `user/NAME` or `role/NAME`,
 so a user and a role may share a name. `AccountId` is optional; it is only needed to
 look up the account's SCPs in an organization file.
+
+Roles can have a `Path`, as in AWS (default "/"). AWS creates service-linked roles for its
+own services under "/aws-service-role/", and SCPs never apply to them.
 """
 
 from dataclasses import dataclass, replace
@@ -26,6 +29,8 @@ from iam_analyzer.loader import parse_policy
 from iam_analyzer.models import Policy
 
 TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles"}
+# The path AWS gives every service-linked role, e.g. "/aws-service-role/support.amazonaws.com/".
+SERVICE_LINKED_PATH = "/aws-service-role/"
 
 # The shared checks, reporting problems as AccountError.
 _load_json = partial(_validation.load_json, error=AccountError)
@@ -52,6 +57,11 @@ class User:
 class Role:
     policies: tuple[str, ...] = ()
     boundary: str | None = None
+    path: str = "/"
+
+    @property
+    def service_linked(self) -> bool:
+        return self.path.startswith(SERVICE_LINKED_PATH)
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,11 @@ class Account:
         """The permissions boundary set on `principal`, or None if it has none."""
         entity = self._principal(principal)
         return self.policies[entity.boundary] if entity.boundary is not None else None
+
+    def is_service_linked(self, principal: str) -> bool:
+        """Whether `principal` is a service-linked role, which SCPs never restrict."""
+        entity = self._principal(principal)
+        return isinstance(entity, Role) and entity.service_linked
 
     def _principal(self, principal: str) -> User | Role:
         kind, _, name = principal.partition("/")
@@ -144,10 +159,11 @@ def parse_account(document: Any, name: str) -> Account:
     roles = {}
     for role_name, raw in _section(document, "Roles", name).items():
         where = f"{name} role {role_name!r}"
-        fields = _entry(raw, {"Policies", "PermissionsBoundary"}, where)
+        fields = _entry(raw, {"Policies", "PermissionsBoundary", "Path"}, where)
         roles[role_name] = Role(
             policies=_refs(fields, "Policies", policies, "policy", where),
             boundary=_ref(fields, "PermissionsBoundary", policies, "policy", where),
+            path=_path(fields, where),
         )
 
     return Account(
@@ -158,3 +174,13 @@ def parse_account(document: Any, name: str) -> Account:
         roles=roles,
         account_id=account_id,
     )
+
+
+def _path(fields: dict, where: str) -> str:
+    """Read an optional role `Path`. As in AWS, it starts and ends with "/"."""
+    value = fields.get("Path", "/")
+    if not isinstance(value, str) or not (value.startswith("/") and value.endswith("/")):
+        raise AccountError(
+            f"{where}: 'Path' must be a string that starts and ends with '/', got {value!r}"
+        )
+    return value

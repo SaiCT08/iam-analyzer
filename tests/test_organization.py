@@ -65,10 +65,20 @@ def test_scps_do_not_apply_to_the_management_account():
     assert org.scp_levels_for(MANAGEMENT) == ()
 
 
+def test_scps_do_not_apply_to_service_linked_roles():
+    org = parse(attached("Full", Accounts={**MANAGEMENT_ONLY, DISTRICT: attached("Guard")}))
+    assert org.scp_levels_for(DISTRICT, service_linked=True) == ()
+    # Other principals in the same account still get the account's SCPs.
+    assert len(org.scp_levels_for(DISTRICT)) == 2
+
+
 def test_unknown_account():
     org = parse(VALID_ROOT)
     with pytest.raises(OrganizationError, match="no account '444455556666'"):
         org.scp_levels_for("444455556666")
+    # Even a service-linked role must be in an account the organization knows.
+    with pytest.raises(OrganizationError, match="no account '444455556666'"):
+        org.scp_levels_for("444455556666", service_linked=True)
 
 
 @pytest.mark.parametrize(

@@ -19,7 +19,7 @@ SCPs are defined once and attached by name to the root, OUs and accounts, and OU
 hold more OUs. The rules follow AWS:
   - every root, OU and account has at least one SCP (AWS attaches FullAWSAccess by default);
   - a request must be allowed at every level from the root down to the account;
-  - SCPs never apply to the management account.
+  - SCPs never apply to the management account, or to service-linked roles in any account.
 """
 
 from collections.abc import Iterator
@@ -52,14 +52,17 @@ class Organization:
     # Each account's SCP levels, from the root down to the account itself.
     account_paths: dict[str, tuple[ScpLevel, ...]]
 
-    def scp_levels_for(self, account_id: str) -> tuple[ScpLevel, ...]:
-        """The SCP levels that apply to principals in `account_id`, root first.
+    def scp_levels_for(
+        self, account_id: str, *, service_linked: bool = False
+    ) -> tuple[ScpLevel, ...]:
+        """The SCP levels that apply to a principal in `account_id`, root first.
 
-        Empty for the management account, because SCPs never restrict it.
+        Empty for the principals SCPs never restrict: everyone in the management account,
+        and service-linked roles (`service_linked=True`) in any account.
         """
         if account_id not in self.account_paths:
             raise OrganizationError(f"{self.name}: no account {account_id!r} in the organization")
-        if account_id == self.management_account_id:
+        if account_id == self.management_account_id or service_linked:
             return ()
         return self.account_paths[account_id]
 

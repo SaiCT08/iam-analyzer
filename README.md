@@ -36,8 +36,6 @@ Not supported yet:
   `"Version": "2012-10-17"`, where AWS fills them in from the request. Without that `Version`, AWS
   treats them as plain text, and so does the analyzer.
 - Resource-based policies, such as S3 bucket policies, aren't evaluated.
-- AWS doesn't apply SCPs to service-linked roles, but the account file can't mark a role as
-  service-linked yet.
 
 ## Setup
 
@@ -125,6 +123,11 @@ they have, including the ones that come from their groups. As in AWS, groups can
 In the example account, student teacher `dpatel` is in the Teachers group, but a boundary limits
 them to campus-01 records.
 
+Roles can also have a `Path`, as in AWS, and the default is `/`. AWS creates service-linked roles
+for its own services under `/aws-service-role/`, for example
+`/aws-service-role/support.amazonaws.com/`. SCPs never apply to those roles, so give a
+service-linked role its real path. A role's name alone doesn't make it service-linked.
+
 ### Organizations and SCPs
 
 SCPs go in a separate organization file, because in AWS they belong to the organization, not to any
@@ -172,7 +175,8 @@ The rules follow AWS:
   The SCPs at one level combine, so any one of them can allow it.
 - A Deny in any SCP wins.
 - Every root, OU and account needs at least one SCP. AWS attaches `FullAWSAccess` by default.
-- SCPs never apply to the management account.
+- SCPs never apply to the management account, or to service-linked roles (roles whose `Path`
+  starts with `/aws-service-role/`) in any account.
 
 The Schools OU's `SchoolServicesOnly` SCP is an allow list that leaves out EC2. So `user/alee` can't
 call `ec2:DescribeInstances` in that account, even though their IAM policy allows it:

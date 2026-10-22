@@ -327,3 +327,34 @@ def test_single_value_options_cannot_be_repeated(args, capsys):
         main(["check", *args, "--action", "s3:GetObject", "--resource", ROSTER])
     assert exc.value.code == 2
     assert "can only be given once" in capsys.readouterr().err
+
+
+# --- Service-linked roles --------------------------------------------------------------
+
+
+def support_role_account(tmp_path, role):
+    """An account in the example organization's Schools OU, whose allow-list SCP leaves out EC2."""
+    return account_file(tmp_path, {
+        "AccountId": "111122223333",
+        "Policies": {"SupportPermissions": {"Statement": [
+            {"Effect": "Allow", "Action": "ec2:Describe*", "Resource": "*"}]}},
+        "Roles": {"AWSServiceRoleForSupport": {"Policies": ["SupportPermissions"], **role}},
+    })
+
+
+def test_scps_do_not_apply_to_service_linked_roles(capsys, tmp_path):
+    path = support_role_account(tmp_path, {"Path": "/aws-service-role/support.amazonaws.com/"})
+    code, out, _ = run(capsys, "--account", path, "--org", ORG,
+                       "--principal", "role/AWSServiceRoleForSupport",
+                       "--action", "ec2:DescribeInstances", "--resource", "*")
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == ["ALLOW", "  Allow  SupportPermissions  Sid=(no Sid)"]
+
+
+def test_a_service_linked_name_without_the_path_still_gets_scps(capsys, tmp_path):
+    path = support_role_account(tmp_path, {})
+    code, out, _ = run(capsys, "--account", path, "--org", ORG,
+                       "--principal", "role/AWSServiceRoleForSupport",
+                       "--action", "ec2:DescribeInstances", "--resource", "*")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == ["IMPLICIT_DENY", "  No SCP attached to OU Schools allows this."]

@@ -388,7 +388,9 @@ def test_scenario(path):
     scps = ()
     if "organization" in scenario:
         organization = parse_organization(scenario["organization"], name="organization")
-        scps = organization.scp_levels_for(scenario["account_id"])
+        scps = organization.scp_levels_for(
+            scenario["account_id"], service_linked=scenario.get("service_linked", False)
+        )
     request = Request(**scenario["request"])
     result = evaluate(request, policies, boundary=boundary, scps=scps)
     assert result.decision is Decision(scenario["expected"]), scenario.get("description")

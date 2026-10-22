@@ -148,7 +148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             account = load_account_file(args.account)
             policies = account.policies_for(args.principal)
             boundary = account.boundary_for(args.principal)
-            scps = _scp_levels(account, args.org) if args.org else ()
+            scps = _scp_levels(account, args.principal, args.org) if args.org else ()
         else:
             policies = [load_policy_file(path) for path in args.policy]
             boundary = load_policy_file(args.boundary) if args.boundary else None
@@ -162,11 +162,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     return EXIT_ALLOWED if result.allowed else EXIT_DENIED
 
 
-def _scp_levels(account: Account, org_file: str) -> tuple[ScpLevel, ...]:
-    """The SCP levels in the organization file that apply to `account`."""
+def _scp_levels(account: Account, principal: str, org_file: str) -> tuple[ScpLevel, ...]:
+    """The SCP levels in the organization file that apply to `principal` in `account`."""
     if account.account_id is None:
         raise AccountError(f"{account.name}: needs an 'AccountId' to look up its SCPs")
-    return load_organization_file(org_file).scp_levels_for(account.account_id)
+    return load_organization_file(org_file).scp_levels_for(
+        account.account_id, service_linked=account.is_service_linked(principal)
+    )
 
 
 if __name__ == "__main__":
