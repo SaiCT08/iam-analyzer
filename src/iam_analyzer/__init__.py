@@ -5,6 +5,7 @@ from iam_analyzer.context import RequestContext
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import load_policy, load_policy_file, parse_policy
 from iam_analyzer.models import (
+    Condition,
     Decision,
     EvaluationResult,
     Layer,
@@ -13,6 +14,7 @@ from iam_analyzer.models import (
     PolicyType,
     Request,
     ScpLevel,
+    SetOperator,
     Statement,
     TargetType,
 )
@@ -20,6 +22,7 @@ from iam_analyzer.organization import Organization, load_organization_file, pars
 
 __all__ = [
     "Account",
+    "Condition",
     "Decision",
     "EvaluationResult",
     "Layer",
@@ -30,6 +33,7 @@ __all__ = [
     "Request",
     "RequestContext",
     "ScpLevel",
+    "SetOperator",
     "Statement",
     "TargetType",
     "evaluate",

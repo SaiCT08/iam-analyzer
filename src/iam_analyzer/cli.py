@@ -22,6 +22,7 @@ from iam_analyzer.errors import AccountError, MissingContextError, PolicyError
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import load_policy_file
 from iam_analyzer.models import (
+    Condition,
     EvaluationResult,
     Layer,
     MatchedStatement,
@@ -129,13 +130,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def format_result(result: EvaluationResult) -> str:
+def format_result(result: EvaluationResult, context: RequestContext = RequestContext()) -> str:
+    """The decision, then each statement behind it. `context` is the request's context, used to
+    show the values each condition was checked against."""
     lines = [result.decision.value]
     lines += [f"  {_not_allowed_message(layer)}" for layer in result.not_allowed_by]
     for reason in result.reasons:
         sid = reason.statement.sid or "(no Sid)"
         lines.append(f"  {reason.statement.effect.value:<6} {_source(reason)}  Sid={sid}")
+        lines += [f"         {_condition(c, context)}" for c in reason.statement.conditions]
     return "\n".join(lines)
+
+
+def _condition(condition: Condition, context: RequestContext) -> str:
+    """A condition with the request's value for its key: "Bool aws:SecureTransport: true
+    (request: true)"."""
+    found = context.get(condition.key)
+    request = "not present" if found is None else _values(found)
+    return f"{condition.name} {condition.key}: {_values(condition.values)} (request: {request})"
+
+
+def _values(values: Sequence[str]) -> str:
+    return ", ".join(value or '""' for value in values)
 
 
 def _source(reason: MatchedStatement) -> str:
@@ -204,7 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(MISSING_CONTEXT_HINT, file=sys.stderr)
         return EXIT_INPUT_ERROR
 
-    print(format_result(result))
+    print(format_result(result, request.context))
     return EXIT_ALLOWED if result.allowed else EXIT_DENIED
 
 

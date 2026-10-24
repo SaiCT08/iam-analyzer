@@ -132,6 +132,38 @@ def test_missing_file(tmp_path):
             {"Statement": [{**READ, "Sid": "Read"}, {**READ, "Sid": "Read"}]},
             "Sid 'Read' is used more than once",
         ),
+        # The shape of a Condition block: {operator: {key: value or [values]}}.
+        ({"Statement": [{**READ, "Condition": []}]}, "'Condition' must be a non-empty JSON"),
+        ({"Statement": [{**READ, "Condition": {}}]}, "'Condition' must be a non-empty JSON"),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": []}}]},
+            "condition 'StringEquals' must be a non-empty JSON object of condition keys",
+        ),
+        ({"Statement": [{**READ, "Condition": {"StringEquals": {}}}]}, "non-empty JSON object"),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": {"SourceIp": "x"}}}]},
+            "'SourceIp' is not a condition key",
+        ),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": {"aws:${x}": "a"}}}]},
+            "is not a condition key",
+        ),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": {"aws:x": "a", "AWS:X": "b"}}}]},
+            "names 'AWS:X' twice",
+        ),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": {"aws:x": []}}}]},
+            "on 'aws:x': needs at least one value",
+        ),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": {"aws:x": None}}}]},
+            "values must be strings, numbers or booleans",
+        ),
+        (
+            {"Statement": [{**READ, "Condition": {"StringEquals": {"aws:x": [{"a": 1}]}}}]},
+            "values must be strings, numbers or booleans",
+        ),
     ],
 )
 def test_invalid_policies(document, message):
@@ -233,7 +265,6 @@ def test_principal_is_only_for_resource_based_policies(element):
 @pytest.mark.parametrize(
     "element, value",
     [
-        ("Condition", {"Bool": {"aws:SecureTransport": "true"}}),
         ("Principal", "*"),
         ("NotPrincipal", "*"),
     ],

@@ -44,6 +44,35 @@ class TargetType(str, Enum):
     ACCOUNT = "ACCOUNT"
 
 
+class SetOperator(str, Enum):
+    """A condition prefix for keys that can have several values in the request."""
+
+    FOR_ALL_VALUES = "ForAllValues"  # every request value must pass
+    FOR_ANY_VALUE = "ForAnyValue"  # at least one request value must pass
+
+
+@dataclass(frozen=True)
+class Condition:
+    """One test from a statement's Condition block: does the request's `key` pass `operator`?
+
+    "ForAnyValue:StringLikeIfExists" is stored as operator "StringLike", set_operator
+    FOR_ANY_VALUE and if_exists True. Values are kept as text, since AWS lets numbers and
+    booleans go unquoted: 10 is stored as "10" and true as "true".
+    """
+
+    operator: str
+    key: str  # as written, such as "aws:SourceIp"
+    values: tuple[str, ...]
+    set_operator: SetOperator | None = None
+    if_exists: bool = False
+
+    @property
+    def name(self) -> str:
+        """The operator as a policy writes it, such as "ForAnyValue:StringLikeIfExists"."""
+        prefix = f"{self.set_operator.value}:" if self.set_operator else ""
+        return f"{prefix}{self.operator}{'IfExists' if self.if_exists else ''}"
+
+
 @dataclass(frozen=True)
 class Statement:
     """One normalized policy statement. Action and Resource are always tuples.
@@ -52,7 +81,10 @@ class Statement:
     patterns list what the statement does NOT cover, and it applies to everything else.
 
     `policy_variables` is True when the policy has "Version": "2012-10-17". Then ${...} in a
-    resource is a policy variable that AWS fills in from the request; otherwise it is plain text.
+    resource or condition value is a policy variable that AWS fills in from the request;
+    otherwise it is plain text.
+
+    The statement applies only when every one of its `conditions` holds.
     """
 
     effect: Effect
@@ -62,6 +94,7 @@ class Statement:
     not_action: bool = False
     not_resource: bool = False
     policy_variables: bool = False
+    conditions: tuple[Condition, ...] = ()
 
 
 @dataclass(frozen=True)

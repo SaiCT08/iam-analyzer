@@ -59,17 +59,23 @@ def test_missing_policy_file(capsys, tmp_path):
     assert "cannot read file" in err
 
 
-def test_unsupported_policy(capsys, tmp_path):
-    path = tmp_path / "conditional.json"
+def test_conditional_deny(capsys, tmp_path):
+    path = tmp_path / "https_only.json"
     path.write_text(
-        '{"Statement": [{"Effect": "Deny", "Action": "*", "Resource": "*",'
+        '{"Statement": [{"Sid": "HttpsOnly", "Effect": "Deny", "Action": "*", "Resource": "*",'
         ' "Condition": {"Bool": {"aws:SecureTransport": "false"}}}]}'
     )
-    code, _, err = run(
-        capsys, "--policy", str(path), "--action", "s3:GetObject", "--resource", ROSTER,
-    )
-    assert code == EXIT_INPUT_ERROR
-    assert "'Condition' is not supported yet" in err
+    args = ["--policy", TEACHER, "--policy", str(path), "--action", "s3:GetObject",
+            "--resource", ROSTER]
+    code, out, _ = run(capsys, *args, "--context", "aws:SecureTransport=false")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "EXPLICIT_DENY",
+        "  Deny   https_only.json  Sid=HttpsOnly",
+        "         Bool aws:SecureTransport: false (request: false)",
+    ]
+    code, _, _ = run(capsys, *args, "--context", "aws:SecureTransport=true")
+    assert code == EXIT_ALLOWED
 
 
 def test_missing_required_argument_exits_with_usage_error():
@@ -485,3 +491,50 @@ def test_a_roles_own_tag_cannot_be_absent(capsys, tmp_path):
     assert code == EXIT_INPUT_ERROR
     assert ("'aws:PrincipalTag/Campus' can't be absent: role/CampusApp has this tag, and "
             "session tags can override a role's tags but not remove them") in err
+
+
+# --- Conditions ------------------------------------------------------------------------
+
+
+def test_registrar_changes_need_mfa(capsys):
+    # The Deny uses BoolIfExists, so it also blocks requests made with access keys, which
+    # don't include aws:MultiFactorAuthPresent at all.
+    args = ["--account", ACCOUNT, "--principal", "user/rnguyen", "--action", "s3:PutObject",
+            "--resource", "arn:aws:s3:::district-student-records/campus-02/transcript.pdf"]
+    code, _, err = run(capsys, *args)
+    assert code == EXIT_INPUT_ERROR
+    assert ("  aws:MultiFactorAuthPresent, used by RegistrarCampusRecords statement 1 "
+            "(Sid=RequireMfaForChanges)") in err
+
+    code, out, _ = run(capsys, *args, "--absent", "aws:MultiFactorAuthPresent")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "EXPLICIT_DENY",
+        "  Deny   RegistrarCampusRecords (via group Registrars)  Sid=RequireMfaForChanges",
+        "         BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)",
+    ]
+
+    code, out, _ = run(capsys, *args, "--context", "aws:MultiFactorAuthPresent=true")
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        "  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords",
+    ]
+
+
+def test_allow_reasons_show_their_conditions(capsys, tmp_path):
+    path = tmp_path / "district_network.json"
+    path.write_text(json.dumps({"Statement": [{
+        "Sid": "DistrictNetwork", "Effect": "Allow", "Action": "s3:GetObject", "Resource": "*",
+        "Condition": {"IpAddress": {"aws:SourceIp": ["10.0.0.0/8", "192.0.2.0/24"]},
+                      "StringLike": {"s3:prefix": ""}}}]}))
+    code, out, _ = run(capsys, "--policy", str(path), "--action", "s3:GetObject",
+                       "--resource", ROSTER, "--context", "aws:SourceIp=10.1.2.3",
+                       "--context", "s3:prefix=")
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        "  Allow  district_network.json  Sid=DistrictNetwork",
+        "         IpAddress aws:SourceIp: 10.0.0.0/8, 192.0.2.0/24 (request: 10.1.2.3)",
+        '         StringLike s3:prefix: "" (request: "")',
+    ]

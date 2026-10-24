@@ -27,14 +27,15 @@ policies (SCPs)**:
 - Policy variables such as `${aws:username}` in `Resource` and `NotResource`, filled in from the
   request context. The analyzer never guesses a value: if a statement needs one that nobody gave,
   it says which.
+- `Condition`, with every operator AWS documents, `...IfExists`, `Null`, and the `ForAllValues` /
+  `ForAnyValue` set operators.
 - Policies are checked the way AWS checks them when they're saved. A policy AWS would reject is
   refused with a clear error instead of being evaluated. Examples: a repeated JSON key, an unknown
   `Version`, a `Sid` with characters other than letters and digits, or an action without a service
   prefix.
 
 Not supported yet:
-- `Condition`, `Principal` and `NotPrincipal` are rejected with a clear error. Most real-world SCPs
-  use conditions, so many of them can't be loaded yet.
+- `Principal` and `NotPrincipal` are rejected with a clear error.
 - Resource-based policies, such as S3 bucket policies, aren't evaluated.
 
 ## Setup
@@ -270,6 +271,63 @@ AWS's documentation doesn't settle a few cases, so the analyzer refuses them:
 
 As AWS requires, a variable can only appear in the resource part of an ARN, after the fifth colon.
 Without `"Version": "2012-10-17"`, AWS treats `${...}` as plain text, and so does the analyzer.
+
+### Conditions
+
+A statement with a `Condition` only applies when every condition holds. Conditions read the request
+context too, so the same three states apply. Registrars may change their campus's records only
+when they signed in with MFA:
+
+```json
+{
+  "Sid": "RequireMfaForChanges",
+  "Effect": "Deny",
+  "Action": "s3:PutObject",
+  "Resource": "arn:aws:s3:::district-student-records/*",
+  "Condition": { "BoolIfExists": { "aws:MultiFactorAuthPresent": "false" } }
+}
+```
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/rnguyen \
+  --action s3:PutObject \
+  --resource arn:aws:s3:::district-student-records/campus-02/transcript.pdf \
+  --absent aws:MultiFactorAuthPresent
+```
+
+```
+EXPLICIT_DENY
+  Deny   RegistrarCampusRecords (via group Registrars)  Sid=RequireMfaForChanges
+         BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)
+```
+
+The indented line shows each condition, with the value the request had. AWS leaves
+`aws:MultiFactorAuthPresent` out of requests made with access keys, so `--absent` describes such a
+request. `BoolIfExists` treats a missing key as passing, so the Deny applies. With
+`--context aws:MultiFactorAuthPresent=true` the answer is `ALLOW`, and with no flag at all the
+analyzer asks for the key.
+
+The rules follow AWS:
+- Several conditions, or several keys under one operator: every one must hold.
+- Several values for one key: any one can match. A negated operator, such as `StringNotEquals` or
+  `NotIpAddress`, holds only when none match.
+- A key the request doesn't include: a negated operator holds and any other doesn't. An operator
+  ending in `IfExists` holds, and `Null` tests exactly that.
+- `ForAllValues` needs every request value to pass, and also holds when the key is missing.
+  `ForAnyValue` needs at least one. A key with several values in the request needs one of these
+  two set operators.
+- Policy variables can be used in String and ARN values.
+
+Supported operators: `String(Not)Equals(IgnoreCase)`, `String(Not)Like`, the six `Numeric` and six
+`Date` comparisons, `Bool`, `BinaryEquals`, `(Not)IpAddress`, `Arn(Not)Equals`, `Arn(Not)Like` and
+`Null`. Dates are ISO 8601 date-times with a time zone (`2026-08-15T07:30:00Z`), or epoch seconds.
+
+AWS's documentation leaves some cases open, so the analyzer refuses them instead of guessing. For
+example: a date without a time zone, a bare IPv6 address without a prefix, a policy variable in a
+`Bool` value (two AWS pages disagree), and a request key with several values under an operator
+without `ForAllValues` or `ForAnyValue`.
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 

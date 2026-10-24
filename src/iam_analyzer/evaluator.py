@@ -8,9 +8,9 @@ A request is checked against one or more layers of policy:
 
 The logic, in three steps:
   1. Match:   in each layer, keep statements whose Action AND Resource both match the
-              request. NotAction / NotResource flip the test: the statement matches when
-              the request is NOT in the list. Policy variables in a resource, such as
-              ${aws:username}, are filled in from the request context first.
+              request, and whose conditions all hold. NotAction / NotResource flip the
+              test: the statement matches when the request is NOT in the list. Policy
+              variables, such as ${aws:username}, are filled in from the request context.
   2. Deny:    a matching Deny in ANY layer    -> EXPLICIT_DENY (a Deny always wins)
   3. Allow:   a matching Allow in EVERY layer -> ALLOW
               otherwise                       -> IMPLICIT_DENY (the default is "no")
@@ -25,9 +25,9 @@ key and the statements that use it.
 
 from collections.abc import Iterable, Sequence
 
-from iam_analyzer import variables
+from iam_analyzer import conditions, variables
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import MissingContextError, PolicyError
+from iam_analyzer.errors import MissingContextError, PolicyError, UnsupportedPolicyFeature
 from iam_analyzer.matching import Pattern, match_action, match_resource
 from iam_analyzer.models import (
     Decision,
@@ -47,7 +47,8 @@ def statement_matches(statement: Statement, request: Request) -> bool:
     """Whether `statement` applies to `request`.
 
     Raises MissingContextError when the answer depends on a condition key the request context
-    says nothing about. Keys are only needed once the action matches.
+    says nothing about. Keys are only needed once the action matches, and condition keys once
+    the resource matches too.
     """
     # `!=` with the flag acts as "flip the result when negated".
     action_ok = any(match_action(p, request.action) for p in statement.actions)
@@ -55,7 +56,28 @@ def statement_matches(statement: Statement, request: Request) -> bool:
         return False
     resources = _resource_patterns(statement, request.context)
     resource_ok = any(match_resource(p, request.resource) for p in resources)
-    return resource_ok != statement.not_resource
+    if resource_ok == statement.not_resource:
+        return False
+    _require(conditions.keys(statement), request.context)
+    return _conditions_hold(statement, request.context)
+
+
+def _conditions_hold(statement: Statement, context: RequestContext) -> bool:
+    """Whether every condition holds.
+
+    One condition that fails is enough for the statement not to apply, whatever AWS does with
+    the others. So a condition the analyzer refuses only matters when all the rest hold.
+    """
+    refused = None
+    for condition in statement.conditions:
+        try:
+            if not conditions.holds(condition, context, statement.policy_variables):
+                return False
+        except UnsupportedPolicyFeature as exc:
+            refused = refused or exc
+    if refused is not None:
+        raise refused
+    return True
 
 
 def evaluate(

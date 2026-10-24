@@ -135,6 +135,17 @@
             "s3:PutObject"
           ],
           "Resource": "arn:aws:s3:::district-student-records/${aws:PrincipalTag/campus}/*"
+        },
+        {
+          "Sid": "RequireMfaForChanges",
+          "Effect": "Deny",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::district-student-records/*",
+          "Condition": {
+            "BoolIfExists": {
+              "aws:MultiFactorAuthPresent": "false"
+            }
+          }
         }
       ]
     }

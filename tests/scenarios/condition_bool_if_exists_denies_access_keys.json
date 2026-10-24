@@ -1,0 +1,39 @@
+{
+  "description": "BoolIfExists makes an MFA Deny also apply to requests made with access keys, which don't include aws:MultiFactorAuthPresent.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [
+        {
+          "Sid": "FullS3Access",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "require_mfa.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "RequireMfaForDeletes",
+          "Effect": "Deny",
+          "Action": "s3:DeleteObject",
+          "Resource": "*",
+          "Condition": {
+            "BoolIfExists": {
+              "aws:MultiFactorAuthPresent": "false"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "context": {
+    "aws:MultiFactorAuthPresent": null
+  },
+  "request": {
+    "action": "s3:DeleteObject",
+    "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"
+  },
+  "expected": "EXPLICIT_DENY"
+}

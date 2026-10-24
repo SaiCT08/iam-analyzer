@@ -1,0 +1,30 @@
+{
+  "description": "ForAllValues holds when the key is missing, so without a Null check this Allow also covers a request with no tags at all. AWS warns about this.",
+  "policies": {
+    "tag_only_campus.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "ec2:CreateTags",
+          "Resource": "*",
+          "Condition": {
+            "ForAllValues:StringEquals": {
+              "aws:TagKeys": [
+                "campus"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "context": {
+    "aws:TagKeys": null
+  },
+  "request": {
+    "action": "ec2:CreateTags",
+    "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"
+  },
+  "expected": "ALLOW"
+}

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from iam_analyzer.errors import OrganizationError, UnsupportedPolicyFeature
+from iam_analyzer.errors import OrganizationError, PolicyParseError
 from iam_analyzer.models import TargetType
 from iam_analyzer.organization import load_organization_file, parse_organization
 
@@ -148,7 +148,12 @@ def test_scps_are_parsed_like_any_policy():
         "Condition": {"StringNotEquals": {"aws:RequestedRegion": "us-east-1"}},
     }
     doc["ServiceControlPolicies"]["RegionLock"] = {"Statement": [statement]}
-    with pytest.raises(UnsupportedPolicyFeature, match="RegionLock statement 0.*'Condition'"):
+    [region_lock] = parse_organization(doc, name="org.json").policies["RegionLock"].statements
+    [condition] = region_lock.conditions
+    assert (condition.operator, condition.key) == ("StringNotEquals", "aws:RequestedRegion")
+    statement["Condition"] = {"StringNotEqual": {"aws:RequestedRegion": "us-east-1"}}
+    message = "RegionLock statement 0: unknown condition operator 'StringNotEqual'"
+    with pytest.raises(PolicyParseError, match=message):
         parse_organization(doc, name="org.json")
 
 

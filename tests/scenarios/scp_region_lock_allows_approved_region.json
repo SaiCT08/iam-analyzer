@@ -1,0 +1,79 @@
+{
+  "description": "The same SCP doesn't apply to a request sent to an approved region.",
+  "policies": {
+    "it_admin_full_s3.json": {
+      "Statement": [
+        {
+          "Sid": "FullS3Access",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": "*"
+        }
+      ]
+    }
+  },
+  "organization": {
+    "ManagementAccountId": "999988887777",
+    "ServiceControlPolicies": {
+      "FullAWSAccess": {
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "*",
+            "Resource": "*"
+          }
+        ]
+      },
+      "ApprovedRegionsOnly": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "DenyOutsideApprovedRegions",
+            "Effect": "Deny",
+            "NotAction": [
+              "iam:*",
+              "sts:*",
+              "organizations:*"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "StringNotEquals": {
+                "aws:RequestedRegion": [
+                  "us-east-1",
+                  "us-east-2"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "Root": {
+      "ServiceControlPolicies": [
+        "FullAWSAccess",
+        "ApprovedRegionsOnly"
+      ],
+      "Accounts": {
+        "111122223333": {
+          "ServiceControlPolicies": [
+            "FullAWSAccess"
+          ]
+        },
+        "999988887777": {
+          "ServiceControlPolicies": [
+            "FullAWSAccess"
+          ]
+        }
+      }
+    }
+  },
+  "account_id": "111122223333",
+  "context": {
+    "aws:RequestedRegion": "us-east-1"
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"
+  },
+  "expected": "ALLOW"
+}

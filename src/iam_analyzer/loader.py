@@ -12,9 +12,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from iam_analyzer import _validation, variables
+from iam_analyzer import _validation, conditions, variables
+from iam_analyzer.context import CONDITION_KEY
 from iam_analyzer.errors import PolicyError, PolicyParseError, UnsupportedPolicyFeature
-from iam_analyzer.models import Effect, Policy, Statement
+from iam_analyzer.models import Condition, Effect, Policy, Statement
 
 # The policy language versions. A policy without a Version uses the older one, which has no
 # policy variables: there, "${aws:username}" is plain text.
@@ -22,14 +23,12 @@ CURRENT_VERSION = "2012-10-17"
 VERSIONS = (CURRENT_VERSION, "2008-10-17")
 TOP_LEVEL_KEYS = {"Version", "Statement"}
 
-# Elements the analyzer recognises but can't evaluate yet (later phases).
-UNSUPPORTED_ELEMENTS = ("Condition",)
 # Elements AWS only allows in resource-based policies (such as S3 bucket policies). Identity
 # policies, permissions boundaries and SCPs, the only kinds loaded so far, can't use them.
 RESOURCE_POLICY_ELEMENTS = ("Principal", "NotPrincipal")
 KNOWN_ELEMENTS = {
-    "Sid", "Effect", "Action", "NotAction", "Resource", "NotResource",
-    *UNSUPPORTED_ELEMENTS, *RESOURCE_POLICY_ELEMENTS,
+    "Sid", "Effect", "Action", "NotAction", "Resource", "NotResource", "Condition",
+    *RESOURCE_POLICY_ELEMENTS,
 }
 
 # IAM allows only ASCII letters and digits in a Sid. "" is treated as no Sid.
@@ -98,9 +97,6 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
     for element in RESOURCE_POLICY_ELEMENTS:
         if element in raw:
             raise _resource_policy_only(element, where)
-    for element in UNSUPPORTED_ELEMENTS:
-        if element in raw:
-            raise UnsupportedPolicyFeature(f"{where}: '{element}' is not supported yet")
     unknown = set(raw) - KNOWN_ELEMENTS
     if unknown:
         raise PolicyParseError(f"{where}: unknown element(s): {', '.join(sorted(unknown))}")
@@ -120,6 +116,9 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
     if policy_variables:
         _check_no_variables(actions, action_key, where)
         _check_variables(resources, "NotResource" if not_resource else "Resource", where)
+    parsed_conditions = ()
+    if "Condition" in raw:
+        parsed_conditions = _parse_conditions(raw["Condition"], where, policy_variables)
     return Statement(
         effect=effect,
         actions=actions,
@@ -128,6 +127,7 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
         not_action=not_action,
         not_resource=not_resource,
         policy_variables=policy_variables,
+        conditions=parsed_conditions,
     )
 
 
@@ -188,6 +188,59 @@ def _check_no_variables(actions: tuple[str, ...], key: str, where: str) -> None:
             raise PolicyParseError(
                 f"{where}: '{key}' entry {action!r}: policy variables can't be used in actions"
             )
+
+
+def _parse_conditions(raw: Any, where: str, policy_variables: bool) -> tuple[Condition, ...]:
+    """Read a Condition block: {operator: {condition key: value or [values]}}."""
+    if not isinstance(raw, dict) or not raw:
+        raise PolicyParseError(f"{where}: 'Condition' must be a non-empty JSON object of operators")
+    found = []
+    for name, block in raw.items():
+        try:
+            set_operator, operator, if_exists = conditions.parse_operator(name)
+        except PolicyError as exc:
+            raise type(exc)(f"{where}: {exc}") from None
+        if not isinstance(block, dict) or not block:
+            raise PolicyParseError(
+                f"{where}: condition {name!r} must be a non-empty JSON object of condition keys"
+            )
+        seen = set()
+        for key, value in block.items():
+            if not CONDITION_KEY.fullmatch(key) or "${" in key:
+                raise PolicyParseError(
+                    f"{where}: condition {name!r}: {key!r} is not a condition key such as "
+                    "'aws:SourceIp'"
+                )
+            if key.casefold() in seen:
+                raise PolicyParseError(
+                    f"{where}: condition {name!r} names {key!r} twice (keys ignore case)"
+                )
+            seen.add(key.casefold())
+            values = _condition_values(value, f"{where}: condition {name!r} on {key!r}")
+            condition = Condition(operator, key, values, set_operator, if_exists)
+            try:
+                conditions.check(condition, policy_variables)
+            except PolicyError as exc:
+                raise type(exc)(f"{where}: {exc}") from None
+            found.append(condition)
+    return tuple(found)
+
+
+def _condition_values(raw: Any, where: str) -> tuple[str, ...]:
+    """A condition's values as text. AWS lets numbers and booleans go unquoted."""
+    values = []
+    for value in _as_list(raw):
+        if isinstance(value, bool):
+            values.append("true" if value else "false")
+        elif isinstance(value, (str, int, float)):
+            values.append(str(value))
+        else:
+            raise PolicyParseError(
+                f"{where}: values must be strings, numbers or booleans, got {value!r}"
+            )
+    if not values:
+        raise PolicyParseError(f"{where}: needs at least one value")
+    return tuple(values)
 
 
 def _check_unique_sids(statements: tuple[Statement, ...], name: str) -> None:

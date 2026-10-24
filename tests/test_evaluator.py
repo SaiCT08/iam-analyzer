@@ -456,6 +456,54 @@ def test_without_variables_the_context_is_never_read():
     assert evaluate(GET, [versioned("p", allow("s3:GetObject", OBJECT))]).allowed
 
 
+# --- Conditions ------------------------------------------------------------------------
+
+
+def get_with(*values):
+    return Request(action="s3:GetObject", resource=OBJECT, context=RequestContext.of(values))
+
+
+REGION_LOCK = versioned("RegionLock", {
+    "Sid": "ApprovedRegionsOnly", "Effect": "Deny", "NotAction": ["iam:*", "sts:*"],
+    "Resource": "*",
+    "Condition": {"StringNotEquals": {"aws:RequestedRegion": ["us-east-1", "us-east-2"]}},
+})
+
+
+def test_an_scp_condition_can_deny():
+    scps = org_path(ou=[FULL_ACCESS, REGION_LOCK])
+    approved = get_with(("aws:RequestedRegion", "us-east-1"))
+    assert evaluate(approved, [BROAD_S3], scps=scps).decision is Decision.ALLOW
+    result = evaluate(get_with(("aws:RequestedRegion", "eu-west-1")), [BROAD_S3], scps=scps)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert reasons(result) == [("RegionLock", "ApprovedRegionsOnly", scp(SCHOOLS))]
+
+
+def test_a_boundary_condition_limits_access():
+    district_network = versioned("DistrictNetwork", {
+        "Effect": "Allow", "Action": "s3:*", "Resource": "*",
+        "Condition": {"IpAddress": {"aws:SourceIp": "10.0.0.0/8"}},
+    })
+    inside = get_with(("aws:SourceIp", "10.1.2.3"))
+    assert evaluate(inside, [BROAD_S3], boundary=district_network).allowed
+    outside = get_with(("aws:SourceIp", "198.51.100.7"))
+    result = evaluate(outside, [BROAD_S3], boundary=district_network)
+    assert result.decision is Decision.IMPLICIT_DENY
+    assert result.not_allowed_by == (BOUNDARY,)
+
+
+def test_condition_keys_are_only_needed_once_action_and_resource_match():
+    p = versioned("p", allow("s3:GetObject", "*"), {
+        "Effect": "Deny", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::other/*",
+        "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+    })
+    # The Deny is for another bucket, so whether GET used HTTPS doesn't matter.
+    assert evaluate(GET, [p]).allowed
+    other = Request(action="s3:GetObject", resource="arn:aws:s3:::other/x")
+    with pytest.raises(MissingContextError, match="aws:SecureTransport, used by p statement 1"):
+        evaluate(other, [p])
+
+
 # --- Data-driven scenarios -------------------------------------------------------------
 
 SCENARIO_DIR = Path(__file__).parent / "scenarios"
