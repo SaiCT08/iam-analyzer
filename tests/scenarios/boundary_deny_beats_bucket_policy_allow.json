@@ -1,0 +1,65 @@
+{
+  "description": "AWS's boundaries example: a bucket policy that lets the user write to the logs bucket doesn't help, because the boundary explicitly denies the bucket.",
+  "policies": {
+    "read_only.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": "*"
+        }
+      ]
+    }
+  },
+  "boundary": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "ServiceBoundaries",
+        "Effect": "Allow",
+        "Action": [
+          "s3:*",
+          "ec2:*"
+        ],
+        "Resource": "*"
+      },
+      {
+        "Sid": "DenyS3Logs",
+        "Effect": "Deny",
+        "Action": "s3:*",
+        "Resource": [
+          "arn:aws:s3:::district-logs",
+          "arn:aws:s3:::district-logs/*"
+        ]
+      }
+    ]
+  },
+  "resource_policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::111122223333:user/kwong"
+        },
+        "Action": "s3:PutObject",
+        "Resource": [
+          "arn:aws:s3:::district-logs/*",
+          "arn:aws:s3:::district-logs"
+        ]
+      }
+    ]
+  },
+  "context": {
+    "aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"
+  },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-logs/2026-10-24.log"
+  },
+  "expected": "EXPLICIT_DENY"
+}

@@ -34,6 +34,41 @@ class PolicyType(str, Enum):
     IDENTITY = "identity"
     PERMISSIONS_BOUNDARY = "permissions boundary"
     SCP = "SCP"
+    RESOURCE_BASED = "resource-based"  # attached to a resource, such as an S3 bucket policy
+
+
+class PrincipalType(str, Enum):
+    """The kinds of principal a Principal element names, spelled as in a policy."""
+
+    AWS = "AWS"
+    SERVICE = "Service"
+    FEDERATED = "Federated"
+    CANONICAL_USER = "CanonicalUser"
+
+
+class PrincipalMatch(str, Enum):
+    """How a resource-based policy's statement named the caller. It decides which other layers
+    still have to allow the request."""
+
+    EVERYONE = "everyone"  # "*"
+    USER = "user"  # the caller's own user ARN
+    ROLE = "role"  # the ARN of the role whose session the caller is
+    ACCOUNT = "account"  # the caller's account, which delegates to its identity-based policies
+
+    @property
+    def direct(self) -> bool:
+        """A grant straight to the caller, which neither identity policies nor a boundary limit."""
+        return self in (PrincipalMatch.EVERYONE, PrincipalMatch.USER)
+
+
+@dataclass(frozen=True)
+class Principal:
+    """One principal from a Principal element: {"AWS": "111122223333"} is
+    Principal(PrincipalType.AWS, "111122223333"). "Principal": "*" is stored as AWS "*", which AWS
+    documents as the same thing."""
+
+    type: PrincipalType
+    value: str
 
 
 class TargetType(str, Enum):
@@ -85,6 +120,9 @@ class Statement:
     otherwise it is plain text.
 
     The statement applies only when every one of its `conditions` holds.
+
+    `principals` is the Principal element of a resource-based policy's statement: it applies only
+    when one of them names the caller. It is None in identity-based policies, which have none.
     """
 
     effect: Effect
@@ -95,6 +133,7 @@ class Statement:
     not_resource: bool = False
     policy_variables: bool = False
     conditions: tuple[Condition, ...] = ()
+    principals: tuple[Principal, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -172,26 +211,34 @@ class ScpLevel:
 
 @dataclass(frozen=True)
 class Layer:
-    """One layer of evaluation: the identity policies, the permissions boundary, or the
-    SCPs at one level of the organization.
+    """One layer of evaluation: the identity policies, the permissions boundary, the SCPs at one
+    level of the organization, or the resource-based policy of the resource the request is on.
 
-    A request needs a matching Allow in every layer that applies, and a matching Deny in
-    any layer denies it. SCPs apply level by level (the root, each OU, then the account),
-    so each level is its own layer and `org_target` says which one.
+    A matching Deny in any layer denies the request. SCPs apply level by level (the root, each
+    OU, then the account), so each level is its own layer and `org_target` says which one. Every
+    SCP level needs a matching Allow. A resource-based policy can stand in for the identity
+    policies, and sometimes the boundary, as `evaluator` explains. `resource` is the ARN that
+    policy is attached to.
     """
 
     policy_type: PolicyType
     org_target: OrgTarget | None = None
+    resource: str | None = None
 
 
 @dataclass(frozen=True)
 class MatchedStatement:
-    """A statement that matched the request, plus the policy and layer it came from."""
+    """A statement that matched the request, plus the policy and layer it came from.
+
+    For a resource-based policy's statement, `principal_match` says how its Principal named the
+    caller.
+    """
 
     policy_name: str
     statement: Statement
     via_group: str | None = None
     layer: Layer = Layer(PolicyType.IDENTITY)
+    principal_match: PrincipalMatch | None = None
 
 
 @dataclass(frozen=True)

@@ -1,22 +1,33 @@
-"""AWS policy evaluation for identity policies, permissions boundaries and SCPs.
+"""AWS policy evaluation for identity policies, permissions boundaries, SCPs and resource-based
+policies.
 
 A request is checked against one or more layers of policy:
   - the identity policies attached to the principal (always),
-  - the principal's permissions boundary, if it has one, and
+  - the principal's permissions boundary, if it has one,
   - the SCPs of the principal's AWS organization, if it is in one. Each level of the
-    organization (the root, each OU, then the account) is a layer of its own.
+    organization (the root, each OU, then the account) is a layer of its own, and
+  - the resource-based policy of the resource the request is on, if it has one, such as an S3
+    bucket policy.
 
 The logic, in three steps:
-  1. Match:   in each layer, keep statements whose Action AND Resource both match the
-              request, and whose conditions all hold. NotAction / NotResource flip the
-              test: the statement matches when the request is NOT in the list. Policy
-              variables, such as ${aws:username}, are filled in from the request context.
-  2. Deny:    a matching Deny in ANY layer    -> EXPLICIT_DENY (a Deny always wins)
-  3. Allow:   a matching Allow in EVERY layer -> ALLOW
-              otherwise                       -> IMPLICIT_DENY (the default is "no")
+  1. Match:   in each layer, keep statements whose Action AND Resource both match the request,
+              whose Principal names the caller (resource-based policies only), and whose
+              conditions all hold. NotAction / NotResource flip the test: the statement matches
+              when the request is NOT in the list. Policy variables, such as ${aws:username},
+              are filled in from the request context.
+  2. Deny:    a matching Deny in ANY layer -> EXPLICIT_DENY (a Deny always wins)
+  3. Allow:   every SCP level needs a matching Allow. Within one account, AWS then allows the
+              request when the identity policies allow it, and the boundary too if there is
+              one, or when the resource-based policy grants it. What that policy's Principal
+              names decides what else is needed:
+                - the caller's user, or everyone ("*"): nothing else;
+                - the caller's role: the boundary must still allow;
+                - the caller's account: AWS says that "delegates authority to the account",
+                  so the identity policies and the boundary must allow, as with no grant.
+              Otherwise -> IMPLICIT_DENY (the default is "no")
 
 So boundaries and SCPs never grant anything by themselves; they only limit what identity
-policies allow.
+and resource-based policies allow.
 
 When matching a statement needs a condition key the request context says nothing about,
 there is no answer to give: evaluation raises one MissingContextError that names every such
@@ -31,7 +42,7 @@ also need that account's policies.
 
 from collections.abc import Iterable, Sequence
 
-from iam_analyzer import conditions, resources, variables
+from iam_analyzer import conditions, principals, resources, variables
 from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import (
     MissingContextError,
@@ -49,6 +60,7 @@ from iam_analyzer.models import (
     MatchedStatement,
     Policy,
     PolicyType,
+    PrincipalMatch,
     Request,
     Resource,
     ScpLevel,
@@ -65,18 +77,40 @@ def statement_matches(statement: Statement, request: Request) -> bool:
 
     Raises MissingContextError when the answer depends on a condition key the request context
     says nothing about. Keys are only needed once the action matches, and condition keys once
-    the resource matches too.
+    the resource, and in a resource-based policy the principal, match too.
     """
+    applies, _ = _applies(statement, request)
+    return applies
+
+
+def _applies(statement: Statement, request: Request) -> tuple[bool, PrincipalMatch | None]:
+    """Whether `statement` applies to `request`, and how its Principal names the caller."""
     # `!=` with the flag acts as "flip the result when negated".
     action_ok = any(match_action(p, request.action) for p in statement.actions)
     if action_ok == statement.not_action:
-        return False
-    resources = _resource_patterns(statement, request.context)
-    resource_ok = any(match_resource(p, request.resource) for p in resources)
+        return False, None
+    patterns = _resource_patterns(statement, request.context)
+    resource_ok = any(match_resource(p, request.resource) for p in patterns)
     if resource_ok == statement.not_resource:
-        return False
+        return False, None
+    found = refused = None
+    if statement.principals is not None:
+        if principals.needs_caller(statement.principals):
+            _require([principals.CALLER_KEY], request.context)
+        deny = statement.effect is Effect.DENY
+        try:
+            found = principals.match(statement.principals, request.context, deny=deny)
+        except UnsupportedPolicyFeature as exc:
+            refused = exc  # like a refused condition, it only matters if the conditions hold
+        else:
+            if found is None:
+                return False, None
     _require(conditions.keys(statement), request.context)
-    return _conditions_hold(statement, request.context)
+    if not _conditions_hold(statement, request.context):
+        return False, None
+    if refused is not None:
+        raise refused
+    return True, found
 
 
 def _conditions_hold(statement: Statement, context: RequestContext) -> bool:
@@ -112,14 +146,18 @@ def evaluate(
     needs one, except a request on an IAM or STS resource.
     """
     missing: list[tuple[str, str]] = []
-    described = _check_resource(request, resource)
-    _check_same_account(request, described, missing)
+    governing = _check_resource(request, resource)
+    _check_same_account(request, governing is not None, missing)
 
     layers = [(Layer(PolicyType.IDENTITY), tuple(policies))]
     if boundary is not None:
         layers.append((Layer(PolicyType.PERMISSIONS_BOUNDARY), (boundary,)))
     # A level with no SCPs has no Allow, so it denies: the safe default.
     layers += [(Layer(PolicyType.SCP, level.target), level.policies) for level in scps]
+    resource_layer = None
+    if governing is not None and resource.policy is not None:
+        resource_layer = Layer(PolicyType.RESOURCE_BASED, resource=governing)
+        layers.append((resource_layer, (resource.policy,)))
 
     matched = [
         (layer, _matching(request, layer, layer_policies, missing))
@@ -133,23 +171,61 @@ def evaluate(
     if denies:
         return EvaluationResult(Decision.EXPLICIT_DENY, denies)
 
-    # No Deny matched, so every matched statement is an Allow. Each layer needs one.
-    not_allowed_by = tuple(layer for layer, found in matched if not found)
+    # No Deny matched, so every matched statement is an Allow.
+    grant = principals.strongest(m.principal_match for m in every if m.layer == resource_layer)
+    not_allowed_by = _not_allowed_by(matched, grant, resource_layer)
     if not_allowed_by:
         return EvaluationResult(Decision.IMPLICIT_DENY, not_allowed_by=not_allowed_by)
 
     return EvaluationResult(Decision.ALLOW, tuple(every))
 
 
-def _check_resource(request: Request, resource: Resource | None) -> bool:
-    """Check that `resource` describes what the request needs. Returns whether it needed one."""
+def _not_allowed_by(
+    matched: list[tuple[Layer, list[MatchedStatement]]],
+    grant: PrincipalMatch | None,
+    resource_layer: Layer | None,
+) -> tuple[Layer, ...]:
+    """The layers whose missing Allow stops the request.
+
+    Every SCP level needs an Allow, and so do the identity policies and the boundary, unless the
+    resource-based policy's `grant` spares them. When that policy grants nothing and the identity
+    side doesn't allow either, it is listed too: it was the other way in.
+    """
+    blocked = [layer for layer, found in matched if not found and _needed(layer, grant)]
+    identity_side = (PolicyType.IDENTITY, PolicyType.PERMISSIONS_BOUNDARY)
+    if resource_layer is not None and grant is None:
+        if any(layer.policy_type in identity_side for layer in blocked):
+            blocked.append(resource_layer)
+    return tuple(blocked)
+
+
+def _needed(layer: Layer, grant: PrincipalMatch | None) -> bool:
+    """Whether `layer` must allow the request, given how the resource-based policy granted it.
+
+    AWS: grants to a user ARN "are not limited by an implicit deny in an identity-based policy or
+    permissions boundary", and grants to a role ARN "are limited by an implicit deny in a
+    permissions boundary". A grant to everyone ("*") counts as direct, and one to the account
+    grants nothing by itself.
+    """
+    if layer.policy_type is PolicyType.SCP:
+        return True
+    if layer.policy_type is PolicyType.IDENTITY:
+        return grant in (None, PrincipalMatch.ACCOUNT)
+    if layer.policy_type is PolicyType.PERMISSIONS_BOUNDARY:
+        return grant is None or not grant.direct
+    return False
+
+
+def _check_resource(request: Request, resource: Resource | None) -> str | None:
+    """Check that `resource` describes what the request needs. Returns the described resource's
+    ARN, or None when the request needs no description."""
     governing = resources.governing_arn(request.resource, request.action)
     if governing is None:
         if resource is not None and resource.policy is not None:
             raise RequestError(
                 f"no resource-based policy applies to {request.action} on {request.resource}"
             )
-        return False
+        return None
     if resources.is_role_arn(governing):
         raise UnsupportedPolicyFeature(
             f"{request.action} on {governing}: role trust policies aren't supported yet"
@@ -165,8 +241,8 @@ def _check_resource(request: Request, resource: Resource | None) -> bool:
             f"a request on {request.resource} needs {governing} described, not {resource.arn}"
         )
     if resource.policy is not None:
-        raise UnsupportedPolicyFeature(f"{governing}: resource-based policies aren't supported yet")
-    return True
+        resources.check_policy_support(governing, where=resource.policy.name)
+    return governing
 
 
 def _check_same_account(request: Request, described: bool, missing: list[tuple[str, str]]) -> None:
@@ -214,8 +290,11 @@ def _matching(
     for policy in policies:
         for index, statement in enumerate(policy.statements):
             try:
-                if statement_matches(statement, request):
-                    found.append(MatchedStatement(policy.name, statement, policy.via_group, layer))
+                applies, principal_match = _applies(statement, request)
+                if applies:
+                    found.append(MatchedStatement(
+                        policy.name, statement, policy.via_group, layer, principal_match
+                    ))
             except MissingContextError as exc:
                 missing += [(key, _where(policy, index, statement)) for key in exc.keys]
             except PolicyError as exc:

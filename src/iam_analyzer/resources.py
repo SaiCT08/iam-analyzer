@@ -17,13 +17,21 @@ No, but VPC, which also uses ec2: ARNs, says Partial), and it never defines Part
 Requests on KMS keys are refused, because every key has a key policy that must allow them and the
 analyzer doesn't evaluate key policies yet. So are requests on S3 resources other than buckets and
 objects, such as access points.
+
+Only S3 bucket policies are evaluated so far. AWS: "Resource-based policies for services other
+than IAM and AWS KMS may also require an explicit Allow statement within the same account", so
+another service's resource can be described only as having none.
 """
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-from iam_analyzer.errors import RequestError, UnsupportedPolicyFeature
-from iam_analyzer.models import Resource
+from iam_analyzer import _validation
+from iam_analyzer.errors import PolicyParseError, RequestError, UnsupportedPolicyFeature
+from iam_analyzer.loader import parse_policy
+from iam_analyzer.models import PolicyType, Resource
 
 # The STS actions whose resource type is "role" in the STS page of the Service Authorization
 # Reference. A role's trust policy covers them.
@@ -133,15 +141,48 @@ def account_of(resource: str) -> str | None:
     return arn.account_id if arn is not None else None
 
 
-def describe(resource: str, action: str) -> Resource | None:
-    """Describe the resource a request needs as being in the principal's account with no
-    resource-based policy, and for an S3 bucket, with its ACLs disabled. This is what
-    --no-resource-policy says.
+def describe(
+    resource: str, action: str, document: Any = None, *, name: str = "resource policy"
+) -> Resource | None:
+    """Describe the resource a request needs: in the principal's account, with the resource-based
+    policy in `document`, or with none when `document` is None. For an S3 bucket, its ACLs are
+    disabled. This is what --resource-policy and --no-resource-policy say.
 
-    None when the request needs no description.
+    None when the request needs no description and `document` is None.
     """
     governing = governing_arn(resource, action)
-    return None if governing is None else Resource(governing)
+    if governing is None:
+        if document is not None:
+            raise RequestError(f"no resource-based policy applies to {action} on {resource}")
+        return None
+    if document is None:
+        return Resource(governing)
+    check_policy_support(governing, where=name)
+    return Resource(governing, parse_policy(document, name=name, kind=PolicyType.RESOURCE_BASED))
+
+
+def load_resource_policy_file(path: str | Path, resource: str, action: str) -> Resource:
+    """Describe the resource a request needs with the resource-based policy in a JSON file."""
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PolicyParseError(f"{path}: cannot read file: {exc.strerror}") from exc
+    document = _validation.load_json(text, path.name, error=PolicyParseError)
+    described = describe(resource, action, document, name=path.name)
+    assert described is not None  # describe() refuses a policy for a request that needs none
+    return described
+
+
+def check_policy_support(governing: str, *, where: str) -> None:
+    """Refuse a resource-based policy on a resource whose service's rules aren't settled yet."""
+    arn = Arn.parse(governing)
+    if arn is None or arn.service != "s3":
+        raise UnsupportedPolicyFeature(
+            f"{where}: only S3 bucket policies are evaluated so far, and {governing} isn't a "
+            "bucket. AWS says resource-based policies for services other than IAM and AWS KMS "
+            "\"may also require an explicit Allow statement within the same account\""
+        )
 
 
 def _role_action(arn: Arn, action: str) -> bool:

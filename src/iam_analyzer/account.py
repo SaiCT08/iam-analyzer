@@ -22,8 +22,10 @@ Policies read them as aws:PrincipalTag/campus. Groups can't be tagged, as in IAM
 
 `Resources` describes the account's resources by ARN, which a request on a specific resource
 needs (see `resources`): {"arn:aws:s3:::district-staff-files": {}} says the bucket is in this
-account and has no resource-based policy. Describing a bucket also says its ACLs are disabled
-(Object Ownership "Bucket owner enforced"). For an S3 object, its bucket is described.
+account and has no resource-based policy, and {"Policy": {...}} gives a bucket its bucket policy.
+Describing a bucket also says its ACLs are disabled (Object Ownership "Bucket owner enforced").
+For an S3 object, its bucket is described. A bucket policy's Principal elements name ARNs, so a
+file with one needs an `AccountId`.
 """
 
 import re
@@ -36,7 +38,7 @@ from iam_analyzer import _validation, resources
 from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import AccountError, UnsupportedPolicyFeature
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import Policy, Resource
+from iam_analyzer.models import Policy, PolicyType, Resource
 
 TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles", "Resources"}
 # The path AWS gives every service-linked role, e.g. "/aws-service-role/support.amazonaws.com/".
@@ -241,6 +243,11 @@ def parse_account(document: Any, name: str) -> Account:
         arn: _resource(arn, raw, account_id, f"{name} resource {arn!r}")
         for arn, raw in _section(document, "Resources", name).items()
     }
+    if account_id is None and any(r.policy is not None for r in described.values()):
+        raise AccountError(
+            f"{name}: a bucket policy's Principal elements name ARNs, so the account file needs "
+            "an 'AccountId' to know which ARNs are its users' and roles'"
+        )
 
     return Account(
         name=name,
@@ -291,9 +298,10 @@ def _resource(text: str, raw: Any, account_id: str | None, where: str) -> Resour
                 f"{where}: is in account {arn.account}, not this file's account {account_id}; "
                 "cross-account requests aren't supported yet"
             )
-    if "Policy" in fields:
-        raise UnsupportedPolicyFeature(f"{where}: resource-based policies aren't supported yet")
-    return Resource(text)
+    if "Policy" not in fields:
+        return Resource(text)
+    resources.check_policy_support(text, where=where)
+    return Resource(text, parse_policy(fields["Policy"], name=text, kind=PolicyType.RESOURCE_BASED))
 
 
 def _tags(fields: dict, where: str) -> tuple[tuple[str, str], ...]:

@@ -11,7 +11,7 @@ from iam_analyzer.errors import (
     RequestError,
     UnsupportedPolicyFeature,
 )
-from iam_analyzer.models import Resource
+from iam_analyzer.models import Principal, PrincipalType, Resource
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "accounts" / "district.json"
 
@@ -368,6 +368,8 @@ def test_principal_context_for_an_unknown_principal():
 
 RECORDS = "arn:aws:s3:::district-student-records"
 ALERTS = "arn:aws:sqs:us-east-1:111122223333:district-alerts"
+READ_STATEMENT = {"Effect": "Allow", "Action": "s3:GetObject", "Resource": f"{RECORDS}/*"}
+BUCKET_POLICY = {"Statement": [{**READ_STATEMENT, "Principal": "*"}]}
 
 
 def test_resources_describe_buckets_and_other_resources():
@@ -421,9 +423,14 @@ def test_example_account_describes_its_buckets():
         ),
         ({"arn:aws:sqs:us-east-1:aws:alerts": {}}, AccountError, "empty or a 12-digit account ID"),
         (
-            {RECORDS: {"Policy": {"Statement": []}}},
+            {ALERTS: {"Policy": BUCKET_POLICY}},
             UnsupportedPolicyFeature,
-            "resource-based policies aren't supported yet",
+            f"resource '{ALERTS}': only S3 bucket policies are evaluated so far",
+        ),
+        (
+            {RECORDS: {"Policy": {"Statement": [{**READ_STATEMENT}]}}},
+            PolicyParseError,
+            f"{RECORDS} statement 0: a resource-based policy's statement needs a 'Principal'",
         ),
     ],
 )
@@ -435,3 +442,23 @@ def test_invalid_resources(described, error, message):
 def test_a_resource_that_names_an_account_needs_the_files_account_id():
     with pytest.raises(AccountError, match="names account 111122223333, so the account file needs"):
         account(Resources={ALERTS: {}})
+
+
+def test_a_bucket_policy_is_read_as_a_resource_based_policy():
+    acct = account(AccountId="111122223333", Resources={RECORDS: {"Policy": BUCKET_POLICY}})
+    bucket_policy = acct.resources[RECORDS].policy
+    assert bucket_policy.name == RECORDS
+    assert bucket_policy.statements[0].principals == (Principal(PrincipalType.AWS, "*"),)
+
+
+def test_a_bucket_policy_needs_the_files_account_id():
+    with pytest.raises(AccountError, match="needs an 'AccountId' to know which ARNs"):
+        account(Resources={RECORDS: {"Policy": BUCKET_POLICY}})
+
+
+def test_example_account_has_a_bucket_policy_on_student_records():
+    bucket_policy = load_account_file(EXAMPLE).resources[RECORDS].policy
+    assert [s.sid for s in bucket_policy.statements] == [
+        "OnlyITAdminChangesThePolicy",
+        "CounselorsReadCounselingNotes",
+    ]

@@ -10,8 +10,8 @@ It works entirely on local policy JSON files. No AWS account or credentials are 
 
 ## Status
 
-The analyzer currently covers **identity policies**, **permissions boundaries** and **service control
-policies (SCPs)**:
+The analyzer currently covers **identity policies**, **permissions boundaries**, **service control
+policies (SCPs)** and **S3 bucket policies**:
 - Allow/Deny statements, where an explicit deny always wins and the default is an implicit deny.
 - `*` / `?` wildcards in actions and resources. In a resource ARN, a wildcard stays inside one
   colon-separated part, except a `*` at the end of a part, which can run on past colons. So
@@ -24,6 +24,9 @@ policies (SCPs)**:
   grants access on its own.
 - SCPs from AWS Organizations. A request must be allowed at every level from the organization root
   down to the account, and a Deny in any SCP wins. Like boundaries, SCPs never grant access.
+- S3 bucket policies, with their `Principal` element. Within one account, a bucket policy can allow
+  a request on its own. Who its `Principal` names decides whether the identity policies and the
+  boundary must allow too (see [Resource-based policies](#resource-based-policies)).
 - Policy variables such as `${aws:username}` in `Resource` and `NotResource`, filled in from the
   request context. The analyzer never guesses a value: if a statement needs one that nobody gave,
   it says which.
@@ -38,8 +41,8 @@ policies (SCPs)**:
   [Resources](#resources)).
 
 Not supported yet:
-- `Principal` and `NotPrincipal` are rejected with a clear error.
-- Resource-based policies, such as S3 bucket policies, aren't evaluated yet. A resource can only be
+- `NotPrincipal` is refused with a clear error.
+- Resource-based policies other than S3 bucket policies. Another service's resource can only be
   described as having none.
 - Cross-account requests, KMS keys and role trust policies are refused.
 
@@ -158,18 +161,19 @@ no account at all. So a request on a specific resource needs the resource *descr
 a description the analyzer stops instead of assuming it has none.
 
 In an account file, `Resources` describes resources by ARN. `{}` says the resource is in this
-account and has no resource-based policy:
+account and has no resource-based policy, and `Policy` gives a bucket its bucket policy (see
+[Resource-based policies](#resource-based-policies)):
 
 ```json
 "Resources": {
-  "arn:aws:s3:::district-student-records": {},
+  "arn:aws:s3:::district-student-records": { "Policy": { "Statement": [ ... ] } },
   "arn:aws:s3:::district-staff-files": {}
 }
 ```
 
 For an S3 object, describe its bucket: a bucket policy covers the bucket's objects. With
-`--policy`, `--no-resource-policy` says the same thing about the request's resource: it's in the
-same account and has no resource-based policy.
+`--policy`, `--resource-policy FILE` gives the request's resource its resource-based policy, and
+`--no-resource-policy` says it has none. Either flag also says the resource is in the same account.
 
 Describing a bucket also says its ACLs are disabled, meaning its Object Ownership setting is
 "Bucket owner enforced". That has been S3's default for new buckets since April 2023, and it makes
@@ -206,8 +210,97 @@ The analyzer refuses:
   account's policies, which aren't modeled yet.
 - Requests on KMS keys, because every key has a key policy that must allow the request.
 - S3 resources other than buckets and objects, such as access points.
-- Role trust policies (for `sts:AssumeRole` and the other STS actions on a role), and
-  resource-based policies themselves, which come in later phases.
+- Resource-based policies of services other than S3. AWS says they "may also require an explicit
+  Allow statement within the same account", and the analyzer doesn't know which ones do.
+- Role trust policies (for `sts:AssumeRole` and the other STS actions on a role), which come in a
+  later phase.
+
+### Resource-based policies
+
+A bucket policy is evaluated alongside the identity policies. A Deny in either one wins, as
+always. Within one account, an Allow in the bucket policy can grant the request even when no
+identity policy allows it. Whom the statement's `Principal` names decides what else still has to
+allow:
+
+| The bucket policy's Allow names… | Identity policy also needed? | Boundary must also allow? |
+|---|---|---|
+| the caller's user ARN | no | no |
+| everyone (`"*"`) | no | no |
+| the caller's role ARN | no | yes |
+| the caller's account (`111122223333` or `arn:aws:iam::111122223333:root`) | yes | yes |
+| no one who matches | yes | yes |
+
+Naming the account "delegates authority to the account", in AWS's words: the account's own
+identity policies decide, as if the bucket policy said nothing. Every SCP level must still allow,
+whatever the bucket policy says.
+
+The example account's `district-student-records` bucket policy lets counselor `kwong` read
+counseling notes, although `kwong` has no identity policies at all:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/kwong \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::district-student-records/counseling/2026/notes.pdf
+```
+
+```
+ALLOW
+  Allow  arn:aws:s3:::district-student-records (resource-based policy, names the user)  Sid=CounselorsReadCounselingNotes
+```
+
+The same bucket policy stops everyone but the IT admin role from changing the bucket's policy. It
+uses AWS's recommended pattern, a Deny for `"*"` with an `ArnNotEquals` condition on
+`aws:PrincipalArn`:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/alee \
+  --action s3:PutBucketPolicy \
+  --resource arn:aws:s3:::district-student-records
+```
+
+```
+EXPLICIT_DENY
+  Deny   arn:aws:s3:::district-student-records (resource-based policy, names everyone)  Sid=OnlyITAdminChangesThePolicy
+         ArnNotEquals aws:PrincipalArn: arn:aws:iam::111122223333:role/ITAdmin (request: arn:aws:iam::111122223333:user/alee)
+```
+
+The analyzer reads the caller from `aws:PrincipalArn`. With `--account`, the file fills it in,
+which needs the file's `AccountId`. With `--policy`, give it with `--context`, and give the bucket
+policy with `--resource-policy`:
+
+```sh
+iam-analyzer check \
+  --policy examples/policies/teacher_read_grades.json \
+  --resource-policy examples/policies/student_records_bucket_policy.json \
+  --context aws:PrincipalArn=arn:aws:iam::111122223333:user/kwong \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::district-student-records/counseling/2026/notes.pdf
+```
+
+```
+ALLOW
+  Allow  teacher_read_grades.json  Sid=ReadStudentRecords
+  Allow  student_records_bucket_policy.json (resource-based policy on arn:aws:s3:::district-student-records, names the user)  Sid=CounselorsReadCounselingNotes
+```
+
+`Principal` can name `"*"`, accounts, users, roles, role sessions, federated users, services,
+federated identity providers and S3 canonical users, as AWS allows. Services and identity
+providers never name an IAM user or role. The analyzer refuses what the account file can't settle:
+- a role session's ARN for the caller's role, because the session's name isn't known;
+- S3 canonical user IDs, and IAM unique IDs, which AWS shows for a principal that was deleted;
+- a role ARN that matches the caller's only if case is ignored, since AWS doesn't say whether role
+  names are case sensitive there;
+- `NotPrincipal`, which AWS recommends replacing with `aws:PrincipalArn` conditions.
+
+Treating `"*"` as a direct grant is a judgment call: AWS says that for "IAM users and role
+principals within your account, no other permissions are required", and that boundaries "do not
+limit permissions granted using the aws:PrincipalArn condition key with a wildcard(*) in the
+Principal element". S3 Block Public Access isn't modeled. Its `RestrictPublicBuckets` setting can
+block grants in a public bucket policy.
 
 ### Organizations and SCPs
 

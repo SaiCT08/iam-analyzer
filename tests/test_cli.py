@@ -196,7 +196,13 @@ def test_account_boundary_limits_group_policies(capsys):
 
     code, out, _ = run(capsys, *args, "--resource", campus.format("campus-02"))
     assert code == EXIT_DENIED
-    assert out.splitlines() == ["IMPLICIT_DENY", "  The permissions boundary does not allow this."]
+    # A grant to dpatel in the bucket policy would have been the other way in.
+    assert out.splitlines() == [
+        "IMPLICIT_DENY",
+        "  The permissions boundary does not allow this.",
+        "  The resource-based policy on arn:aws:s3:::district-student-records does not allow "
+        "this either.",
+    ]
 
 
 # --- Organizations and SCPs ------------------------------------------------------------
@@ -562,8 +568,8 @@ def test_policy_mode_needs_the_resource_described(capsys):
     assert out == ""
     assert err.splitlines() == [
         NOTHING_DESCRIBES.format("arn:aws:s3:::district-student-records"),
-        "hint: give --no-resource-policy if it is in the same account and has no "
-        "resource-based policy",
+        "hint: give its resource-based policy with --resource-policy FILE, or "
+        "--no-resource-policy if it has none; either says it is in the same account",
     ]
 
 
@@ -588,6 +594,20 @@ def test_no_resource_policy_only_works_with_policy(capsys):
     assert "--no-resource-policy only works with --policy" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--account", ACCOUNT, "--principal", "user/jsmith", "--resource-policy", TEACHER],
+        ["--policy", TEACHER, "--resource-policy", TEACHER, NO_RESOURCE_POLICY],
+        ["--policy", TEACHER, "--resource-policy", TEACHER, "--resource-policy", TEACHER],
+    ],
+)
+def test_resource_policy_flag_misuse_is_a_usage_error(args):
+    with pytest.raises(SystemExit) as exc:
+        main(["check", *args, "--action", "s3:GetObject", "--resource", ROSTER])
+    assert exc.value.code == 2
+
+
 def test_kms_requests_are_refused(capsys):
     key = "arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab"
     code, out, err = run(capsys, "--policy", IT_ADMIN, NO_RESOURCE_POLICY,
@@ -608,3 +628,79 @@ def test_an_iam_request_needs_the_principals_account(capsys):
     assert "cross-account requests aren't supported yet" in err
     code, _, _ = run(capsys, *args, "--context", "aws:PrincipalAccount=111122223333")
     assert code == EXIT_DENIED  # the policy only allows S3
+
+
+# --- Resource-based policies -----------------------------------------------------------
+
+BUCKET_POLICY = str(POLICIES / "student_records_bucket_policy.json")
+COUNSELING = "arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"
+RECORDS_BUCKET = "arn:aws:s3:::district-student-records"
+KWONG_ARN = "arn:aws:iam::111122223333:user/kwong"
+
+
+def test_a_bucket_policy_alone_lets_a_counselor_read(capsys):
+    # kwong has no identity policies at all.
+    code, out, _ = run(capsys, "--account", ACCOUNT, "--principal", "user/kwong",
+                       "--action", "s3:GetObject", "--resource", COUNSELING)
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        f"  Allow  {RECORDS_BUCKET} (resource-based policy, names the user)  "
+        "Sid=CounselorsReadCounselingNotes",
+    ]
+
+
+def test_others_need_their_identity_policies(capsys):
+    code, out, _ = run(capsys, "--account", ACCOUNT, "--principal", "user/kwong",
+                       "--action", "s3:GetObject", "--resource", ROSTER)
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "IMPLICIT_DENY",
+        "  No identity policy allows this; access is denied by default.",
+        f"  The resource-based policy on {RECORDS_BUCKET} does not allow this either.",
+    ]
+
+
+def test_a_bucket_policy_deny_shows_its_condition(capsys):
+    code, out, _ = run(capsys, "--account", ACCOUNT, "--principal", "user/alee",
+                       "--action", "s3:PutBucketPolicy", "--resource", RECORDS_BUCKET)
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "EXPLICIT_DENY",
+        f"  Deny   {RECORDS_BUCKET} (resource-based policy, names everyone)  "
+        "Sid=OnlyITAdminChangesThePolicy",
+        "         ArnNotEquals aws:PrincipalArn: arn:aws:iam::111122223333:role/ITAdmin "
+        "(request: arn:aws:iam::111122223333:user/alee)",
+    ]
+
+
+def test_policy_mode_reads_a_resource_policy_file(capsys):
+    args = ["--policy", TEACHER, "--resource-policy", BUCKET_POLICY,
+            "--action", "s3:GetObject", "--resource", COUNSELING]
+    code, _, err = run(capsys, *args)
+    assert code == EXIT_INPUT_ERROR
+    assert ("  aws:PrincipalArn, used by student_records_bucket_policy.json statement 1 "
+            "(Sid=CounselorsReadCounselingNotes)") in err
+    code, out, _ = run(capsys, *args, "--context", f"aws:PrincipalArn={KWONG_ARN}")
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        "  Allow  teacher_read_grades.json  Sid=ReadStudentRecords",
+        "  Allow  student_records_bucket_policy.json (resource-based policy on "
+        f"{RECORDS_BUCKET}, names the user)  Sid=CounselorsReadCounselingNotes",
+    ]
+
+
+def test_a_resource_policy_for_a_request_that_none_covers(capsys):
+    code, _, err = run(capsys, "--policy", TEACHER, "--resource-policy", BUCKET_POLICY,
+                       "--action", "iam:GetUser", "--resource", "*")
+    assert code == EXIT_INPUT_ERROR
+    assert "no resource-based policy applies to iam:GetUser on *" in err
+
+
+def test_only_bucket_policies_are_evaluated(capsys):
+    queue = "arn:aws:sqs:us-east-1:111122223333:district-alerts"
+    code, _, err = run(capsys, "--policy", TEACHER, "--resource-policy", BUCKET_POLICY,
+                       "--action", "sqs:SendMessage", "--resource", queue)
+    assert code == EXIT_INPUT_ERROR
+    assert "only S3 bucket policies are evaluated so far" in err

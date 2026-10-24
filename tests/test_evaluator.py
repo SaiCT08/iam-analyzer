@@ -20,6 +20,7 @@ from iam_analyzer.models import (
     Layer,
     OrgTarget,
     PolicyType,
+    PrincipalMatch,
     Request,
     Resource,
     ScpLevel,
@@ -616,15 +617,199 @@ def test_trust_policies_are_refused_until_supported():
         evaluate(request, [ALLOW_ALL])
 
 
-def test_resource_based_policies_are_refused_until_supported():
-    with pytest.raises(UnsupportedPolicyFeature, match="resource-based policies aren't supported"):
-        evaluate(GET, [ALLOW_ALL], resource=Resource(BUCKET, policy=ALLOW_ALL))
+def test_only_s3_bucket_policies_are_evaluated():
+    queue = "arn:aws:sqs:us-east-1:111122223333:district-alerts"
+    send = Request(action="sqs:SendMessage", resource=queue)
+    with pytest.raises(UnsupportedPolicyFeature, match="only S3 bucket policies are evaluated"):
+        evaluate(send, [ALLOW_ALL], resource=Resource(queue, policy=ALLOW_ALL))
 
 
 def test_a_policy_for_a_request_that_no_resource_based_policy_covers():
     message = "no resource-based policy applies to iam:ChangePassword"
     with pytest.raises(RequestError, match=message):
         evaluate(in_account("111122223333"), [ALLOW_ALL], resource=Resource(USER_ARN, ALLOW_ALL))
+
+
+# --- Resource-based policies -----------------------------------------------------------
+
+KWONG = "arn:aws:iam::111122223333:user/kwong"
+CAMPUS_APP = "arn:aws:iam::111122223333:role/district/CampusApp"
+RESOURCE = Layer(PolicyType.RESOURCE_BASED, resource=BUCKET)
+NO_S3 = policy("NoS3", allow("ec2:*", "*"))
+
+
+def bucket_policy(*statements):
+    document = {"Version": "2012-10-17", "Statement": list(statements)}
+    return parse_policy(document, name=BUCKET, kind=PolicyType.RESOURCE_BASED)
+
+
+def grant(principal, effect="Allow", sid=None, **elements):
+    return {"Sid": sid, "Effect": effect, "Principal": principal, "Action": "s3:GetObject",
+            "Resource": f"{BUCKET}/*", **elements}
+
+
+def get_by(arn, *values):
+    context = RequestContext.of([("aws:PrincipalArn", arn), *values])
+    return Request(action="s3:GetObject", resource=OBJECT, context=context)
+
+
+def with_bucket_policy(request, policies, *statements, **layers):
+    described = Resource(BUCKET, bucket_policy(*statements))
+    return evaluate(request, policies, resource=described, **layers)
+
+
+@pytest.mark.parametrize(
+    "caller, principal, boundary, decision",
+    [
+        # A grant to the user isn't limited by their identity policies or boundary.
+        (KWONG, {"AWS": KWONG}, None, Decision.ALLOW),
+        (KWONG, {"AWS": KWONG}, NO_S3, Decision.ALLOW),
+        # Neither is a grant to everyone (a judgment call).
+        (KWONG, "*", NO_S3, Decision.ALLOW),
+        (CAMPUS_APP, "*", NO_S3, Decision.ALLOW),
+        # A grant to the role needs no identity policy, but the role's boundary limits it.
+        (CAMPUS_APP, {"AWS": CAMPUS_APP}, None, Decision.ALLOW),
+        (CAMPUS_APP, {"AWS": CAMPUS_APP}, NO_S3, Decision.IMPLICIT_DENY),
+        # A grant to the account delegates to its identity policies, which don't allow S3 here.
+        (KWONG, {"AWS": "111122223333"}, None, Decision.IMPLICIT_DENY),
+        (CAMPUS_APP, {"AWS": "arn:aws:iam::111122223333:root"}, None, Decision.IMPLICIT_DENY),
+        # Naming someone else grants the caller nothing.
+        (KWONG, {"AWS": "arn:aws:iam::111122223333:user/jsmith"}, None, Decision.IMPLICIT_DENY),
+        (KWONG, {"AWS": "arn:aws:iam::111122223333:user/KWONG"}, None, Decision.IMPLICIT_DENY),
+        (CAMPUS_APP, {"Service": "cloudtrail.amazonaws.com"}, None, Decision.IMPLICIT_DENY),
+    ],
+)
+def test_what_a_bucket_policy_grant_still_needs(caller, principal, boundary, decision):
+    # The caller's identity policy doesn't allow S3, so only the bucket policy can.
+    layers = {"boundary": boundary} if boundary else {}
+    result = with_bucket_policy(get_by(caller), [NO_S3], grant(principal), **layers)
+    assert result.decision is decision
+
+
+def test_identity_policies_alone_still_allow():
+    result = with_bucket_policy(get_by(KWONG), [BROAD_S3], grant({"AWS": "444455556666"}))
+    assert result.decision is Decision.ALLOW
+    assert reasons(result) == [("identity", "BroadS3", IDENTITY)]
+
+
+def test_a_grant_to_the_account_works_with_an_identity_allow():
+    to_account = grant({"AWS": "111122223333"}, sid="Acct")
+    result = with_bucket_policy(get_by(KWONG), [BROAD_S3], to_account)
+    assert result.decision is Decision.ALLOW
+    assert [(r.statement.sid, r.layer, r.principal_match) for r in result.reasons] == [
+        ("BroadS3", IDENTITY, None),
+        ("Acct", RESOURCE, PrincipalMatch.ACCOUNT),
+    ]
+
+
+def test_allow_reasons_say_how_the_principal_matched():
+    result = with_bucket_policy(get_by(KWONG), [], grant({"AWS": KWONG}, sid="Counselor"))
+    [reason] = result.reasons
+    assert (reason.policy_name, reason.statement.sid, reason.layer, reason.principal_match) == (
+        BUCKET, "Counselor", RESOURCE, PrincipalMatch.USER
+    )
+
+
+def test_a_bucket_policy_deny_wins():
+    result = with_bucket_policy(get_by(KWONG), [BROAD_S3], grant("*", effect="Deny", sid="NoOne"))
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert reasons(result) == [(BUCKET, "NoOne", RESOURCE)]
+
+
+def test_a_deny_naming_the_account_covers_its_users():
+    deny_account = grant({"AWS": "111122223333"}, effect="Deny")
+    result = with_bucket_policy(get_by(KWONG), [BROAD_S3], deny_account)
+    assert result.decision is Decision.EXPLICIT_DENY
+
+
+def test_a_deny_in_identity_policies_beats_a_bucket_policy_grant():
+    no_get = policy("NoGet", deny("s3:GetObject", "*"))
+    assert with_bucket_policy(get_by(KWONG), [no_get], grant({"AWS": KWONG})).decision is (
+        Decision.EXPLICIT_DENY
+    )
+
+
+def test_not_allowed_by_lists_the_bucket_policy_when_it_grants_nothing():
+    result = with_bucket_policy(get_by(KWONG), [NO_S3], grant({"AWS": "444455556666"}))
+    assert result.not_allowed_by == (IDENTITY, RESOURCE)
+
+
+def test_not_allowed_by_names_only_the_boundary_for_a_role_grant():
+    result = with_bucket_policy(get_by(CAMPUS_APP), [NO_S3], grant({"AWS": CAMPUS_APP}),
+                                boundary=NO_S3)
+    assert result.not_allowed_by == (BOUNDARY,)
+
+
+def test_not_allowed_by_doesnt_list_a_delegating_bucket_policy():
+    result = with_bucket_policy(get_by(KWONG), [NO_S3], grant({"AWS": "111122223333"}))
+    assert result.not_allowed_by == (IDENTITY,)
+
+
+def test_scps_still_limit_a_bucket_policy_grant():
+    ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
+    result = with_bucket_policy(get_by(KWONG), [], grant({"AWS": KWONG}),
+                                scps=org_path(ou=[ec2_only]))
+    assert result.decision is Decision.IMPLICIT_DENY
+    # The bucket policy isn't listed: no grant gets a request past an SCP.
+    assert result.not_allowed_by == (scp(SCHOOLS),)
+
+
+def test_the_caller_is_needed_unless_the_principal_is_everyone():
+    anonymous_context = Request(action="s3:GetObject", resource=OBJECT)
+    with pytest.raises(MissingContextError) as exc:
+        with_bucket_policy(anonymous_context, [], grant({"AWS": KWONG}, sid="Counselor"))
+    assert exc.value.keys == ("aws:PrincipalArn",)
+    assert f"aws:PrincipalArn, used by {BUCKET} statement 0 (Sid=Counselor)" in str(exc.value)
+    assert with_bucket_policy(anonymous_context, [], grant("*")).allowed
+
+
+def test_condition_keys_are_needed_only_once_the_principal_matches():
+    on_campus = grant({"AWS": "arn:aws:iam::111122223333:user/jsmith"},
+                      Condition={"IpAddress": {"aws:SourceIp": "10.0.0.0/8"}})
+    # The statement is about jsmith, so kwong's request doesn't need aws:SourceIp.
+    assert with_bucket_policy(get_by(KWONG), [BROAD_S3], on_campus).allowed
+
+
+def test_a_refused_principal_only_matters_when_the_statement_could_apply():
+    canonical = {"CanonicalUser": "79a59df900b949e55d96a1e698fbacedfd6e09d98eacf8f8d5218e7cd47ef"}
+    off_campus = {"IpAddress": {"aws:SourceIp": "10.0.0.0/8"}}
+    deny = grant(canonical, effect="Deny", Condition=off_campus)
+    outside = get_by(KWONG, ("aws:SourceIp", "198.51.100.7"))
+    assert with_bucket_policy(outside, [BROAD_S3], deny).allowed  # the condition fails
+    inside = get_by(KWONG, ("aws:SourceIp", "10.1.2.3"))
+    with pytest.raises(UnsupportedPolicyFeature, match="S3 canonical user IDs"):
+        with_bucket_policy(inside, [BROAD_S3], deny)
+
+
+def test_a_direct_match_makes_a_refused_principal_moot():
+    principal = {"AWS": KWONG, "CanonicalUser": "79a59df900b949e5"}
+    assert with_bucket_policy(get_by(KWONG), [], grant(principal)).allowed
+
+
+def test_principals_the_analyzer_cannot_check_are_refused():
+    session = "arn:aws:sts::111122223333:assumed-role/CampusApp/nightly-export"
+    lowercase = CAMPUS_APP.replace("CampusApp", "campusapp")
+    cases = [
+        (CAMPUS_APP, {"AWS": session}, "doesn't know the session's name"),
+        (CAMPUS_APP, {"AWS": lowercase}, "only if case is ignored"),
+        (KWONG, {"AWS": "AIDAJQABLZS4A3QDU576Q"}, "is an IAM unique ID"),
+    ]
+    for caller, principal, message in cases:
+        with pytest.raises(UnsupportedPolicyFeature, match=message):
+            with_bucket_policy(get_by(caller), [], grant(principal))
+
+
+def test_a_session_of_another_role_is_not_the_caller():
+    other = {"AWS": "arn:aws:sts::111122223333:assumed-role/OtherApp/nightly-export"}
+    assert with_bucket_policy(get_by(CAMPUS_APP), [], grant(other)).decision is (
+        Decision.IMPLICIT_DENY
+    )
+
+
+def test_resource_based_policies_are_for_iam_users_and_role_sessions():
+    root = get_by("arn:aws:iam::111122223333:root")
+    with pytest.raises(UnsupportedPolicyFeature, match="IAM users and role sessions"):
+        with_bucket_policy(root, [], grant({"AWS": KWONG}))
 
 
 # --- Data-driven scenarios -------------------------------------------------------------
@@ -659,10 +844,11 @@ def test_scenario(path):
         )
     resource = None
     if "resource_policy" in scenario:
-        # null says the resource has no resource-based policy, as --no-resource-policy does.
-        assert scenario["resource_policy"] is None, "resource-based policies aren't supported yet"
+        # A policy, or null for none, as --resource-policy and --no-resource-policy say.
         asked = scenario["request"]
-        resource = resources.describe(asked["resource"], asked["action"])
+        resource = resources.describe(
+            asked["resource"], asked["action"], scenario["resource_policy"], name="resource_policy"
+        )
     context = scenario_context(scenario.get("context", {}))
     request = Request(**scenario["request"], context=context)
     result = evaluate(request, policies, boundary=boundary, scps=scps, resource=resource)

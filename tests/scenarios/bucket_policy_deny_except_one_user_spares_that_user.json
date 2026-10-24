@@ -1,0 +1,43 @@
+{
+  "description": "The same Deny doesn't apply to the user its condition names.",
+  "policies": {
+    "admin.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": "*"
+        }
+      ]
+    }
+  },
+  "resource_policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Sid": "UsePrincipalArnInsteadOfNotPrincipalWithDeny",
+        "Effect": "Deny",
+        "Action": "s3:*",
+        "Principal": "*",
+        "Resource": [
+          "arn:aws:s3:::district-kwong-files/*",
+          "arn:aws:s3:::district-kwong-files"
+        ],
+        "Condition": {
+          "ArnNotEquals": {
+            "aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"
+          }
+        }
+      }
+    ]
+  },
+  "context": {
+    "aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-kwong-files/notes.txt"
+  },
+  "expected": "ALLOW"
+}

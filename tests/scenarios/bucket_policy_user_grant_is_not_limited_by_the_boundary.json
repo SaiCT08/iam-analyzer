@@ -1,0 +1,38 @@
+{
+  "description": "A bucket policy that names a user isn't limited by the user's permissions boundary.",
+  "policies": {},
+  "boundary": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "ec2:*",
+        "Resource": "*"
+      }
+    ]
+  },
+  "resource_policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::111122223333:user/kwong"
+        },
+        "Action": "s3:GetObject",
+        "Resource": [
+          "arn:aws:s3:::district-kwong-files/*",
+          "arn:aws:s3:::district-kwong-files"
+        ]
+      }
+    ]
+  },
+  "context": {
+    "aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"
+  },
+  "request": {
+    "action": "s3:GetObject",
+    "resource": "arn:aws:s3:::district-kwong-files/notes.txt"
+  },
+  "expected": "ALLOW"
+}

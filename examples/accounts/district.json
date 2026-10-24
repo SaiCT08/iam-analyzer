@@ -211,7 +211,8 @@
           "Value": "campus-02"
         }
       ]
-    }
+    },
+    "kwong": {}
   },
   "Roles": {
     "ITAdmin": {
@@ -228,7 +229,37 @@
     }
   },
   "Resources": {
-    "arn:aws:s3:::district-student-records": {},
+    "arn:aws:s3:::district-student-records": {
+      "Policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "OnlyITAdminChangesThePolicy",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": [
+              "s3:PutBucketPolicy",
+              "s3:DeleteBucketPolicy"
+            ],
+            "Resource": "arn:aws:s3:::district-student-records",
+            "Condition": {
+              "ArnNotEquals": {
+                "aws:PrincipalArn": "arn:aws:iam::111122223333:role/ITAdmin"
+              }
+            }
+          },
+          {
+            "Sid": "CounselorsReadCounselingNotes",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111122223333:user/kwong"
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::district-student-records/counseling/*"
+          }
+        ]
+      }
+    },
     "arn:aws:s3:::district-staff-files": {},
     "arn:aws:s3:::district-gradebook-app": {}
   }

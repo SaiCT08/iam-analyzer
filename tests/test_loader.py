@@ -4,7 +4,7 @@ import pytest
 
 from iam_analyzer.errors import PolicyParseError, UnsupportedPolicyFeature
 from iam_analyzer.loader import load_policy, load_policy_file, parse_policy
-from iam_analyzer.models import Effect
+from iam_analyzer.models import Effect, PolicyType, Principal, PrincipalType
 
 READ = {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}
 
@@ -252,24 +252,108 @@ def test_invalid_policy_variables_are_refused(statement, error, message):
 
 
 def test_id_is_only_for_resource_based_policies():
-    with pytest.raises(UnsupportedPolicyFeature, match="'Id' is only allowed in resource-based"):
+    with pytest.raises(PolicyParseError, match="^p: 'Id' is only allowed in resource-based"):
         parse_policy({"Id": "cd3ad3d9-2776-4ef1-a904-4c229d1642ee", "Statement": [READ]}, name="p")
 
 
 @pytest.mark.parametrize("element", ["Principal", "NotPrincipal"])
 def test_principal_is_only_for_resource_based_policies(element):
-    with pytest.raises(UnsupportedPolicyFeature, match=f"'{element}' is only allowed in resource-based"):
-        parse_policy({"Statement": [{**READ, element: "*"}]}, name="p")
+    statement = {"Sid": "S1", **READ, element: "*"}
+    message = f"^p statement 0 \\(Sid=S1\\): '{element}' is only allowed in resource-based"
+    with pytest.raises(PolicyParseError, match=message):
+        parse_policy({"Statement": [statement]}, name="p")
+
+
+# --- Resource-based policies -----------------------------------------------------------
+
+BUCKET_READ = {
+    "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::b/*",
+}
+KWONG = "arn:aws:iam::111122223333:user/kwong"
+
+
+def resource_policy(*statements, **top):
+    document = {"Statement": list(statements), **top}
+    return parse_policy(document, name="bucket", kind=PolicyType.RESOURCE_BASED)
+
+
+def test_principals_are_read():
+    principal = {"AWS": ["111122223333", KWONG], "Service": "cloudtrail.amazonaws.com"}
+    [statement] = resource_policy({**BUCKET_READ, "Principal": principal}).statements
+    assert statement.principals == (
+        Principal(PrincipalType.AWS, "111122223333"),
+        Principal(PrincipalType.AWS, KWONG),
+        Principal(PrincipalType.SERVICE, "cloudtrail.amazonaws.com"),
+    )
+
+
+def test_star_is_the_same_as_aws_star():
+    # AWS documents "Principal": "*" and {"AWS": "*"} as the same thing.
+    for principal in ("*", {"AWS": "*"}):
+        [statement] = resource_policy({**BUCKET_READ, "Principal": principal}).statements
+        assert statement.principals == (Principal(PrincipalType.AWS, "*"),)
+
+
+def test_identity_policies_have_no_principals():
+    assert parse_policy({"Statement": [READ]}, name="p").statements[0].principals is None
+
+
+def test_id_is_allowed_in_resource_based_policies():
+    resource_policy(BUCKET_READ, Id="cd3ad3d9-2776-4ef1-a904-4c229d1642ee")
+    with pytest.raises(PolicyParseError, match="'Id' must be a string"):
+        resource_policy(BUCKET_READ, Id=7)
 
 
 @pytest.mark.parametrize(
-    "element, value",
+    "changes, error, message",
     [
-        ("Principal", "*"),
-        ("NotPrincipal", "*"),
+        ({"Principal": None}, PolicyParseError, "statement needs a 'Principal'"),
+        ({"NotPrincipal": "*"}, PolicyParseError, "cannot have both 'Principal' and"),
+        (
+            {"Principal": None, "NotPrincipal": {"AWS": KWONG}},
+            PolicyParseError,
+            "AWS only allows 'NotPrincipal' with \"Effect\": \"Deny\"",
+        ),
+        (
+            {"Principal": None, "NotPrincipal": {"AWS": KWONG}, "Effect": "Deny"},
+            UnsupportedPolicyFeature,
+            "'NotPrincipal' isn't supported yet",
+        ),
+        ({"Principal": "111122223333"}, PolicyParseError, "must be \"\\*\" or a non-empty JSON"),
+        ({"Principal": {}}, PolicyParseError, "must be \"\\*\" or a non-empty JSON"),
+        ({"Principal": {"Group": "Teachers"}}, PolicyParseError, "unknown principal type 'Group'"),
+        ({"Principal": {"AWS": []}}, PolicyParseError, "needs a string or a non-empty list"),
+        ({"Principal": {"AWS": ""}}, PolicyParseError, "needs a string or a non-empty list"),
+        (
+            {"Principal": {"AWS": "arn:aws:iam::111122223333:user/*"}},
+            PolicyParseError,
+            "AWS doesn't allow a wildcard in part of a principal",
+        ),
+        ({"Principal": {"AWS": "arn:aws:iam::*:root"}}, PolicyParseError, "wildcard"),
+        ({"Principal": {"Service": "*"}}, PolicyParseError, "'Service' can't be \"\\*\""),
+        (
+            {"Principal": {"AWS": "arn:aws:iam::111122223333:group/Teachers"}},
+            PolicyParseError,
+            "isn't an AWS principal",
+        ),
+        ({"Principal": {"AWS": "jsmith"}}, PolicyParseError, "isn't an AWS principal"),
+        ({"Principal": {"AWS": "1111-2222-3333"}}, PolicyParseError, "isn't an AWS principal"),
     ],
 )
-def test_unsupported_elements_are_rejected(element, value):
-    statement = {"Sid": "S1", "Effect": "Deny", "Action": "*", "Resource": "*", element: value}
-    with pytest.raises(UnsupportedPolicyFeature, match=f"Sid=S1.*'{element}'"):
-        parse_policy({"Statement": [statement]}, name="p")
+def test_invalid_resource_based_statements(changes, error, message):
+    statement = {**BUCKET_READ, **changes}
+    statement = {key: value for key, value in statement.items() if value is not None}
+    with pytest.raises(error, match=message):
+        resource_policy(statement)
+
+
+def test_principal_forms_aws_documents_are_accepted():
+    principals = {"AWS": [
+        "*", "111122223333", "arn:aws:iam::111122223333:root", KWONG,
+        "arn:aws:iam::111122223333:role/district/CampusApp",
+        "arn:aws:sts::111122223333:assumed-role/CampusApp/session-1",
+        "arn:aws:sts::111122223333:federated-user/bob",
+        "AIDAJQABLZS4A3QDU576Q",  # what AWS shows for a principal that was deleted
+    ], "Federated": "cognito-identity.amazonaws.com", "CanonicalUser": "79a59df900b949e5"}
+    [statement] = resource_policy({**BUCKET_READ, "Principal": principals}).statements
+    assert len(statement.principals) == 10

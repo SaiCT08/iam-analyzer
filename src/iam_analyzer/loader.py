@@ -12,10 +12,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from iam_analyzer import _validation, conditions, variables
+from iam_analyzer import _validation, conditions, principals, variables
 from iam_analyzer.context import CONDITION_KEY
 from iam_analyzer.errors import PolicyError, PolicyParseError, UnsupportedPolicyFeature
-from iam_analyzer.models import Condition, Effect, Policy, Statement
+from iam_analyzer.models import Condition, Effect, Policy, PolicyType, Principal, Statement
 
 # The policy language versions. A policy without a Version uses the older one, which has no
 # policy variables: there, "${aws:username}" is plain text.
@@ -24,7 +24,8 @@ VERSIONS = (CURRENT_VERSION, "2008-10-17")
 TOP_LEVEL_KEYS = {"Version", "Statement"}
 
 # Elements AWS only allows in resource-based policies (such as S3 bucket policies). Identity
-# policies, permissions boundaries and SCPs, the only kinds loaded so far, can't use them.
+# policies, permissions boundaries and SCPs can't use them. In a resource-based policy, every
+# statement needs a Principal.
 RESOURCE_POLICY_ELEMENTS = ("Principal", "NotPrincipal")
 KNOWN_ELEMENTS = {
     "Sid", "Effect", "Action", "NotAction", "Resource", "NotResource", "Condition",
@@ -37,29 +38,38 @@ _SID = re.compile(r"[A-Za-z0-9]*")
 _ACTION = re.compile(r"\*|[A-Za-z0-9-]+:.+")
 
 
-def load_policy_file(path: str | Path) -> Policy:
+def load_policy_file(path: str | Path, *, kind: PolicyType = PolicyType.IDENTITY) -> Policy:
     """Load a policy from a JSON file. The policy is named after the file."""
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise PolicyParseError(f"{path}: cannot read file: {exc.strerror}") from exc
-    return load_policy(text, name=path.name)
+    return load_policy(text, name=path.name, kind=kind)
 
 
-def load_policy(text: str, name: str) -> Policy:
+def load_policy(text: str, name: str, *, kind: PolicyType = PolicyType.IDENTITY) -> Policy:
     """Load a policy from a JSON string."""
     document = _validation.load_json(text, name, error=PolicyParseError)
-    return parse_policy(document, name=name)
+    return parse_policy(document, name=name, kind=kind)
 
 
-def parse_policy(document: Any, name: str) -> Policy:
-    """Build a Policy from an already-decoded JSON document."""
+def parse_policy(document: Any, name: str, *, kind: PolicyType = PolicyType.IDENTITY) -> Policy:
+    """Build a Policy from an already-decoded JSON document.
+
+    `kind` is PolicyType.RESOURCE_BASED for a resource-based policy, such as an S3 bucket policy,
+    which may have an Id and whose statements need a Principal. Identity policies, permissions
+    boundaries and SCPs (every other kind) can have neither.
+    """
+    resource_based = kind is PolicyType.RESOURCE_BASED
     if not isinstance(document, dict):
         raise PolicyParseError(f"{name}: policy must be a JSON object")
     if "Id" in document:
-        raise _resource_policy_only("Id", name)
-    unknown = set(document) - TOP_LEVEL_KEYS
+        if not resource_based:
+            raise _resource_policy_only("Id", name)
+        if not isinstance(document["Id"], str):
+            raise PolicyParseError(f"{name}: 'Id' must be a string, got {document['Id']!r}")
+    unknown = set(document) - TOP_LEVEL_KEYS - {"Id"}
     if unknown:
         raise PolicyParseError(f"{name}: unknown top-level key(s): {', '.join(sorted(unknown))}")
     version = document.get("Version")
@@ -74,14 +84,14 @@ def parse_policy(document: Any, name: str) -> Policy:
     if not raw_statements:
         raise PolicyParseError(f"{name}: 'Statement' must not be empty")
     statements = tuple(
-        _parse_statement(raw, f"{name} statement {index}", version)
+        _parse_statement(raw, f"{name} statement {index}", version, resource_based)
         for index, raw in enumerate(raw_statements)
     )
     _check_unique_sids(statements, name)
     return Policy(name=name, statements=statements)
 
 
-def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
+def _parse_statement(raw: Any, where: str, version: str | None, resource_based: bool) -> Statement:
     if not isinstance(raw, dict):
         raise PolicyParseError(f"{where}: statement must be a JSON object")
 
@@ -94,9 +104,10 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
     if sid is not None:
         where = f"{where} (Sid={sid})"
 
-    for element in RESOURCE_POLICY_ELEMENTS:
-        if element in raw:
-            raise _resource_policy_only(element, where)
+    if not resource_based:
+        for element in RESOURCE_POLICY_ELEMENTS:
+            if element in raw:
+                raise _resource_policy_only(element, where)
     unknown = set(raw) - KNOWN_ELEMENTS
     if unknown:
         raise PolicyParseError(f"{where}: unknown element(s): {', '.join(sorted(unknown))}")
@@ -107,6 +118,7 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
         raise PolicyParseError(
             f"{where}: 'Effect' must be \"Allow\" or \"Deny\", got {raw.get('Effect')!r}"
         ) from None
+    statement_principals = _principals(raw, effect, where) if resource_based else None
 
     actions, not_action = _patterns(raw, "Action", "NotAction", where)
     action_key = "NotAction" if not_action else "Action"
@@ -128,7 +140,27 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
         not_resource=not_resource,
         policy_variables=policy_variables,
         conditions=parsed_conditions,
+        principals=statement_principals,
     )
+
+
+def _principals(raw: dict, effect: Effect, where: str) -> tuple[Principal, ...]:
+    """Read the Principal that a resource-based policy's statement needs. NotPrincipal is
+    refused."""
+    if "Principal" in raw and "NotPrincipal" in raw:
+        raise PolicyParseError(f"{where}: cannot have both 'Principal' and 'NotPrincipal'")
+    if "NotPrincipal" in raw:
+        if effect is Effect.ALLOW:
+            raise PolicyParseError(
+                f"{where}: AWS only allows 'NotPrincipal' with \"Effect\": \"Deny\""
+            )
+        raise UnsupportedPolicyFeature(
+            f"{where}: 'NotPrincipal' isn't supported yet: AWS says which principals it checks "
+            "depends on the service, and recommends aws:PrincipalArn conditions instead"
+        )
+    if "Principal" not in raw:
+        raise PolicyParseError(f"{where}: a resource-based policy's statement needs a 'Principal'")
+    return principals.parse(raw["Principal"], where)
 
 
 def _patterns(raw: dict, key: str, not_key: str, where: str) -> tuple[tuple[str, ...], bool]:
@@ -253,11 +285,8 @@ def _check_unique_sids(statements: tuple[Statement, ...], name: str) -> None:
             seen.add(statement.sid)
 
 
-def _resource_policy_only(element: str, where: str) -> UnsupportedPolicyFeature:
-    return UnsupportedPolicyFeature(
-        f"{where}: '{element}' is only allowed in resource-based policies, "
-        "which the analyzer does not support yet"
-    )
+def _resource_policy_only(element: str, where: str) -> PolicyParseError:
+    return PolicyParseError(f"{where}: '{element}' is only allowed in resource-based policies")
 
 
 def _as_list(value: Any) -> list:

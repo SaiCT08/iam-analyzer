@@ -1,6 +1,7 @@
 """Command-line interface.
 
-    iam-analyzer check --policy FILE [--policy FILE ...] [--boundary FILE] [--no-resource-policy]
+    iam-analyzer check --policy FILE [--policy FILE ...] [--boundary FILE]
+                       [--resource-policy FILE | --no-resource-policy]
                        --action ACTION --resource ARN [CONTEXT]
     iam-analyzer check --account FILE --principal user/NAME [--org FILE] [--no-session-tags]
                        --action ACTION --resource ARN [CONTEXT]
@@ -9,8 +10,11 @@ CONTEXT describes the request's condition keys:
     --context KEY=VALUE   a key's value (repeat for more keys, or for more values of one key)
     --absent KEY          a key the request doesn't include
 
-A request on a specific resource also needs the resource described: in the account file's
-Resources, or with --no-resource-policy.
+A request on a specific resource also needs the resource described. With --account, the
+account file's Resources describe it. With --policy, --resource-policy FILE gives its
+resource-based policy, such as its bucket's policy, and --no-resource-policy says it has none.
+Either flag says the resource is in the same account, and for an S3 bucket, that its ACLs are
+disabled.
 
 Exit codes: 0 = allowed, 1 = denied, 2 = input error.
 """
@@ -32,6 +36,7 @@ from iam_analyzer.models import (
     MatchedStatement,
     OrgTarget,
     PolicyType,
+    PrincipalMatch,
     Request,
     ScpLevel,
     TargetType,
@@ -48,8 +53,15 @@ MISSING_CONTEXT_HINT = (
 MISSING_RESOURCE_HINT = {
     "account": "hint: describe it in the account file's Resources, as {} if it has no "
     "resource-based policy",
-    "policy": "hint: give --no-resource-policy if it is in the same account and has no "
-    "resource-based policy",
+    "policy": "hint: give its resource-based policy with --resource-policy FILE, or "
+    "--no-resource-policy if it has none; either says it is in the same account",
+}
+# How a resource-based policy's statement named the caller.
+NAMES = {
+    PrincipalMatch.EVERYONE: "everyone",
+    PrincipalMatch.USER: "the user",
+    PrincipalMatch.ROLE: "the role",
+    PrincipalMatch.ACCOUNT: "the account",
 }
 
 
@@ -112,6 +124,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="organization JSON file with SCPs (with --account; the account file needs an "
         "AccountId)",
+    )
+    check.add_argument(
+        "--resource-policy",
+        action=_StoreOnce,
+        metavar="FILE",
+        help="with --policy: the resource-based policy on the request's resource, such as its "
+        "bucket's policy. It also says the resource is in the same account, and for an S3 "
+        "bucket, that its ACLs are disabled (Object Ownership: Bucket owner enforced)",
     )
     check.add_argument(
         "--no-resource-policy",
@@ -181,6 +201,10 @@ def _source(reason: MatchedStatement) -> str:
         source += " (permissions boundary)"
     elif reason.layer.policy_type is PolicyType.SCP:
         source += f" (SCP on {_target(reason.layer.org_target)})"
+    elif reason.layer.policy_type is PolicyType.RESOURCE_BASED:
+        resource = reason.layer.resource
+        on = "" if reason.policy_name == resource else f" on {resource}"
+        source += f" (resource-based policy{on}, names {NAMES[reason.principal_match]})"
     return source
 
 
@@ -189,6 +213,8 @@ def _not_allowed_message(layer: Layer) -> str:
         return "The permissions boundary does not allow this."
     if layer.policy_type is PolicyType.SCP:
         return f"No SCP attached to {_target(layer.org_target)} allows this."
+    if layer.policy_type is PolicyType.RESOURCE_BASED:
+        return f"The resource-based policy on {layer.resource} does not allow this either."
     return "No identity policy allows this; access is denied by default."
 
 
@@ -214,11 +240,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--org only works with --account")
     if args.no_session_tags and not args.account:
         parser.error("--no-session-tags only works with --account")
-    if args.no_resource_policy and args.account:
-        parser.error(
-            "--no-resource-policy only works with --policy; in an account file, "
-            "describe the resource in Resources"
-        )
+    for flag, given in (("--resource-policy", args.resource_policy),
+                        ("--no-resource-policy", args.no_resource_policy)):
+        if given and args.account:
+            parser.error(
+                f"{flag} only works with --policy; in an account file, describe the resource in "
+                "Resources"
+            )
+    if args.resource_policy and args.no_resource_policy:
+        parser.error("--resource-policy and --no-resource-policy can't be used together")
 
     try:
         context = RequestContext.of(args.context or (), args.absent or ())
@@ -237,7 +267,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             boundary = load_policy_file(args.boundary) if args.boundary else None
             scps = ()
             resource = None
-            if args.no_resource_policy:
+            if args.resource_policy:
+                resource = resources.load_resource_policy_file(
+                    args.resource_policy, args.resource, args.action
+                )
+            elif args.no_resource_policy:
                 resource = resources.describe(args.resource, args.action)
         request = Request(action=args.action, resource=args.resource, context=context)
         result = evaluate(request, policies, boundary=boundary, scps=scps, resource=resource)

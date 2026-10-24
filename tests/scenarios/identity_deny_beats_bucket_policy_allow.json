@@ -1,0 +1,60 @@
+{
+  "description": "AWS's same-account example: the identity policy denies every bucket with \"log\" in its name, which beats the bucket policy's Allow.",
+  "policies": {
+    "kwong.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowS3ListRead",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetBucketLocation",
+            "s3:GetAccountPublicAccessBlock",
+            "s3:ListAccessPoints",
+            "s3:ListAllMyBuckets"
+          ],
+          "Resource": "arn:aws:s3:::*"
+        },
+        {
+          "Sid": "AllowS3Self",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": [
+            "arn:aws:s3:::district-kwong-files/*",
+            "arn:aws:s3:::district-kwong-files"
+          ]
+        },
+        {
+          "Sid": "DenyS3Logs",
+          "Effect": "Deny",
+          "Action": "s3:*",
+          "Resource": "arn:aws:s3:::*log*"
+        }
+      ]
+    }
+  },
+  "resource_policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::111122223333:user/kwong"
+        },
+        "Action": "s3:*",
+        "Resource": [
+          "arn:aws:s3:::district-kwong-files-logs/*",
+          "arn:aws:s3:::district-kwong-files-logs"
+        ]
+      }
+    ]
+  },
+  "context": {
+    "aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"
+  },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-kwong-files-logs/notes.txt"
+  },
+  "expected": "EXPLICIT_DENY"
+}
