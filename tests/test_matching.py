@@ -117,3 +117,26 @@ def test_action_wildcards_are_not_split_into_segments():
 )
 def test_incomplete_arns_are_completed_with_wildcards(pattern, resource, expected):
     assert match_resource(pattern, resource) is expected
+
+
+# --- Pieces: patterns after policy variables are filled in ------------------------------
+
+
+def test_literal_pieces_are_not_wildcards():
+    pattern = (("arn:aws:s3:::district-uploads/", False), ("*?", True), ("/*", False))
+    assert match_resource(pattern, "arn:aws:s3:::district-uploads/*?/report.csv")
+    assert not match_resource(pattern, "arn:aws:s3:::district-uploads/ab/report.csv")
+    assert wildcard_match((("a", False), ("*", True)), "a*")
+    assert not wildcard_match((("a", False), ("*", True)), "ab")
+
+
+def test_the_segment_rule_looks_across_pieces():
+    # A * just before a colon ends a segment, even when the colon is in the next piece.
+    ends = (("arn:aws:s3:::b/*", False), (":x", True))
+    assert match_resource(ends, "arn:aws:s3:::b/a:b:x")
+    inside = (("arn:aws:s3:::b/*", False), ("-x", True))
+    assert not match_resource(inside, "arn:aws:s3:::b/a:b-x")
+
+
+def test_a_short_arn_in_pieces_is_completed():
+    assert match_resource((("arn:aws:", False), ("s3", True)), "arn:aws:s3:::bucket/key")

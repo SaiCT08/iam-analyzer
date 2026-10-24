@@ -12,8 +12,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from iam_analyzer import _validation
-from iam_analyzer.errors import PolicyParseError, UnsupportedPolicyFeature
+from iam_analyzer import _validation, variables
+from iam_analyzer.errors import PolicyError, PolicyParseError, UnsupportedPolicyFeature
 from iam_analyzer.models import Effect, Policy, Statement
 
 # The policy language versions. A policy without a Version uses the older one, which has no
@@ -36,8 +36,6 @@ KNOWN_ELEMENTS = {
 _SID = re.compile(r"[A-Za-z0-9]*")
 # An action is "*" or starts with a service prefix: "s3:GetObject", "ec2:Describe*".
 _ACTION = re.compile(r"\*|[A-Za-z0-9-]+:.+")
-# A policy variable such as ${aws:username}, ${*} or ${aws:PrincipalTag/team, 'default'}.
-_POLICY_VARIABLE = re.compile(r"\$\{[^}]*\}")
 
 
 def load_policy_file(path: str | Path) -> Policy:
@@ -115,10 +113,13 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
         ) from None
 
     actions, not_action = _patterns(raw, "Action", "NotAction", where)
-    _check_actions(actions, "NotAction" if not_action else "Action", where)
+    action_key = "NotAction" if not_action else "Action"
+    _check_actions(actions, action_key, where)
     resources, not_resource = _patterns(raw, "Resource", "NotResource", where)
-    if version == CURRENT_VERSION:
-        _refuse_policy_variables(resources, "NotResource" if not_resource else "Resource", where)
+    policy_variables = version == CURRENT_VERSION
+    if policy_variables:
+        _check_no_variables(actions, action_key, where)
+        _check_variables(resources, "NotResource" if not_resource else "Resource", where)
     return Statement(
         effect=effect,
         actions=actions,
@@ -126,6 +127,7 @@ def _parse_statement(raw: Any, where: str, version: str | None) -> Statement:
         sid=sid,
         not_action=not_action,
         not_resource=not_resource,
+        policy_variables=policy_variables,
     )
 
 
@@ -158,15 +160,33 @@ def _check_actions(actions: tuple[str, ...], key: str, where: str) -> None:
             )
 
 
-def _refuse_policy_variables(resources: tuple[str, ...], key: str, where: str) -> None:
-    """With Version 2012-10-17, AWS replaces ${...} in a resource with a value from the
-    request, such as the caller's user name. The analyzer can't do that yet, and matching the
-    text literally would give wrong answers, so it refuses."""
+def _check_variables(resources: tuple[str, ...], key: str, where: str) -> None:
+    """Check the policy variables in a Resource or NotResource list (Version 2012-10-17).
+
+    AWS only allows them in the resource part of an ARN, after the fifth colon, so a variable
+    can't stand for the service or the account.
+    """
     for resource in resources:
-        variable = _POLICY_VARIABLE.search(resource)
-        if variable:
-            raise UnsupportedPolicyFeature(
-                f"{where}: policy variable {variable.group()!r} in '{key}' is not supported yet"
+        if "${" not in resource:
+            continue
+        try:
+            variables.parse(resource)
+        except PolicyError as exc:
+            raise type(exc)(f"{where}: '{key}': {exc}") from None
+        before = resource[: resource.index("${")]
+        if not (before.startswith("arn:") and before.count(":") >= 5):
+            raise PolicyParseError(
+                f"{where}: '{key}' entry {resource!r}: policy variables can only be used in the "
+                "resource part of an ARN, after the fifth colon"
+            )
+
+
+def _check_no_variables(actions: tuple[str, ...], key: str, where: str) -> None:
+    """AWS only fills in policy variables in resources and condition values, never in actions."""
+    for action in actions:
+        if "${" in action:
+            raise PolicyParseError(
+                f"{where}: '{key}' entry {action!r}: policy variables can't be used in actions"
             )
 
 

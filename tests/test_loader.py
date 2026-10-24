@@ -1,5 +1,4 @@
 import json
-import re
 
 import pytest
 
@@ -167,12 +166,13 @@ def test_both_policy_language_versions_are_accepted():
 @pytest.mark.parametrize(
     "variable", ["${aws:username}", "${*}", "${aws:PrincipalTag/team, 'staff'}"]
 )
-def test_policy_variables_are_refused_with_version_2012_10_17(key, variable):
-    statement = {"Effect": "Allow", "Action": "s3:GetObject", key: f"arn:aws:s3:::home/{variable}/*"}
+def test_policy_variables_are_read_with_version_2012_10_17(key, variable):
+    resource = f"arn:aws:s3:::home/{variable}/*"
+    statement = {"Effect": "Allow", "Action": "s3:GetObject", key: resource}
     document = {"Version": "2012-10-17", "Statement": [statement]}
-    message = f"p statement 0: policy variable {variable!r} in '{key}' is not supported yet"
-    with pytest.raises(UnsupportedPolicyFeature, match=re.escape(message)):
-        parse_policy(document, name="p")
+    [parsed] = parse_policy(document, name="p").statements
+    assert parsed.policy_variables
+    assert parsed.resources == (resource,)  # filled in when a request is evaluated
 
 
 @pytest.mark.parametrize("version", [None, "2008-10-17"])
@@ -181,7 +181,42 @@ def test_policy_variables_are_plain_text_without_version_2012_10_17(version):
     document = {"Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": resource}]}
     if version is not None:
         document["Version"] = version
-    assert parse_policy(document, name="p").statements[0].resources == (resource,)
+    [statement] = parse_policy(document, name="p").statements
+    assert statement.resources == (resource,)
+    assert not statement.policy_variables
+
+
+@pytest.mark.parametrize(
+    "statement, error, message",
+    [
+        (
+            {**READ, "Resource": "arn:aws:s3:::home/${username}/*"},
+            PolicyParseError,
+            "p statement 0: 'Resource': malformed policy variable",
+        ),
+        # AWS only allows variables in the resource part of an ARN, after the fifth colon.
+        (
+            {**READ, "Resource": "arn:aws:iam::${aws:PrincipalAccount}:user/x"},
+            PolicyParseError,
+            "after the fifth colon",
+        ),
+        ({**READ, "Resource": "${aws:username}"}, PolicyParseError, "after the fifth colon"),
+        (
+            {"Effect": "Allow", "Action": "s3:GetObject", "NotResource": "arn:aws:s3:${*}::b"},
+            PolicyParseError,
+            "'NotResource' entry 'arn:aws:s3:\\$\\{\\*\\}::b': policy variables can only be used",
+        ),
+        ({**READ, "Action": "s3:${aws:username}"}, PolicyParseError, "can't be used in actions"),
+        (
+            {**READ, "Resource": "arn:aws:s3:::b/${aws:PrincipalTag/team, 'team-*'}"},
+            UnsupportedPolicyFeature,
+            "contains \\* or \\?",
+        ),
+    ],
+)
+def test_invalid_policy_variables_are_refused(statement, error, message):
+    with pytest.raises(error, match=message):
+        parse_policy({"Version": "2012-10-17", "Statement": [statement]}, name="p")
 
 
 def test_id_is_only_for_resource_based_policies():

@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
+from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import RequestError
 
 # One concrete action: a service prefix, a colon, and a name with no wildcards.
@@ -49,6 +50,9 @@ class Statement:
 
     `not_action` / `not_resource` mean the statement used NotAction / NotResource: the
     patterns list what the statement does NOT cover, and it applies to everything else.
+
+    `policy_variables` is True when the policy has "Version": "2012-10-17". Then ${...} in a
+    resource is a policy variable that AWS fills in from the request; otherwise it is plain text.
     """
 
     effect: Effect
@@ -57,6 +61,7 @@ class Statement:
     sid: str | None = None
     not_action: bool = False
     not_resource: bool = False
+    policy_variables: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,10 +84,14 @@ class Request:
     Like a real AWS request, it names one concrete action ("s3:GetObject"), never a pattern
     such as "s3:*". A pattern would be matched as literal text, so a policy's "s3:*" would
     match it while a Deny on "s3:DeleteObject" would not: a wrong answer.
+
+    `context` holds the request's condition keys, such as aws:username, which policy
+    variables read. By default it knows nothing, which is enough for policies without them.
     """
 
     action: str
     resource: str
+    context: RequestContext = field(default_factory=RequestContext)
 
     def __post_init__(self) -> None:
         if not _CONCRETE_ACTION.fullmatch(self.action):

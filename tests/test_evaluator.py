@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from iam_analyzer.errors import RequestError
+from iam_analyzer.context import RequestContext
+from iam_analyzer.errors import MissingContextError, RequestError, UnsupportedPolicyFeature
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import parse_policy
 from iam_analyzer.models import Decision, Layer, OrgTarget, PolicyType, Request, ScpLevel, TargetType
@@ -372,10 +373,104 @@ def test_boundary_and_scps_are_both_checked_in_order():
     assert result.not_allowed_by == (BOUNDARY, scp(ROOT))
 
 
+# --- Policy variables and the request context ------------------------------------------
+
+HOME = "arn:aws:s3:::district-staff-files/home"
+OWN_HOME = f"{HOME}/${{aws:username}}/*"
+
+
+def versioned(name, *statements):
+    """A policy with "Version": "2012-10-17", where ${...} is a policy variable."""
+    return parse_policy({"Version": "2012-10-17", "Statement": list(statements)}, name=name)
+
+
+def home_request(folder, values=(), absent=()):
+    context = RequestContext.of(values, absent)
+    return Request(action="s3:GetObject", resource=f"{HOME}/{folder}/a.txt", context=context)
+
+
+JSMITH = [("aws:username", "jsmith")]
+
+
+def test_policy_variable_is_filled_in_from_the_context():
+    p = versioned("home", allow("s3:GetObject", OWN_HOME))
+    assert evaluate(home_request("jsmith", JSMITH), [p]).decision is Decision.ALLOW
+    assert evaluate(home_request("mgarcia", JSMITH), [p]).decision is Decision.IMPLICIT_DENY
+
+
+def test_deny_with_a_policy_variable_applies():
+    p = versioned("p", allow("s3:*", "*"), deny("s3:GetObject", OWN_HOME, sid="NotOwnFolder"))
+    result = evaluate(home_request("jsmith", JSMITH), [p])
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert [r.statement.sid for r in result.reasons] == ["NotOwnFolder"]
+
+
+def test_not_resource_with_a_policy_variable():
+    # Deny reads anywhere except the caller's own home folder.
+    p = versioned(
+        "p", allow("s3:*", "*"), statement("Deny", Action="s3:GetObject", NotResource=OWN_HOME)
+    )
+    assert evaluate(home_request("jsmith", JSMITH), [p]).decision is Decision.ALLOW
+    assert evaluate(home_request("mgarcia", JSMITH), [p]).decision is Decision.EXPLICIT_DENY
+
+
+def test_policy_variables_work_in_boundaries_and_scps():
+    own_only = versioned("OwnHomeOnly", allow("s3:*", OWN_HOME))
+    for kwargs in ({"boundary": own_only}, {"scps": org_path(ou=[own_only])}):
+        assert evaluate(home_request("jsmith", JSMITH), [BROAD_S3], **kwargs).allowed
+        result = evaluate(home_request("mgarcia", JSMITH), [BROAD_S3], **kwargs)
+        assert result.decision is Decision.IMPLICIT_DENY
+
+
+def test_missing_keys_are_all_named_with_the_statements_that_use_them():
+    identity = versioned("home", allow("s3:GetObject", OWN_HOME, sid="Own"))
+    boundary = versioned(
+        "teams",
+        allow("s3:*", f"{HOME}/${{aws:PrincipalTag/team}}/*"),
+        allow("s3:*", f"{HOME}/${{AWS:Username}}/*"),
+    )
+    with pytest.raises(MissingContextError) as exc:
+        evaluate(home_request("jsmith"), [identity], boundary=boundary)
+    assert exc.value.keys == ("aws:username", "aws:PrincipalTag/team")
+    assert str(exc.value) == (
+        "the request context says nothing about these condition keys:\n"
+        "  aws:username, used by home statement 0 (Sid=Own); teams statement 1\n"
+        "  aws:PrincipalTag/team, used by teams statement 0"
+    )
+
+
+def test_keys_are_only_needed_when_the_action_matches():
+    p = versioned("p", allow("s3:PutObject", OWN_HOME), allow("s3:GetObject", "*"))
+    assert evaluate(home_request("jsmith"), [p]).decision is Decision.ALLOW
+
+
+def test_a_variable_with_no_value_is_refused_naming_the_statement():
+    p = versioned("home", allow("s3:GetObject", OWN_HOME, sid="Own"))
+    message = r"^home statement 0 \(Sid=Own\): policy variable '\$\{aws:username\}' has no value"
+    with pytest.raises(UnsupportedPolicyFeature, match=message):
+        evaluate(home_request("jsmith", absent=["aws:username"]), [p])
+
+
+def test_without_variables_the_context_is_never_read():
+    # GET has an empty context, and nothing here uses a policy variable.
+    assert evaluate(GET, [versioned("p", allow("s3:GetObject", OBJECT))]).allowed
+
+
 # --- Data-driven scenarios -------------------------------------------------------------
 
 SCENARIO_DIR = Path(__file__).parent / "scenarios"
 SCENARIOS = sorted(SCENARIO_DIR.glob("*.json"))
+
+
+def scenario_context(entries):
+    """A scenario's "context": {"key": "value" or ["value", ...], or null when absent}."""
+    values = []
+    for key, value in entries.items():
+        if value == []:
+            raise ValueError(f"{key}: give at least one value, or null when the key is absent")
+        if value is not None:
+            values += [(key, v) for v in (value if isinstance(value, list) else [value])]
+    return RequestContext.of(values, [key for key, value in entries.items() if value is None])
 
 
 @pytest.mark.parametrize("path", SCENARIOS, ids=[p.stem for p in SCENARIOS])
@@ -391,6 +486,7 @@ def test_scenario(path):
         scps = organization.scp_levels_for(
             scenario["account_id"], service_linked=scenario.get("service_linked", False)
         )
-    request = Request(**scenario["request"])
+    context = scenario_context(scenario.get("context", {}))
+    request = Request(**scenario["request"], context=context)
     result = evaluate(request, policies, boundary=boundary, scps=scps)
     assert result.decision is Decision(scenario["expected"]), scenario.get("description")

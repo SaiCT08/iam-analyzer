@@ -1,9 +1,13 @@
 """Command-line interface.
 
     iam-analyzer check --policy FILE [--policy FILE ...] [--boundary FILE]
-                       --action ACTION --resource ARN
-    iam-analyzer check --account FILE --principal user/NAME [--org FILE]
-                       --action ACTION --resource ARN
+                       --action ACTION --resource ARN [CONTEXT]
+    iam-analyzer check --account FILE --principal user/NAME [--org FILE] [--no-session-tags]
+                       --action ACTION --resource ARN [CONTEXT]
+
+CONTEXT describes the request's condition keys:
+    --context KEY=VALUE   a key's value (repeat for more keys, or for more values of one key)
+    --absent KEY          a key the request doesn't include
 
 Exit codes: 0 = allowed, 1 = denied, 2 = input error.
 """
@@ -13,7 +17,8 @@ import sys
 from collections.abc import Sequence
 
 from iam_analyzer.account import Account, load_account_file
-from iam_analyzer.errors import AccountError, PolicyError
+from iam_analyzer.context import RequestContext
+from iam_analyzer.errors import AccountError, MissingContextError, PolicyError
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import load_policy_file
 from iam_analyzer.models import (
@@ -31,6 +36,10 @@ from iam_analyzer.organization import load_organization_file
 EXIT_ALLOWED = 0
 EXIT_DENIED = 1
 EXIT_INPUT_ERROR = 2
+MISSING_CONTEXT_HINT = (
+    "hint: give each key a value with --context KEY=VALUE, "
+    "or use --absent KEY if the request doesn't include it"
+)
 
 
 class _StoreOnce(argparse.Action):
@@ -44,6 +53,14 @@ class _StoreOnce(argparse.Action):
         if getattr(namespace, self.dest) is not None:
             parser.error(f"{option_string} can only be given once")
         setattr(namespace, self.dest, values)
+
+
+def _key_value(text: str) -> tuple[str, str]:
+    """Split a --context argument at its first "=", so values may contain "=" themselves."""
+    key, equals, value = text.partition("=")
+    if not equals or not key:
+        raise argparse.ArgumentTypeError(f"expected KEY=VALUE, got {text!r}")
+    return key, value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -85,9 +102,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="organization JSON file with SCPs (with --account; the account file needs an "
         "AccountId)",
     )
+    check.add_argument(
+        "--no-session-tags",
+        action="store_true",
+        help="with --account: a role's session has no session tags, so the role's own tags are "
+        "its only aws:PrincipalTag keys",
+    )
     check.add_argument("--action", action=_StoreOnce, required=True, help="e.g. s3:GetObject")
     check.add_argument(
         "--resource", action=_StoreOnce, required=True, help="e.g. arn:aws:s3:::bucket/key"
+    )
+    check.add_argument(
+        "--context",
+        action="append",
+        type=_key_value,
+        metavar="KEY=VALUE",
+        help="a condition key's value in the request, e.g. aws:username=jsmith (repeat for more "
+        "keys, or for more values of one key)",
+    )
+    check.add_argument(
+        "--absent",
+        action="append",
+        metavar="KEY",
+        help="a condition key the request doesn't include, e.g. aws:MultiFactorAuthPresent",
     )
     return parser
 
@@ -141,23 +178,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.org and not args.account:
         parser.error("--org only works with --account")
+    if args.no_session_tags and not args.account:
+        parser.error("--no-session-tags only works with --account")
 
     try:
-        request = Request(action=args.action, resource=args.resource)
+        context = RequestContext.of(args.context or (), args.absent or ())
         if args.account:
             account = load_account_file(args.account)
             policies = account.policies_for(args.principal)
             boundary = account.boundary_for(args.principal)
             scps = _scp_levels(account, args.principal, args.org) if args.org else ()
+            principal = account.principal_context(
+                args.principal, session_tags=not args.no_session_tags
+            )
+            context = principal.merged(context)
         else:
             policies = [load_policy_file(path) for path in args.policy]
             boundary = load_policy_file(args.boundary) if args.boundary else None
             scps = ()
+        request = Request(action=args.action, resource=args.resource, context=context)
+        result = evaluate(request, policies, boundary=boundary, scps=scps)
     except PolicyError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        if isinstance(exc, MissingContextError):
+            print(MISSING_CONTEXT_HINT, file=sys.stderr)
         return EXIT_INPUT_ERROR
 
-    result = evaluate(request, policies, boundary=boundary, scps=scps)
     print(format_result(result))
     return EXIT_ALLOWED if result.allowed else EXIT_DENIED
 

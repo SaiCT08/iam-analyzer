@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from iam_analyzer.account import load_account_file, parse_account
-from iam_analyzer.errors import AccountError, PolicyParseError
+from iam_analyzer.context import RequestContext
+from iam_analyzer.errors import AccountError, PolicyParseError, RequestError
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "accounts" / "district.json"
 
@@ -143,6 +144,38 @@ def test_unknown_principal(principal, message):
             {"Policies": {}, "Roles": {"r": {"Path": "/district"}}},
             "'Path' must be a string that starts and ends with '/'",
         ),
+        (
+            {"Policies": {}, "Users": {"u": {"Path": "teachers/"}}},
+            "user 'u': 'Path' must be a string that starts and ends with '/'",
+        ),
+        # Tags, with IAM's rules for users and roles.
+        ({"Policies": {}, "Users": {"u": {"Tags": {"campus": "x"}}}}, "'Tags' must be a list"),
+        ({"Policies": {}, "Users": {"u": {"Tags": ["campus"]}}}, "user 'u' tag 0: must be a JSON"),
+        (
+            {"Policies": {}, "Users": {"u": {"Tags": [{"Key": "k", "Value": "v", "Note": 1}]}}},
+            "user 'u' tag 0: unknown key",
+        ),
+        ({"Policies": {}, "Users": {"u": {"Tags": [{"Key": "campus"}]}}}, "'Value' must be"),
+        ({"Policies": {}, "Users": {"u": {"Tags": [{"Key": "", "Value": "x"}]}}}, "'Key' must be"),
+        (
+            {"Policies": {}, "Users": {"u": {"Tags": [{"Key": "campus*", "Value": "x"}]}}},
+            "'Key' must be a string of 1 to 128 letters, numbers, spaces",
+        ),
+        ({"Policies": {}, "Users": {"u": {"Tags": [{"Key": "k", "Value": "x?"}]}}}, "'Value' must"),
+        (
+            {"Policies": {}, "Users": {"u": {"Tags": [{"Key": "k", "Value": "x" * 257}]}}},
+            "'Value' must be a string of 0 to 256",
+        ),
+        (
+            {"Policies": {}, "Users": {"u": {"Tags": [{"Key": "AWS:campus", "Value": "x"}]}}},
+            "'Key' can't start with 'aws:'",
+        ),
+        (
+            {"Policies": {}, "Roles": {"r": {"Tags": [
+                {"Key": "Campus", "Value": "a"}, {"Key": "campus", "Value": "b"}]}}},
+            "role 'r' tag 1: tag key 'campus' is used more than once",
+        ),
+        ({"Policies": {}, "Groups": {"g": {"Tags": []}}}, "group 'g': unknown key"),
     ],
 )
 def test_invalid_accounts(document, message):
@@ -242,3 +275,84 @@ def test_account_id_is_optional():
 
 def test_example_account_has_an_id():
     assert load_account_file(EXAMPLE).account_id == "111122223333"
+
+
+# --- Tags, user paths and the principal's request context ------------------------------
+
+
+def test_tags_are_read_in_aws_shape():
+    acct = account(
+        Users={"jsmith": {"Tags": [{"Key": "campus", "Value": "campus-01"},
+                                   {"Key": "phone", "Value": ""}]}},
+        Roles={"Vendor": {"Tags": [{"Key": "vendor", "Value": "gradebook"}]}},
+    )
+    assert acct.users["jsmith"].tags == (("campus", "campus-01"), ("phone", ""))
+    assert acct.roles["Vendor"].tags == (("vendor", "gradebook"),)
+
+
+def test_user_path_defaults_to_root():
+    acct = account(Users={"jsmith": {}, "dpatel": {"Path": "/student-teachers/"}})
+    assert acct.users["jsmith"].path == "/"
+    assert acct.users["dpatel"].path == "/student-teachers/"
+
+
+def test_principal_context_for_a_user():
+    acct = account(
+        AccountId="111122223333",
+        Users={"jsmith": {"Path": "/teachers/", "Tags": [{"Key": "campus", "Value": "campus-01"}]}},
+    )
+    context = acct.principal_context("user/jsmith")
+    assert context.get("aws:username") == ("jsmith",)
+    assert context.get("aws:PrincipalType") == ("User",)
+    assert context.get("aws:PrincipalArn") == ("arn:aws:iam::111122223333:user/teachers/jsmith",)
+    assert context.get("aws:PrincipalAccount") == ("111122223333",)
+    assert context.get("aws:PrincipalTag/Campus") == ("campus-01",)
+    # The file lists all of a user's tags, so any other tag is absent.
+    assert context.get("aws:PrincipalTag/grade") is None
+    # The file has no unique IDs, and AWS doesn't document aws:PrincipalIsAWSService for users.
+    assert not context.knows("aws:userid")
+    assert not context.knows("aws:PrincipalIsAWSService")
+
+
+def test_principal_context_for_a_role():
+    acct = account(
+        AccountId="111122223333",
+        Roles={"Vendor": {"Path": "/vendors/", "Tags": [{"Key": "vendor", "Value": "gradebook"}]}},
+    )
+    context = acct.principal_context("role/Vendor")
+    assert context.get("aws:username") is None  # roles have no user name
+    assert context.get("aws:PrincipalType") == ("AssumedRole",)
+    # The role's own ARN, not the session's.
+    assert context.get("aws:PrincipalArn") == ("arn:aws:iam::111122223333:role/vendors/Vendor",)
+    # Session tags can override the role's tags and add new ones, so no tag is known.
+    assert not context.knows("aws:PrincipalTag/vendor")
+    assert not context.knows("aws:PrincipalTag/grade")
+
+
+def test_a_role_without_session_tags_has_only_its_own_tags():
+    acct = account(Roles={"Vendor": {"Tags": [{"Key": "vendor", "Value": "gradebook"}]}})
+    context = acct.principal_context("role/Vendor", session_tags=False)
+    assert context.get("aws:PrincipalTag/vendor") == ("gradebook",)
+    assert context.get("aws:PrincipalTag/grade") is None
+
+
+def test_a_session_tag_cannot_remove_a_roles_tag():
+    acct = account(Roles={"Vendor": {"Tags": [{"Key": "campus", "Value": "campus-01"}]}})
+    context = acct.principal_context("role/Vendor")
+    message = "session tags can override a role's tags but not remove them"
+    with pytest.raises(RequestError, match=message):
+        context.merged(RequestContext.of(absent=["aws:principaltag/CAMPUS"]))
+    # A tag the role doesn't have can be missing from the session.
+    merged = context.merged(RequestContext.of(absent=["aws:PrincipalTag/grade"]))
+    assert merged.get("aws:PrincipalTag/grade") is None
+
+
+def test_principal_arn_needs_an_account_id():
+    context = account(Users={"jsmith": {}}).principal_context("user/jsmith")
+    assert not context.knows("aws:PrincipalArn")
+    assert not context.knows("aws:PrincipalAccount")
+
+
+def test_principal_context_for_an_unknown_principal():
+    with pytest.raises(AccountError, match="no user named 'nobody'"):
+        account(Users={"jsmith": {}}).principal_context("user/nobody")

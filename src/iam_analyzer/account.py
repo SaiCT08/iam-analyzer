@@ -14,16 +14,21 @@ permissions boundary; groups cannot. Principals are named `user/NAME` or `role/N
 so a user and a role may share a name. `AccountId` is optional; it is only needed to
 look up the account's SCPs in an organization file.
 
-Roles can have a `Path`, as in AWS (default "/"). AWS creates service-linked roles for its
-own services under "/aws-service-role/", and SCPs never apply to them.
+Users and roles can have a `Path`, as in AWS (default "/"). AWS creates service-linked roles
+for its own services under "/aws-service-role/", and SCPs never apply to them.
+
+Users and roles can also have `Tags`, in AWS's shape: [{"Key": "campus", "Value": "campus-01"}].
+Policies read them as aws:PrincipalTag/campus. Groups can't be tagged, as in IAM.
 """
 
+import re
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from iam_analyzer import _validation
+from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import AccountError
 from iam_analyzer.loader import parse_policy
 from iam_analyzer.models import Policy
@@ -31,6 +36,10 @@ from iam_analyzer.models import Policy
 TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles"}
 # The path AWS gives every service-linked role, e.g. "/aws-service-role/support.amazonaws.com/".
 SERVICE_LINKED_PATH = "/aws-service-role/"
+TAG_PREFIX = "aws:PrincipalTag/"
+# IAM's rules for tag keys and values: these characters only, and limited lengths.
+_TAG_TEXT = re.compile(r"[\w .:/=+\-@]*")
+_TAG_KEY_LENGTH, _TAG_VALUE_LENGTH = 128, 256
 
 # The shared checks, reporting problems as AccountError.
 _load_json = partial(_validation.load_json, error=AccountError)
@@ -51,6 +60,8 @@ class User:
     policies: tuple[str, ...] = ()
     groups: tuple[str, ...] = ()
     boundary: str | None = None
+    path: str = "/"
+    tags: tuple[tuple[str, str], ...] = ()  # (key, value) pairs, in file order
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,7 @@ class Role:
     policies: tuple[str, ...] = ()
     boundary: str | None = None
     path: str = "/"
+    tags: tuple[tuple[str, str], ...] = ()
 
     @property
     def service_linked(self) -> bool:
@@ -98,6 +110,46 @@ class Account:
         """Whether `principal` is a service-linked role, which SCPs never restrict."""
         entity = self._principal(principal)
         return isinstance(entity, Role) and entity.service_linked
+
+    def principal_context(self, principal: str, *, session_tags: bool = True) -> RequestContext:
+        """The condition keys AWS fills in for `principal`, as far as this file knows them.
+
+        - aws:username is a user's name. Roles have none, so for them it is absent.
+        - aws:PrincipalType is "User" for a user and "AssumedRole" for a role.
+        - aws:PrincipalArn and aws:PrincipalAccount need the file's AccountId. For a role, the
+          ARN is the role's own, not the session's.
+        - aws:PrincipalTag/KEY comes from Tags, and a user's tags are all there is. A role's
+          session can carry session tags, which override the role's tags and can add new
+          ones, so a role's tag keys are unknown unless `session_tags` is False. A session
+          tag can't remove a role's tag, though, so the role's own keys are always present.
+
+        Other keys, such as aws:userid, aren't in the file, so the caller has to give them.
+        """
+        entity = self._principal(principal)
+        kind, _, name = principal.partition("/")
+        source = f"{self.name} {principal}"
+        values: list[tuple[str, str]] = []
+        absent: list[str] = []
+        if isinstance(entity, User):
+            values += [("aws:username", name), ("aws:PrincipalType", "User")]
+        else:
+            absent.append("aws:username")
+            values.append(("aws:PrincipalType", "AssumedRole"))
+        if self.account_id is not None:
+            arn = f"arn:aws:iam::{self.account_id}:{kind}{entity.path}{name}"
+            values += [("aws:PrincipalArn", arn), ("aws:PrincipalAccount", self.account_id)]
+        tags = [(f"{TAG_PREFIX}{key}", value) for key, value in entity.tags]
+        if isinstance(entity, User) or not session_tags:
+            return RequestContext.of(
+                [*values, *tags], absent, absent_prefixes=[TAG_PREFIX], source=source
+            )
+        reason = (
+            f"{principal} has this tag, and session tags can override a role's tags "
+            "but not remove them"
+        )
+        return RequestContext.of(
+            values, absent, present={key: reason for key, _ in tags}, source=source
+        )
 
     def _principal(self, principal: str) -> User | Role:
         kind, _, name = principal.partition("/")
@@ -149,21 +201,24 @@ def parse_account(document: Any, name: str) -> Account:
     users = {}
     for user_name, raw in _section(document, "Users", name).items():
         where = f"{name} user {user_name!r}"
-        fields = _entry(raw, {"Policies", "Groups", "PermissionsBoundary"}, where)
+        fields = _entry(raw, {"Policies", "Groups", "PermissionsBoundary", "Path", "Tags"}, where)
         users[user_name] = User(
             policies=_refs(fields, "Policies", policies, "policy", where),
             groups=_refs(fields, "Groups", groups, "group", where),
             boundary=_ref(fields, "PermissionsBoundary", policies, "policy", where),
+            path=_path(fields, where),
+            tags=_tags(fields, where),
         )
 
     roles = {}
     for role_name, raw in _section(document, "Roles", name).items():
         where = f"{name} role {role_name!r}"
-        fields = _entry(raw, {"Policies", "PermissionsBoundary", "Path"}, where)
+        fields = _entry(raw, {"Policies", "PermissionsBoundary", "Path", "Tags"}, where)
         roles[role_name] = Role(
             policies=_refs(fields, "Policies", policies, "policy", where),
             boundary=_ref(fields, "PermissionsBoundary", policies, "policy", where),
             path=_path(fields, where),
+            tags=_tags(fields, where),
         )
 
     return Account(
@@ -176,8 +231,45 @@ def parse_account(document: Any, name: str) -> Account:
     )
 
 
+def _tags(fields: dict, where: str) -> tuple[tuple[str, str], ...]:
+    """Read optional `Tags`, in AWS's shape: [{"Key": "campus", "Value": "campus-01"}].
+
+    IAM's rules apply: only letters, numbers, spaces and _ . : / = + - @, nothing that starts
+    with "aws:", and keys unique ignoring case (IAM treats Campus and campus as one tag).
+    """
+    raw = fields.get("Tags", [])
+    if not isinstance(raw, list):
+        raise AccountError(f"{where}: 'Tags' must be a list of {{\"Key\": ..., \"Value\": ...}}")
+    tags = []
+    seen = set()
+    for index, tag in enumerate(raw):
+        tag_where = f"{where} tag {index}"
+        entry = _entry(tag, {"Key", "Value"}, tag_where)
+        key, value = entry.get("Key"), entry.get("Value")
+        _tag_text(key, "Key", 1, _TAG_KEY_LENGTH, tag_where)
+        _tag_text(value, "Value", 0, _TAG_VALUE_LENGTH, tag_where)
+        if key.casefold() in seen:
+            raise AccountError(
+                f"{tag_where}: tag key {key!r} is used more than once (IAM ignores its case)"
+            )
+        seen.add(key.casefold())
+        tags.append((key, value))
+    return tuple(tags)
+
+
+def _tag_text(text: Any, field: str, shortest: int, longest: int, where: str) -> None:
+    fits = isinstance(text, str) and shortest <= len(text) <= longest
+    if not (fits and _TAG_TEXT.fullmatch(text)):
+        raise AccountError(
+            f"{where}: '{field}' must be a string of {shortest} to {longest} letters, numbers, "
+            f"spaces or _ . : / = + - @, got {text!r}"
+        )
+    if text.casefold().startswith("aws:"):
+        raise AccountError(f"{where}: '{field}' can't start with 'aws:', which AWS reserves")
+
+
 def _path(fields: dict, where: str) -> str:
-    """Read an optional role `Path`. As in AWS, it starts and ends with "/"."""
+    """Read an optional user or role `Path`. As in AWS, it starts and ends with "/"."""
     value = fields.get("Path", "/")
     if not isinstance(value, str) or not (value.startswith("/") and value.endswith("/")):
         raise AccountError(

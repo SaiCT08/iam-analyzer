@@ -1,5 +1,7 @@
 """Exceptions raised while loading or evaluating policies."""
 
+from collections.abc import Iterable
+
 
 class PolicyError(Exception):
     """Base class for all policy-related errors."""
@@ -27,3 +29,15 @@ class OrganizationError(PolicyError):
 
 class RequestError(PolicyError):
     """The request is not one AWS could receive, such as an action with a wildcard in it."""
+
+
+class MissingContextError(RequestError):
+    """A statement that matches the request uses a condition key the request says nothing about.
+
+    Treating the key as missing could switch a Deny off, so the analyzer refuses instead.
+    `keys` lists the keys, spelled as the policies spell them.
+    """
+
+    def __init__(self, message: str, keys: Iterable[str]) -> None:
+        super().__init__(message)
+        self.keys = tuple(keys)

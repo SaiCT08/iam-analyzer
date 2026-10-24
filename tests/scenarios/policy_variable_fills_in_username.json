@@ -1,0 +1,22 @@
+{
+  "description": "AWS fills in ${aws:username} from the request, so a teacher can write to their own home folder.",
+  "policies": {
+    "staff_home_folder.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "OwnHomeFolder",
+          "Effect": "Allow",
+          "Action": ["s3:GetObject", "s3:PutObject"],
+          "Resource": "arn:aws:s3:::district-staff-files/home/${aws:username}/*"
+        }
+      ]
+    }
+  },
+  "context": { "aws:username": "jsmith" },
+  "request": {
+    "action": "s3:PutObject",
+    "resource": "arn:aws:s3:::district-staff-files/home/jsmith/lesson-plan.docx"
+  },
+  "expected": "ALLOW"
+}

@@ -9,18 +9,26 @@ A request is checked against one or more layers of policy:
 The logic, in three steps:
   1. Match:   in each layer, keep statements whose Action AND Resource both match the
               request. NotAction / NotResource flip the test: the statement matches when
-              the request is NOT in the list.
+              the request is NOT in the list. Policy variables in a resource, such as
+              ${aws:username}, are filled in from the request context first.
   2. Deny:    a matching Deny in ANY layer    -> EXPLICIT_DENY (a Deny always wins)
   3. Allow:   a matching Allow in EVERY layer -> ALLOW
               otherwise                       -> IMPLICIT_DENY (the default is "no")
 
 So boundaries and SCPs never grant anything by themselves; they only limit what identity
 policies allow.
+
+When matching a statement needs a condition key the request context says nothing about,
+there is no answer to give: evaluation raises one MissingContextError that names every such
+key and the statements that use it.
 """
 
 from collections.abc import Iterable, Sequence
 
-from iam_analyzer.matching import match_action, match_resource
+from iam_analyzer import variables
+from iam_analyzer.context import RequestContext
+from iam_analyzer.errors import MissingContextError, PolicyError
+from iam_analyzer.matching import Pattern, match_action, match_resource
 from iam_analyzer.models import (
     Decision,
     Effect,
@@ -36,10 +44,18 @@ from iam_analyzer.models import (
 
 
 def statement_matches(statement: Statement, request: Request) -> bool:
+    """Whether `statement` applies to `request`.
+
+    Raises MissingContextError when the answer depends on a condition key the request context
+    says nothing about. Keys are only needed once the action matches.
+    """
     # `!=` with the flag acts as "flip the result when negated".
     action_ok = any(match_action(p, request.action) for p in statement.actions)
-    resource_ok = any(match_resource(p, request.resource) for p in statement.resources)
-    return (action_ok != statement.not_action) and (resource_ok != statement.not_resource)
+    if action_ok == statement.not_action:
+        return False
+    resources = _resource_patterns(statement, request.context)
+    resource_ok = any(match_resource(p, request.resource) for p in resources)
+    return resource_ok != statement.not_resource
 
 
 def evaluate(
@@ -57,9 +73,13 @@ def evaluate(
     # A level with no SCPs has no Allow, so it denies: the safe default.
     layers += [(Layer(PolicyType.SCP, level.target), level.policies) for level in scps]
 
+    missing: list[tuple[str, str]] = []
     matched = [
-        (layer, _matching(request, layer, layer_policies)) for layer, layer_policies in layers
+        (layer, _matching(request, layer, layer_policies, missing))
+        for layer, layer_policies in layers
     ]
+    if missing:
+        raise _missing_context(missing)
     every = [m for _, found in matched for m in found]
 
     denies = tuple(m for m in every if m.statement.effect is Effect.DENY)
@@ -74,11 +94,67 @@ def evaluate(
     return EvaluationResult(Decision.ALLOW, tuple(every))
 
 
-def _matching(request: Request, layer: Layer, policies: Iterable[Policy]) -> list[MatchedStatement]:
-    """Every statement in `policies` that matches `request`, tagged with `layer`."""
-    return [
-        MatchedStatement(policy.name, statement, policy.via_group, layer)
-        for policy in policies
-        for statement in policy.statements
-        if statement_matches(statement, request)
-    ]
+def _matching(
+    request: Request,
+    layer: Layer,
+    policies: Iterable[Policy],
+    missing: list[tuple[str, str]],
+) -> list[MatchedStatement]:
+    """Every statement in `policies` that matches `request`, tagged with `layer`.
+
+    Condition keys that a statement needs but the request context lacks are added to
+    `missing` as (key, statement) pairs, so that one error can name them all.
+    """
+    found = []
+    for policy in policies:
+        for index, statement in enumerate(policy.statements):
+            try:
+                if statement_matches(statement, request):
+                    found.append(MatchedStatement(policy.name, statement, policy.via_group, layer))
+            except MissingContextError as exc:
+                missing += [(key, _where(policy, index, statement)) for key in exc.keys]
+            except PolicyError as exc:
+                raise type(exc)(f"{_where(policy, index, statement)}: {exc}") from None
+    return found
+
+
+def _resource_patterns(statement: Statement, context: RequestContext) -> Sequence[Pattern]:
+    """The statement's resource patterns, with any policy variables filled in."""
+    if not statement.policy_variables:
+        return statement.resources
+    templates = [variables.parse(resource) for resource in statement.resources]
+    _require([key for template in templates for key in variables.keys(template)], context)
+    return [variables.resolve(template, context) for template in templates]
+
+
+def _require(keys: Iterable[str], context: RequestContext) -> None:
+    """Raise one MissingContextError naming each of `keys` that `context` says nothing about."""
+    unknown: dict[str, str] = {}
+    for key in keys:
+        if not context.knows(key):
+            unknown.setdefault(key.casefold(), key)
+    if unknown:
+        names = list(unknown.values())
+        raise MissingContextError(
+            f"the request context says nothing about {', '.join(map(repr, names))}", names
+        )
+
+
+def _missing_context(missing: list[tuple[str, str]]) -> MissingContextError:
+    """One error that names each missing key once, with every statement that needs it."""
+    places: dict[str, tuple[str, list[str]]] = {}
+    for key, where in missing:
+        _, wheres = places.setdefault(key.casefold(), (key, []))
+        if where not in wheres:
+            wheres.append(where)
+    lines = [f"  {key}, used by {'; '.join(wheres)}" for key, wheres in places.values()]
+    return MissingContextError(
+        "the request context says nothing about these condition keys:\n" + "\n".join(lines),
+        [key for key, _ in places.values()],
+    )
+
+
+def _where(policy: Policy, index: int, statement: Statement) -> str:
+    """Name a statement the way the loader does: "Policy statement 0 (Sid=X)"."""
+    where = f"{policy.name} statement {index}"
+    return f"{where} (Sid={statement.sid})" if statement.sid else where

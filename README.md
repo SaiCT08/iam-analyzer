@@ -24,6 +24,9 @@ policies (SCPs)**:
   grants access on its own.
 - SCPs from AWS Organizations. A request must be allowed at every level from the organization root
   down to the account, and a Deny in any SCP wins. Like boundaries, SCPs never grant access.
+- Policy variables such as `${aws:username}` in `Resource` and `NotResource`, filled in from the
+  request context. The analyzer never guesses a value: if a statement needs one that nobody gave,
+  it says which.
 - Policies are checked the way AWS checks them when they're saved. A policy AWS would reject is
   refused with a clear error instead of being evaluated. Examples: a repeated JSON key, an unknown
   `Version`, a `Sid` with characters other than letters and digits, or an action without a service
@@ -32,9 +35,6 @@ policies (SCPs)**:
 Not supported yet:
 - `Condition`, `Principal` and `NotPrincipal` are rejected with a clear error. Most real-world SCPs
   use conditions, so many of them can't be loaded yet.
-- Policy variables such as `${aws:username}` are rejected in policies with
-  `"Version": "2012-10-17"`, where AWS fills them in from the request. Without that `Version`, AWS
-  treats them as plain text, and so does the analyzer.
 - Resource-based policies, such as S3 bucket policies, aren't evaluated.
 
 ## Setup
@@ -123,10 +123,18 @@ they have, including the ones that come from their groups. As in AWS, groups can
 In the example account, student teacher `dpatel` is in the Teachers group, but a boundary limits
 them to campus-01 records.
 
-Roles can also have a `Path`, as in AWS, and the default is `/`. AWS creates service-linked roles
-for its own services under `/aws-service-role/`, for example
+Users and roles can also have a `Path`, as in AWS, and the default is `/`. AWS creates
+service-linked roles for its own services under `/aws-service-role/`, for example
 `/aws-service-role/support.amazonaws.com/`. SCPs never apply to those roles, so give a
 service-linked role its real path. A role's name alone doesn't make it service-linked.
+
+Users and roles can have `Tags` too, in AWS's own shape. Policies read them as
+`aws:PrincipalTag/KEY` (see [Policy variables](#policy-variables-and-the-request-context)). As in
+IAM, groups can't be tagged.
+
+```json
+"rnguyen": { "Groups": ["Registrars"], "Tags": [{ "Key": "campus", "Value": "campus-02" }] }
+```
 
 ### Organizations and SCPs
 
@@ -186,6 +194,83 @@ IMPLICIT_DENY
   No SCP attached to OU Schools allows this.
 ```
 
+### Policy variables and the request context
+
+In a policy with `"Version": "2012-10-17"`, AWS fills in policy variables from the request.
+`${aws:username}` is the caller's user name, so one policy can give every teacher their own home
+folder:
+
+```json
+"Resource": "arn:aws:s3:::district-staff-files/home/${aws:username}/*"
+```
+
+The values come from the *request context*: the condition keys a request carries, such as
+`aws:username` or `aws:SourceIp`. Each key is in one of three states:
+- It has a value. Give one with `--context KEY=VALUE`, and repeat the flag to give a key several
+  values.
+- It's absent: the request really doesn't include it. Say so with `--absent KEY`.
+- It's unknown: nobody said. If a statement that matches the request needs an unknown key, the
+  analyzer stops and names it, instead of guessing.
+
+```sh
+iam-analyzer check \
+  --policy examples/policies/staff_home_folder.json \
+  --action s3:PutObject \
+  --resource arn:aws:s3:::district-staff-files/home/jsmith/lesson-plan.docx
+```
+
+```
+error: the request context says nothing about these condition keys:
+  aws:username, used by staff_home_folder.json statement 0 (Sid=OwnHomeFolder)
+hint: give each key a value with --context KEY=VALUE, or use --absent KEY if the request doesn't include it
+```
+
+With `--context aws:username=jsmith` the answer is `ALLOW`. With `--context aws:username=mgarcia`
+it's `IMPLICIT_DENY`, because that folder belongs to someone else.
+
+With `--account`, the account file fills in what it knows about the principal. You can't change
+those keys with `--context` or `--absent`.
+
+| Key | User | Role |
+|---|---|---|
+| `aws:username` | the user's name | absent, because roles have none |
+| `aws:PrincipalType` | `User` | `AssumedRole` |
+| `aws:PrincipalArn` | the user's ARN | the role's ARN, not the session's |
+| `aws:PrincipalAccount` | the file's `AccountId` | the file's `AccountId` |
+| `aws:PrincipalTag/KEY` | the user's `Tags`; any other tag is absent | unknown (see below) |
+
+`aws:PrincipalArn` and `aws:PrincipalAccount` need the file's `AccountId`. Registrar `rnguyen`'s
+policy covers `district-student-records/${aws:PrincipalTag/campus}/*`, and their `campus` tag is
+`campus-02`:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/rnguyen \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::district-student-records/campus-02/transcript.pdf
+```
+
+```
+ALLOW
+  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords
+```
+
+The same request for `campus-01` gives `IMPLICIT_DENY`.
+
+A role's session can carry *session tags*, which override the role's own tags and can add new ones.
+So for a role, every `aws:PrincipalTag/` key is unknown until you give it with `--context` or
+`--absent`. `--no-session-tags` says the session has none, so the role's own tags are all there
+is. A session tag can't remove one of the role's tags, so `--absent` is refused for those.
+
+AWS's documentation doesn't settle a few cases, so the analyzer refuses them:
+- A variable with no value and no default, such as `${aws:username}` for a role. A default, as in
+  `${aws:PrincipalTag/team, 'company-wide'}`, is used when the key is absent.
+- A key with several values, or a value that contains `*` or `?`.
+
+As AWS requires, a variable can only appear in the resource part of an ARN, after the fifth colon.
+Without `"Version": "2012-10-17"`, AWS treats `${...}` as plain text, and so does the analyzer.
+
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 
 ## Tests
@@ -197,4 +282,5 @@ pytest tests/test_evaluator.py -k deny   # tests whose name matches "deny"
 ```
 
 Data-driven scenarios live in `tests/scenarios/*.json`. Each one holds policies, a request and the
-expected decision. To add a case, drop in a new file.
+expected decision, plus an optional request `context` (`null` marks a key as absent). To add a
+case, drop in a new file.
