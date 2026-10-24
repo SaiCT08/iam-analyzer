@@ -5,16 +5,38 @@ from pathlib import Path
 
 import pytest
 
+from iam_analyzer import resources
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import MissingContextError, RequestError, UnsupportedPolicyFeature
+from iam_analyzer.errors import (
+    MissingContextError,
+    MissingResourceError,
+    RequestError,
+    UnsupportedPolicyFeature,
+)
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import Decision, Layer, OrgTarget, PolicyType, Request, ScpLevel, TargetType
+from iam_analyzer.models import (
+    Decision,
+    Layer,
+    OrgTarget,
+    PolicyType,
+    Request,
+    Resource,
+    ScpLevel,
+    TargetType,
+)
 from iam_analyzer.organization import parse_organization
 
 BUCKET = "arn:aws:s3:::district-student-records"
 OBJECT = f"{BUCKET}/2026/roster.csv"
 GET = Request(action="s3:GetObject", resource=OBJECT)
+
+
+def check(request, policies, **layers):
+    """Evaluate `request` with its resource described as having no resource-based policy, as
+    `--no-resource-policy` describes it. Most tests here are about the other layers."""
+    resource = resources.describe(request.resource, request.action)
+    return evaluate(request, policies, resource=resource, **layers)
 
 
 def policy(name, *statements):
@@ -43,19 +65,19 @@ def test_policy_variable_without_version_is_plain_text():
     p = policy("p", allow("s3:GetObject", "arn:aws:s3:::home/${aws:username}/*"))
     literal = Request(action="s3:GetObject", resource="arn:aws:s3:::home/${aws:username}/a.txt")
     named = Request(action="s3:GetObject", resource="arn:aws:s3:::home/jsmith/a.txt")
-    assert evaluate(literal, [p]).decision is Decision.ALLOW
-    assert evaluate(named, [p]).decision is Decision.IMPLICIT_DENY
+    assert check(literal, [p]).decision is Decision.ALLOW
+    assert check(named, [p]).decision is Decision.IMPLICIT_DENY
 
 
 def test_no_policies_is_implicit_deny():
-    result = evaluate(GET, [])
+    result = check(GET, [])
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.reasons == ()
     assert not result.allowed
 
 
 def test_matching_allow():
-    result = evaluate(GET, [policy("p", allow("s3:GetObject", OBJECT, sid="A"))])
+    result = check(GET, [policy("p", allow("s3:GetObject", OBJECT, sid="A"))])
     assert result.decision is Decision.ALLOW
     assert result.allowed
     assert [(r.policy_name, r.statement.sid) for r in result.reasons] == [("p", "A")]
@@ -70,33 +92,33 @@ def test_matching_allow():
     ],
 )
 def test_allow_for_something_else_is_implicit_deny(statement):
-    assert evaluate(GET, [policy("p", statement)]).decision is Decision.IMPLICIT_DENY
+    assert check(GET, [policy("p", statement)]).decision is Decision.IMPLICIT_DENY
 
 
 def test_action_and_resource_must_both_match_in_the_same_statement():
     # One statement allows the action elsewhere, another allows a different action here.
     p = policy("p", allow("s3:GetObject", "arn:aws:s3:::other/*"), allow("s3:PutObject", OBJECT))
-    assert evaluate(GET, [p]).decision is Decision.IMPLICIT_DENY
+    assert check(GET, [p]).decision is Decision.IMPLICIT_DENY
 
 
 def test_wildcard_allow():
     p = policy("p", allow("s3:Get*", f"{BUCKET}/*"))
-    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    assert check(GET, [p]).decision is Decision.ALLOW
 
 
 def test_any_entry_in_action_and_resource_lists_can_match():
     p = policy("p", allow(["ec2:*", "s3:GetObject"], ["arn:aws:s3:::other/*", f"{BUCKET}/*"]))
-    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    assert check(GET, [p]).decision is Decision.ALLOW
 
 
 def test_explicit_deny_beats_allow_in_any_order():
     statements = [allow("s3:*", "*", sid="AllowAll"), deny("s3:GetObject", OBJECT, sid="NoGet")]
     for ordering in itertools.permutations(statements):
         # Same policy, both orders.
-        assert evaluate(GET, [policy("p", *ordering)]).decision is Decision.EXPLICIT_DENY
+        assert check(GET, [policy("p", *ordering)]).decision is Decision.EXPLICIT_DENY
         # Separate policies, both orders.
         policies = [policy(f"p{i}", s) for i, s in enumerate(ordering)]
-        assert evaluate(GET, policies).decision is Decision.EXPLICIT_DENY
+        assert check(GET, policies).decision is Decision.EXPLICIT_DENY
 
 
 def test_explicit_deny_reasons_list_only_denies():
@@ -104,18 +126,18 @@ def test_explicit_deny_reasons_list_only_denies():
         policy("allow.json", allow("s3:*", "*", sid="AllowAll")),
         policy("deny.json", deny("s3:Get*", f"{BUCKET}/*", sid="NoGet")),
     ]
-    result = evaluate(GET, policies)
+    result = check(GET, policies)
     assert [(r.policy_name, r.statement.sid) for r in result.reasons] == [("deny.json", "NoGet")]
 
 
 def test_deny_alone_is_explicit_deny():
-    result = evaluate(GET, [policy("p", deny("*", "*"))])
+    result = check(GET, [policy("p", deny("*", "*"))])
     assert result.decision is Decision.EXPLICIT_DENY
 
 
 def test_non_matching_deny_does_not_block_allow():
     p = policy("p", allow("s3:*", "*"), deny("s3:DeleteObject", f"{BUCKET}/*"))
-    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    assert check(GET, [p]).decision is Decision.ALLOW
 
 
 def test_all_matching_allows_are_reported():
@@ -123,14 +145,14 @@ def test_all_matching_allows_are_reported():
         policy("a.json", allow("s3:GetObject", OBJECT, sid="One")),
         policy("b.json", allow("s3:*", "*", sid="Two")),
     ]
-    result = evaluate(GET, policies)
+    result = check(GET, policies)
     assert [r.statement.sid for r in result.reasons] == ["One", "Two"]
 
 
 def test_via_group_is_carried_into_reasons():
     direct = policy("Direct", allow("s3:GetObject", OBJECT))
     inherited = dataclasses.replace(policy("Shared", allow("s3:*", "*")), via_group="Teachers")
-    result = evaluate(GET, [direct, inherited])
+    result = check(GET, [direct, inherited])
     assert [(r.policy_name, r.via_group) for r in result.reasons] == [
         ("Direct", None),
         ("Shared", "Teachers"),
@@ -146,9 +168,9 @@ def statement(effect, sid=None, **elements):
 
 def test_allow_not_action_allows_everything_except_listed():
     p = policy("p", statement("Allow", NotAction="s3:Delete*", Resource="*"))
-    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    assert check(GET, [p]).decision is Decision.ALLOW
     delete = Request(action="s3:DeleteObject", resource=OBJECT)
-    assert evaluate(delete, [p]).decision is Decision.IMPLICIT_DENY
+    assert check(delete, [p]).decision is Decision.IMPLICIT_DENY
 
 
 def test_deny_not_action_guardrail_blocks_everything_except_listed():
@@ -156,9 +178,9 @@ def test_deny_not_action_guardrail_blocks_everything_except_listed():
         "Deny", sid="ReadOnly", NotAction=["s3:Get*", "s3:List*"], Resource=f"{BUCKET}/*"
     )
     policies = [policy("p", allow("s3:*", "*"), guardrail)]
-    assert evaluate(GET, policies).decision is Decision.ALLOW
+    assert check(GET, policies).decision is Decision.ALLOW
     put = Request(action="s3:PutObject", resource=OBJECT)
-    result = evaluate(put, policies)
+    result = check(put, policies)
     assert result.decision is Decision.EXPLICIT_DENY
     assert [r.statement.sid for r in result.reasons] == ["ReadOnly"]
 
@@ -167,14 +189,14 @@ def test_deny_not_action_only_applies_to_its_resource():
     guardrail = statement("Deny", NotAction="s3:Get*", Resource=f"{BUCKET}/*")
     put_elsewhere = Request(action="s3:PutObject", resource="arn:aws:s3:::other/file")
     p = policy("p", allow("s3:*", "*"), guardrail)
-    assert evaluate(put_elsewhere, [p]).decision is Decision.ALLOW
+    assert check(put_elsewhere, [p]).decision is Decision.ALLOW
 
 
 def test_allow_not_resource_allows_everywhere_except_listed():
     p = policy("p", statement("Allow", Action="s3:GetObject", NotResource=f"{BUCKET}/*"))
-    assert evaluate(GET, [p]).decision is Decision.IMPLICIT_DENY
+    assert check(GET, [p]).decision is Decision.IMPLICIT_DENY
     other = Request(action="s3:GetObject", resource="arn:aws:s3:::other/file")
-    assert evaluate(other, [p]).decision is Decision.ALLOW
+    assert check(other, [p]).decision is Decision.ALLOW
 
 
 def test_deny_not_resource_blocks_everywhere_except_listed():
@@ -183,9 +205,9 @@ def test_deny_not_resource_blocks_everywhere_except_listed():
         allow("s3:*", "*"),
         statement("Deny", Action="s3:*", NotResource=[BUCKET, f"{BUCKET}/*"]),
     )
-    assert evaluate(GET, [p]).decision is Decision.ALLOW
+    assert check(GET, [p]).decision is Decision.ALLOW
     other = Request(action="s3:GetObject", resource="arn:aws:s3:::other/file")
-    assert evaluate(other, [p]).decision is Decision.EXPLICIT_DENY
+    assert check(other, [p]).decision is Decision.EXPLICIT_DENY
 
 
 def test_not_action_with_not_resource():
@@ -197,7 +219,7 @@ def test_not_action_with_not_resource():
     )
 
     def decide(action, resource):
-        return evaluate(Request(action=action, resource=resource), [p]).decision
+        return check(Request(action=action, resource=resource), [p]).decision
 
     assert decide("s3:GetObject", OBJECT) is Decision.ALLOW  # read: excluded action
     assert decide("s3:PutObject", "arn:aws:s3:::public/x") is Decision.ALLOW  # excluded resource
@@ -215,14 +237,14 @@ def reasons(result):
 
 
 def test_without_boundary_implicit_deny_names_identity_layer():
-    result = evaluate(GET, [policy("p", allow("s3:PutObject", OBJECT))])
+    result = check(GET, [policy("p", allow("s3:PutObject", OBJECT))])
     assert result.not_allowed_by == (IDENTITY,)
 
 
 def test_identity_and_boundary_both_allow():
     identity = policy("identity", allow("s3:*", "*", sid="BroadS3"))
     boundary = policy("boundary", allow("s3:GetObject", f"{BUCKET}/*", sid="ReadRecords"))
-    result = evaluate(GET, [identity], boundary=boundary)
+    result = check(GET, [identity], boundary=boundary)
     assert result.decision is Decision.ALLOW
     assert result.not_allowed_by == ()
     assert reasons(result) == [
@@ -234,7 +256,7 @@ def test_identity_and_boundary_both_allow():
 def test_boundary_blocks_what_identity_allows():
     identity = policy("identity", allow("s3:*", "*"))
     boundary = policy("boundary", allow("s3:*", "arn:aws:s3:::district-gradebook-app/*"))
-    result = evaluate(GET, [identity], boundary=boundary)
+    result = check(GET, [identity], boundary=boundary)
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.reasons == ()
     assert result.not_allowed_by == (BOUNDARY,)
@@ -243,21 +265,21 @@ def test_boundary_blocks_what_identity_allows():
 def test_boundary_never_grants_access():
     identity = policy("identity", allow("s3:PutObject", OBJECT))
     boundary = policy("boundary", allow("*", "*"))
-    result = evaluate(GET, [identity], boundary=boundary)
+    result = check(GET, [identity], boundary=boundary)
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.not_allowed_by == (IDENTITY,)
 
 
 def test_every_layer_without_an_allow_is_listed_in_order():
     boundary = policy("boundary", allow("ec2:*", "*"))
-    result = evaluate(GET, [], boundary=boundary)
+    result = check(GET, [], boundary=boundary)
     assert result.not_allowed_by == (IDENTITY, BOUNDARY)
 
 
 def test_deny_in_boundary_is_an_explicit_deny():
     identity = policy("identity", allow("s3:*", "*"))
     boundary = policy("boundary", allow("s3:*", "*"), deny("s3:GetObject", OBJECT, sid="NoGet"))
-    result = evaluate(GET, [identity], boundary=boundary)
+    result = check(GET, [identity], boundary=boundary)
     assert result.decision is Decision.EXPLICIT_DENY
     assert reasons(result) == [("boundary", "NoGet", BOUNDARY)]
 
@@ -265,7 +287,7 @@ def test_deny_in_boundary_is_an_explicit_deny():
 def test_denies_from_every_layer_are_reported():
     identity = policy("identity", allow("s3:*", "*"), deny("s3:Get*", "*", sid="IdentityDeny"))
     boundary = policy("boundary", deny("s3:GetObject", OBJECT, sid="BoundaryDeny"))
-    result = evaluate(GET, [identity], boundary=boundary)
+    result = check(GET, [identity], boundary=boundary)
     assert reasons(result) == [
         ("identity", "IdentityDeny", IDENTITY),
         ("boundary", "BoundaryDeny", BOUNDARY),
@@ -275,7 +297,7 @@ def test_denies_from_every_layer_are_reported():
 def test_boundary_with_only_denies_allows_nothing():
     identity = policy("identity", allow("s3:*", "*"))
     boundary = policy("boundary", deny("iam:*", "*"))
-    result = evaluate(GET, [identity], boundary=boundary)
+    result = check(GET, [identity], boundary=boundary)
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.not_allowed_by == (BOUNDARY,)
 
@@ -283,7 +305,7 @@ def test_boundary_with_only_denies_allows_nothing():
 def test_boundary_limits_group_policies_too():
     inherited = dataclasses.replace(policy("Shared", allow("s3:*", "*")), via_group="Teachers")
     boundary = policy("boundary", allow("s3:GetObject", "arn:aws:s3:::other/*"))
-    result = evaluate(GET, [inherited], boundary=boundary)
+    result = check(GET, [inherited], boundary=boundary)
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.not_allowed_by == (BOUNDARY,)
 
@@ -311,7 +333,7 @@ def org_path(root=(FULL_ACCESS,), ou=(FULL_ACCESS,), account=(FULL_ACCESS,)):
 
 
 def test_scps_allowing_at_every_level():
-    result = evaluate(GET, [BROAD_S3], scps=org_path())
+    result = check(GET, [BROAD_S3], scps=org_path())
     assert result.decision is Decision.ALLOW
     assert reasons(result) == [
         ("identity", "BroadS3", IDENTITY),
@@ -323,7 +345,7 @@ def test_scps_allowing_at_every_level():
 
 def test_scp_level_without_an_allow_blocks():
     ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
-    result = evaluate(GET, [BROAD_S3], scps=org_path(ou=[ec2_only]))
+    result = check(GET, [BROAD_S3], scps=org_path(ou=[ec2_only]))
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.reasons == ()
     assert result.not_allowed_by == (scp(SCHOOLS),)
@@ -335,41 +357,41 @@ def test_scp_levels_intersect():
     ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
     identity = policy("identity", allow("*", "*"))
     scps = org_path(root=[s3_only], ou=[ec2_only])
-    s3 = evaluate(GET, [identity], scps=scps)
+    s3 = check(GET, [identity], scps=scps)
     assert s3.not_allowed_by == (scp(SCHOOLS),)
-    ec2 = evaluate(Request(action="ec2:RunInstances", resource="*"), [identity], scps=scps)
+    ec2 = check(Request(action="ec2:RunInstances", resource="*"), [identity], scps=scps)
     assert ec2.not_allowed_by == (scp(ROOT),)
 
 
 def test_any_scp_at_a_level_can_allow():
     ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
     s3_only = policy("S3Only", allow("s3:*", "*", sid="S3"))
-    result = evaluate(GET, [BROAD_S3], scps=org_path(ou=[ec2_only, s3_only]))
+    result = check(GET, [BROAD_S3], scps=org_path(ou=[ec2_only, s3_only]))
     assert result.decision is Decision.ALLOW
     assert ("S3Only", "S3", scp(SCHOOLS)) in reasons(result)
 
 
 def test_scp_deny_beats_every_allow():
     protect = policy("ProtectRecords", deny("s3:*", f"{BUCKET}/*", sid="NoRecords"))
-    result = evaluate(GET, [BROAD_S3], scps=org_path(ou=[FULL_ACCESS, protect]))
+    result = check(GET, [BROAD_S3], scps=org_path(ou=[FULL_ACCESS, protect]))
     assert result.decision is Decision.EXPLICIT_DENY
     assert reasons(result) == [("ProtectRecords", "NoRecords", scp(SCHOOLS))]
 
 
 def test_scps_never_grant_access():
-    result = evaluate(GET, [], scps=org_path())
+    result = check(GET, [], scps=org_path())
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.not_allowed_by == (IDENTITY,)
 
 
 def test_scp_level_with_no_policies_denies():
-    result = evaluate(GET, [BROAD_S3], scps=org_path(account=[]))
+    result = check(GET, [BROAD_S3], scps=org_path(account=[]))
     assert result.not_allowed_by == (scp(DISTRICT),)
 
 
 def test_boundary_and_scps_are_both_checked_in_order():
     ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
-    result = evaluate(GET, [BROAD_S3], boundary=ec2_only, scps=org_path(root=[ec2_only]))
+    result = check(GET, [BROAD_S3], boundary=ec2_only, scps=org_path(root=[ec2_only]))
     assert result.not_allowed_by == (BOUNDARY, scp(ROOT))
 
 
@@ -394,13 +416,13 @@ JSMITH = [("aws:username", "jsmith")]
 
 def test_policy_variable_is_filled_in_from_the_context():
     p = versioned("home", allow("s3:GetObject", OWN_HOME))
-    assert evaluate(home_request("jsmith", JSMITH), [p]).decision is Decision.ALLOW
-    assert evaluate(home_request("mgarcia", JSMITH), [p]).decision is Decision.IMPLICIT_DENY
+    assert check(home_request("jsmith", JSMITH), [p]).decision is Decision.ALLOW
+    assert check(home_request("mgarcia", JSMITH), [p]).decision is Decision.IMPLICIT_DENY
 
 
 def test_deny_with_a_policy_variable_applies():
     p = versioned("p", allow("s3:*", "*"), deny("s3:GetObject", OWN_HOME, sid="NotOwnFolder"))
-    result = evaluate(home_request("jsmith", JSMITH), [p])
+    result = check(home_request("jsmith", JSMITH), [p])
     assert result.decision is Decision.EXPLICIT_DENY
     assert [r.statement.sid for r in result.reasons] == ["NotOwnFolder"]
 
@@ -410,15 +432,15 @@ def test_not_resource_with_a_policy_variable():
     p = versioned(
         "p", allow("s3:*", "*"), statement("Deny", Action="s3:GetObject", NotResource=OWN_HOME)
     )
-    assert evaluate(home_request("jsmith", JSMITH), [p]).decision is Decision.ALLOW
-    assert evaluate(home_request("mgarcia", JSMITH), [p]).decision is Decision.EXPLICIT_DENY
+    assert check(home_request("jsmith", JSMITH), [p]).decision is Decision.ALLOW
+    assert check(home_request("mgarcia", JSMITH), [p]).decision is Decision.EXPLICIT_DENY
 
 
 def test_policy_variables_work_in_boundaries_and_scps():
     own_only = versioned("OwnHomeOnly", allow("s3:*", OWN_HOME))
     for kwargs in ({"boundary": own_only}, {"scps": org_path(ou=[own_only])}):
-        assert evaluate(home_request("jsmith", JSMITH), [BROAD_S3], **kwargs).allowed
-        result = evaluate(home_request("mgarcia", JSMITH), [BROAD_S3], **kwargs)
+        assert check(home_request("jsmith", JSMITH), [BROAD_S3], **kwargs).allowed
+        result = check(home_request("mgarcia", JSMITH), [BROAD_S3], **kwargs)
         assert result.decision is Decision.IMPLICIT_DENY
 
 
@@ -430,7 +452,7 @@ def test_missing_keys_are_all_named_with_the_statements_that_use_them():
         allow("s3:*", f"{HOME}/${{AWS:Username}}/*"),
     )
     with pytest.raises(MissingContextError) as exc:
-        evaluate(home_request("jsmith"), [identity], boundary=boundary)
+        check(home_request("jsmith"), [identity], boundary=boundary)
     assert exc.value.keys == ("aws:username", "aws:PrincipalTag/team")
     assert str(exc.value) == (
         "the request context says nothing about these condition keys:\n"
@@ -441,19 +463,19 @@ def test_missing_keys_are_all_named_with_the_statements_that_use_them():
 
 def test_keys_are_only_needed_when_the_action_matches():
     p = versioned("p", allow("s3:PutObject", OWN_HOME), allow("s3:GetObject", "*"))
-    assert evaluate(home_request("jsmith"), [p]).decision is Decision.ALLOW
+    assert check(home_request("jsmith"), [p]).decision is Decision.ALLOW
 
 
 def test_a_variable_with_no_value_is_refused_naming_the_statement():
     p = versioned("home", allow("s3:GetObject", OWN_HOME, sid="Own"))
     message = r"^home statement 0 \(Sid=Own\): policy variable '\$\{aws:username\}' has no value"
     with pytest.raises(UnsupportedPolicyFeature, match=message):
-        evaluate(home_request("jsmith", absent=["aws:username"]), [p])
+        check(home_request("jsmith", absent=["aws:username"]), [p])
 
 
 def test_without_variables_the_context_is_never_read():
     # GET has an empty context, and nothing here uses a policy variable.
-    assert evaluate(GET, [versioned("p", allow("s3:GetObject", OBJECT))]).allowed
+    assert check(GET, [versioned("p", allow("s3:GetObject", OBJECT))]).allowed
 
 
 # --- Conditions ------------------------------------------------------------------------
@@ -473,8 +495,8 @@ REGION_LOCK = versioned("RegionLock", {
 def test_an_scp_condition_can_deny():
     scps = org_path(ou=[FULL_ACCESS, REGION_LOCK])
     approved = get_with(("aws:RequestedRegion", "us-east-1"))
-    assert evaluate(approved, [BROAD_S3], scps=scps).decision is Decision.ALLOW
-    result = evaluate(get_with(("aws:RequestedRegion", "eu-west-1")), [BROAD_S3], scps=scps)
+    assert check(approved, [BROAD_S3], scps=scps).decision is Decision.ALLOW
+    result = check(get_with(("aws:RequestedRegion", "eu-west-1")), [BROAD_S3], scps=scps)
     assert result.decision is Decision.EXPLICIT_DENY
     assert reasons(result) == [("RegionLock", "ApprovedRegionsOnly", scp(SCHOOLS))]
 
@@ -485,9 +507,9 @@ def test_a_boundary_condition_limits_access():
         "Condition": {"IpAddress": {"aws:SourceIp": "10.0.0.0/8"}},
     })
     inside = get_with(("aws:SourceIp", "10.1.2.3"))
-    assert evaluate(inside, [BROAD_S3], boundary=district_network).allowed
+    assert check(inside, [BROAD_S3], boundary=district_network).allowed
     outside = get_with(("aws:SourceIp", "198.51.100.7"))
-    result = evaluate(outside, [BROAD_S3], boundary=district_network)
+    result = check(outside, [BROAD_S3], boundary=district_network)
     assert result.decision is Decision.IMPLICIT_DENY
     assert result.not_allowed_by == (BOUNDARY,)
 
@@ -498,10 +520,111 @@ def test_condition_keys_are_only_needed_once_action_and_resource_match():
         "Condition": {"Bool": {"aws:SecureTransport": "false"}},
     })
     # The Deny is for another bucket, so whether GET used HTTPS doesn't matter.
-    assert evaluate(GET, [p]).allowed
+    assert check(GET, [p]).allowed
     other = Request(action="s3:GetObject", resource="arn:aws:s3:::other/x")
     with pytest.raises(MissingContextError, match="aws:SecureTransport, used by p statement 1"):
-        evaluate(other, [p])
+        check(other, [p])
+
+
+# --- Describing the resource -----------------------------------------------------------
+
+USER_ARN = "arn:aws:iam::111122223333:user/jsmith"
+ALLOW_ALL = policy("p", allow("*", "*"))
+
+
+def in_account(account, action="iam:ChangePassword", resource=USER_ARN):
+    """A request from a principal in `account`."""
+    context = RequestContext.of([("aws:PrincipalAccount", account)])
+    return Request(action=action, resource=resource, context=context)
+
+
+def test_a_request_on_an_undescribed_bucket_is_refused():
+    message = f"^nothing describes {BUCKET}: it can have a resource-based policy"
+    with pytest.raises(MissingResourceError, match=message) as exc:
+        evaluate(GET, [ALLOW_ALL])
+    assert exc.value.resource == BUCKET
+
+
+def test_even_a_deny_needs_the_resource_described():
+    # As with an unknown condition key, the analyzer doesn't answer without what it needs.
+    with pytest.raises(MissingResourceError):
+        evaluate(GET, [policy("p", deny("*", "*"))])
+
+
+def test_a_bucket_is_described_for_its_objects():
+    assert evaluate(GET, [ALLOW_ALL], resource=Resource(BUCKET)).allowed
+
+
+def test_the_description_must_be_of_the_bucket():
+    with pytest.raises(RequestError, match=f"needs {BUCKET} described, not {OBJECT}"):
+        evaluate(GET, [ALLOW_ALL], resource=Resource(OBJECT))
+
+
+def test_iam_sts_and_star_resources_need_no_description():
+    assert evaluate(in_account("111122223333"), [ALLOW_ALL]).allowed
+    federation = in_account(
+        "111122223333", "sts:GetFederationToken", "arn:aws:sts::111122223333:federated-user/bob"
+    )
+    assert evaluate(federation, [ALLOW_ALL]).allowed
+    assert evaluate(Request(action="s3:ListAllMyBuckets", resource="*"), [ALLOW_ALL]).allowed
+
+
+def test_a_request_on_an_iam_resource_needs_the_principals_account():
+    with pytest.raises(MissingContextError) as exc:
+        evaluate(Request(action="iam:ChangePassword", resource=USER_ARN), [ALLOW_ALL])
+    assert exc.value.keys == ("aws:PrincipalAccount",)
+    assert str(exc.value).splitlines()[1] == (
+        f"  aws:PrincipalAccount, used by the check that {USER_ARN} is in the principal's account"
+    )
+
+
+def test_a_request_on_another_accounts_resource_is_refused():
+    message = (
+        f"^{USER_ARN} is in account 111122223333, and the principal is in account 444455556666: "
+        "cross-account requests aren't supported yet$"
+    )
+    with pytest.raises(UnsupportedPolicyFeature, match=message):
+        evaluate(in_account("444455556666"), [ALLOW_ALL])
+
+
+def test_a_described_resource_is_in_the_principals_account():
+    queue = "arn:aws:sqs:us-east-1:444455556666:vendor-alerts"
+    send = Request(action="sqs:SendMessage", resource=queue)
+    assert evaluate(send, [ALLOW_ALL], resource=Resource(queue)).allowed
+    # But not when the principal's account is known to be another one.
+    from_district = in_account("111122223333", "sqs:SendMessage", queue)
+    with pytest.raises(UnsupportedPolicyFeature, match="cross-account"):
+        evaluate(from_district, [ALLOW_ALL], resource=Resource(queue))
+
+
+def test_the_principals_account_is_never_absent():
+    context = RequestContext.of(absent=["aws:PrincipalAccount"])
+    request = Request(action="iam:ChangePassword", resource=USER_ARN, context=context)
+    with pytest.raises(RequestError, match="needs exactly one value"):
+        evaluate(request, [ALLOW_ALL])
+
+
+def test_kms_keys_are_refused():
+    key = "arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+    with pytest.raises(UnsupportedPolicyFeature, match="KMS isn't supported yet"):
+        evaluate(Request(action="kms:Decrypt", resource=key), [ALLOW_ALL])
+
+
+def test_trust_policies_are_refused_until_supported():
+    request = in_account("111122223333", "sts:AssumeRole", "arn:aws:iam::111122223333:role/ITAdmin")
+    with pytest.raises(UnsupportedPolicyFeature, match="role trust policies aren't supported yet"):
+        evaluate(request, [ALLOW_ALL])
+
+
+def test_resource_based_policies_are_refused_until_supported():
+    with pytest.raises(UnsupportedPolicyFeature, match="resource-based policies aren't supported"):
+        evaluate(GET, [ALLOW_ALL], resource=Resource(BUCKET, policy=ALLOW_ALL))
+
+
+def test_a_policy_for_a_request_that_no_resource_based_policy_covers():
+    message = "no resource-based policy applies to iam:ChangePassword"
+    with pytest.raises(RequestError, match=message):
+        evaluate(in_account("111122223333"), [ALLOW_ALL], resource=Resource(USER_ARN, ALLOW_ALL))
 
 
 # --- Data-driven scenarios -------------------------------------------------------------
@@ -534,7 +657,13 @@ def test_scenario(path):
         scps = organization.scp_levels_for(
             scenario["account_id"], service_linked=scenario.get("service_linked", False)
         )
+    resource = None
+    if "resource_policy" in scenario:
+        # null says the resource has no resource-based policy, as --no-resource-policy does.
+        assert scenario["resource_policy"] is None, "resource-based policies aren't supported yet"
+        asked = scenario["request"]
+        resource = resources.describe(asked["resource"], asked["action"])
     context = scenario_context(scenario.get("context", {}))
     request = Request(**scenario["request"], context=context)
-    result = evaluate(request, policies, boundary=boundary, scps=scps)
+    result = evaluate(request, policies, boundary=boundary, scps=scps, resource=resource)
     assert result.decision is Decision(scenario["expected"]), scenario.get("description")

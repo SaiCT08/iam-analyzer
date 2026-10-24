@@ -1,0 +1,148 @@
+"""Which resource a request needs described, because of the resource-based policies AWS consults.
+
+AWS also consults the resource-based policy attached to the resource a request is on, such as an
+S3 bucket policy. The analyzer can't tell from an ARN whether a resource has one, or which account
+it is in (an S3 ARN names no account), so a request on a specific resource needs that resource
+described (`models.Resource`). There are three exceptions:
+  - "*", which names no resource;
+  - IAM resources, except a role for the STS actions on it. AWS: "The IAM resource-based policy
+    type is a role trust policy."
+  - STS resources, which AWS's table of services that work with IAM lists with no resource-based
+    policies.
+For an S3 object, it is the bucket that is described, because a bucket policy covers its objects.
+
+That table isn't used to exempt more services: it rates services, not ARN namespaces (EC2 says
+No, but VPC, which also uses ec2: ARNs, says Partial), and it never defines Partial.
+
+Requests on KMS keys are refused, because every key has a key policy that must allow them and the
+analyzer doesn't evaluate key policies yet. So are requests on S3 resources other than buckets and
+objects, such as access points.
+"""
+
+import re
+from dataclasses import dataclass
+
+from iam_analyzer.errors import RequestError, UnsupportedPolicyFeature
+from iam_analyzer.models import Resource
+
+# The STS actions whose resource type is "role" in the STS page of the Service Authorization
+# Reference. A role's trust policy covers them.
+ROLE_ACTIONS = (
+    "sts:AssumeRole",
+    "sts:AssumeRoleWithSAML",
+    "sts:AssumeRoleWithWebIdentity",
+    "sts:SetContext",
+    "sts:SetSourceIdentity",
+    "sts:TagSession",
+)
+# Services whose resources have no resource-based policies of their own. IAM's one kind, a role's
+# trust policy, is handled separately.
+EXEMPT_SERVICES = ("iam", "sts")
+
+_ROLE_ACTIONS = {action.casefold() for action in ROLE_ACTIONS}
+_ACCOUNT_ID = re.compile(r"[0-9]{12}")
+
+
+@dataclass(frozen=True)
+class Arn:
+    """An ARN's six fields: arn:partition:service:region:account:resource."""
+
+    partition: str
+    service: str
+    region: str
+    account: str
+    resource: str
+
+    @classmethod
+    def parse(cls, text: str) -> "Arn | None":
+        """Split `text` into its fields, or return None when it isn't a full ARN."""
+        fields = text.split(":", 5)
+        if len(fields) != 6 or fields[0] != "arn":
+            return None
+        arn = cls(*fields[1:])
+        return arn if arn.partition and arn.service and arn.resource else None
+
+    @property
+    def account_id(self) -> str | None:
+        """The account the ARN names, or None when it names none, as S3 ARNs don't."""
+        return self.account if _ACCOUNT_ID.fullmatch(self.account) else None
+
+
+def governing_arn(resource: str, action: str) -> str | None:
+    """The ARN that a request for `action` on `resource` needs described, or None when no
+    resource-based policy can apply to it.
+
+    Raises UnsupportedPolicyFeature for a resource the analyzer can't evaluate yet, and
+    RequestError for a resource that isn't "*" or one full ARN.
+    """
+    if resource == "*":
+        return None
+    arn = Arn.parse(resource)
+    if arn is None:
+        raise RequestError(
+            f'the resource must be "*" or a full ARN such as arn:aws:s3:::bucket/key, got '
+            f"{resource!r}"
+        )
+    if arn.service == "sts" or (arn.service == "iam" and not _role_action(arn, action)):
+        return None
+    reason = unsupported(arn)
+    if reason is not None:
+        raise UnsupportedPolicyFeature(f"{resource}: {reason}")
+    governing = resource
+    if arn.service == "s3":
+        governing = bucket_arn(arn)
+        if governing.endswith(":::"):
+            raise RequestError(f"the resource {resource!r} names no bucket")
+    if "*" in governing or "?" in governing:
+        raise RequestError(
+            "the request must name one resource, because its resource-based policy depends on "
+            f"which one; got {resource!r}"
+        )
+    return governing
+
+
+def unsupported(arn: Arn) -> str | None:
+    """Why the analyzer can't evaluate requests on `arn` yet, or None when it can."""
+    if arn.service == "kms" and arn.resource.startswith("key/"):
+        return (
+            "KMS isn't supported yet: every KMS key has a key policy that must allow the request, "
+            "and the analyzer doesn't evaluate key policies"
+        )
+    if arn.service == "s3" and (arn.region or arn.account):
+        return (
+            "S3 resources other than buckets and objects, such as access points, aren't "
+            "supported yet"
+        )
+    return None
+
+
+def bucket_arn(arn: Arn) -> str:
+    """The ARN of the bucket that an S3 bucket or object ARN is in."""
+    bucket = arn.resource.split("/", 1)[0]
+    return f"arn:{arn.partition}:s3:::{bucket}"
+
+
+def is_role_arn(text: str) -> bool:
+    arn = Arn.parse(text)
+    return arn is not None and arn.service == "iam" and arn.resource.startswith("role/")
+
+
+def account_of(resource: str) -> str | None:
+    """The account that `resource`'s ARN names, or None when it names none."""
+    arn = Arn.parse(resource)
+    return arn.account_id if arn is not None else None
+
+
+def describe(resource: str, action: str) -> Resource | None:
+    """Describe the resource a request needs as being in the principal's account with no
+    resource-based policy, and for an S3 bucket, with its ACLs disabled. This is what
+    --no-resource-policy says.
+
+    None when the request needs no description.
+    """
+    governing = governing_arn(resource, action)
+    return None if governing is None else Resource(governing)
+
+
+def _role_action(arn: Arn, action: str) -> bool:
+    return arn.resource.startswith("role/") and action.casefold() in _ROLE_ACTIONS

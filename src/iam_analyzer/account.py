@@ -19,21 +19,26 @@ for its own services under "/aws-service-role/", and SCPs never apply to them.
 
 Users and roles can also have `Tags`, in AWS's shape: [{"Key": "campus", "Value": "campus-01"}].
 Policies read them as aws:PrincipalTag/campus. Groups can't be tagged, as in IAM.
+
+`Resources` describes the account's resources by ARN, which a request on a specific resource
+needs (see `resources`): {"arn:aws:s3:::district-staff-files": {}} says the bucket is in this
+account and has no resource-based policy. Describing a bucket also says its ACLs are disabled
+(Object Ownership "Bucket owner enforced"). For an S3 object, its bucket is described.
 """
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from iam_analyzer import _validation
+from iam_analyzer import _validation, resources
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import AccountError
+from iam_analyzer.errors import AccountError, UnsupportedPolicyFeature
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import Policy
+from iam_analyzer.models import Policy, Resource
 
-TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles"}
+TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles", "Resources"}
 # The path AWS gives every service-linked role, e.g. "/aws-service-role/support.amazonaws.com/".
 SERVICE_LINKED_PATH = "/aws-service-role/"
 TAG_PREFIX = "aws:PrincipalTag/"
@@ -84,6 +89,8 @@ class Account:
     users: dict[str, User]
     roles: dict[str, Role]
     account_id: str | None = None
+    # The described resources, keyed by ARN.
+    resources: dict[str, Resource] = field(default_factory=dict)
 
     def policies_for(self, principal: str) -> list[Policy]:
         """Every identity policy that applies to `principal` (`user/NAME` or `role/NAME`).
@@ -150,6 +157,15 @@ class Account:
         return RequestContext.of(
             values, absent, present={key: reason for key, _ in tags}, source=source
         )
+
+    def resource_for(self, resource: str, action: str) -> Resource | None:
+        """What this file says about the resource that a request for `action` on `resource`
+        needs described: for an S3 object, its bucket.
+
+        None when the request needs no description, or when the file doesn't describe it.
+        """
+        governing = resources.governing_arn(resource, action)
+        return None if governing is None else self.resources.get(governing)
 
     def _principal(self, principal: str) -> User | Role:
         kind, _, name = principal.partition("/")
@@ -221,6 +237,11 @@ def parse_account(document: Any, name: str) -> Account:
             tags=_tags(fields, where),
         )
 
+    described = {
+        arn: _resource(arn, raw, account_id, f"{name} resource {arn!r}")
+        for arn, raw in _section(document, "Resources", name).items()
+    }
+
     return Account(
         name=name,
         policies=policies,
@@ -228,7 +249,51 @@ def parse_account(document: Any, name: str) -> Account:
         users=users,
         roles=roles,
         account_id=account_id,
+        resources=described,
     )
+
+
+def _resource(text: str, raw: Any, account_id: str | None, where: str) -> Resource:
+    """Read one `Resources` entry: a resource in this account, and its resource-based policy.
+
+    The ARN must name one resource that a request can need described: not an IAM or STS
+    resource, not a KMS key, and for S3, a bucket rather than an object.
+    """
+    fields = _entry(raw, {"Policy"}, where)
+    arn = resources.Arn.parse(text)
+    if arn is None or "*" in text or "?" in text:
+        raise AccountError(
+            f"{where}: must be the full ARN of one resource, such as "
+            "arn:aws:s3:::district-student-records"
+        )
+    if arn.service in resources.EXEMPT_SERVICES:
+        raise AccountError(
+            f"{where}: IAM and STS resources aren't described here; AWS says the only IAM "
+            "resource-based policy is a role's trust policy, which belongs to the role"
+        )
+    reason = resources.unsupported(arn)
+    if reason is not None:
+        raise UnsupportedPolicyFeature(f"{where}: {reason}")
+    if arn.service == "s3" and resources.bucket_arn(arn) != text:
+        raise AccountError(
+            f"{where}: describe the bucket, not an object in it; a bucket's policy covers its "
+            "objects"
+        )
+    if arn.account:
+        if arn.account_id is None:
+            raise AccountError(f"{where}: the account field must be empty or a 12-digit account ID")
+        if account_id is None:
+            raise AccountError(
+                f"{where}: names account {arn.account}, so the account file needs an 'AccountId'"
+            )
+        if arn.account != account_id:
+            raise AccountError(
+                f"{where}: is in account {arn.account}, not this file's account {account_id}; "
+                "cross-account requests aren't supported yet"
+            )
+    if "Policy" in fields:
+        raise UnsupportedPolicyFeature(f"{where}: resource-based policies aren't supported yet")
+    return Resource(text)
 
 
 def _tags(fields: dict, where: str) -> tuple[tuple[str, str], ...]:

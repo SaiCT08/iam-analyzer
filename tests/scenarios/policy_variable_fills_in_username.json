@@ -14,6 +14,7 @@
     }
   },
   "context": { "aws:username": "jsmith" },
+  "resource_policy": null,
   "request": {
     "action": "s3:PutObject",
     "resource": "arn:aws:s3:::district-staff-files/home/jsmith/lesson-plan.docx"

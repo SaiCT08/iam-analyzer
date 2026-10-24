@@ -5,6 +5,7 @@
       "Statement": [{ "Effect": "Allow", "Action": "S3:getobject", "Resource": "*" }]
     }
   },
+  "resource_policy": null,
   "request": {
     "action": "s3:GetObject",
     "resource": "arn:aws:s3:::district-student-records/roster.csv"

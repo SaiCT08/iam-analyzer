@@ -71,6 +71,7 @@
   "context": {
     "aws:RequestedRegion": "eu-west-1"
   },
+  "resource_policy": null,
   "request": {
     "action": "s3:GetObject",
     "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"

@@ -33,6 +33,7 @@
     }
   },
   "account_id": "111122223333",
+  "resource_policy": null,
   "request": {
     "action": "s3:PutBucketPolicy",
     "resource": "arn:aws:s3:::district-student-records"

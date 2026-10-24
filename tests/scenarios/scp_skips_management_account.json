@@ -27,6 +27,7 @@
     }
   },
   "account_id": "999988887777",
+  "resource_policy": null,
   "request": {
     "action": "s3:DeleteObject",
     "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"

@@ -13,6 +13,7 @@
     }
   },
   "context": { "aws:PrincipalTag/team": null },
+  "resource_policy": null,
   "request": {
     "action": "s3:GetObject",
     "resource": "arn:aws:s3:::district-teams-company-wide/how-to-join-a-team.pdf"

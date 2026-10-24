@@ -17,6 +17,7 @@
       }
     ]
   },
+  "resource_policy": null,
   "request": {
     "action": "s3:PutObject",
     "resource": "arn:aws:s3:::district-gradebook-app/exports/grades.csv"

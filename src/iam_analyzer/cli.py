@@ -1,6 +1,6 @@
 """Command-line interface.
 
-    iam-analyzer check --policy FILE [--policy FILE ...] [--boundary FILE]
+    iam-analyzer check --policy FILE [--policy FILE ...] [--boundary FILE] [--no-resource-policy]
                        --action ACTION --resource ARN [CONTEXT]
     iam-analyzer check --account FILE --principal user/NAME [--org FILE] [--no-session-tags]
                        --action ACTION --resource ARN [CONTEXT]
@@ -9,6 +9,9 @@ CONTEXT describes the request's condition keys:
     --context KEY=VALUE   a key's value (repeat for more keys, or for more values of one key)
     --absent KEY          a key the request doesn't include
 
+A request on a specific resource also needs the resource described: in the account file's
+Resources, or with --no-resource-policy.
+
 Exit codes: 0 = allowed, 1 = denied, 2 = input error.
 """
 
@@ -16,9 +19,10 @@ import argparse
 import sys
 from collections.abc import Sequence
 
+from iam_analyzer import resources
 from iam_analyzer.account import Account, load_account_file
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import AccountError, MissingContextError, PolicyError
+from iam_analyzer.errors import AccountError, MissingContextError, MissingResourceError, PolicyError
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import load_policy_file
 from iam_analyzer.models import (
@@ -41,6 +45,12 @@ MISSING_CONTEXT_HINT = (
     "hint: give each key a value with --context KEY=VALUE, "
     "or use --absent KEY if the request doesn't include it"
 )
+MISSING_RESOURCE_HINT = {
+    "account": "hint: describe it in the account file's Resources, as {} if it has no "
+    "resource-based policy",
+    "policy": "hint: give --no-resource-policy if it is in the same account and has no "
+    "resource-based policy",
+}
 
 
 class _StoreOnce(argparse.Action):
@@ -102,6 +112,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="organization JSON file with SCPs (with --account; the account file needs an "
         "AccountId)",
+    )
+    check.add_argument(
+        "--no-resource-policy",
+        action="store_true",
+        help="with --policy: the request's resource is in the same account and has no "
+        "resource-based policy; for an S3 bucket, also that its ACLs are disabled (Object "
+        "Ownership: Bucket owner enforced). With --account, describe resources in the account "
+        "file's Resources instead",
     )
     check.add_argument(
         "--no-session-tags",
@@ -196,6 +214,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--org only works with --account")
     if args.no_session_tags and not args.account:
         parser.error("--no-session-tags only works with --account")
+    if args.no_resource_policy and args.account:
+        parser.error(
+            "--no-resource-policy only works with --policy; in an account file, "
+            "describe the resource in Resources"
+        )
 
     try:
         context = RequestContext.of(args.context or (), args.absent or ())
@@ -208,16 +231,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.principal, session_tags=not args.no_session_tags
             )
             context = principal.merged(context)
+            resource = account.resource_for(args.resource, args.action)
         else:
             policies = [load_policy_file(path) for path in args.policy]
             boundary = load_policy_file(args.boundary) if args.boundary else None
             scps = ()
+            resource = None
+            if args.no_resource_policy:
+                resource = resources.describe(args.resource, args.action)
         request = Request(action=args.action, resource=args.resource, context=context)
-        result = evaluate(request, policies, boundary=boundary, scps=scps)
+        result = evaluate(request, policies, boundary=boundary, scps=scps, resource=resource)
     except PolicyError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, MissingContextError):
             print(MISSING_CONTEXT_HINT, file=sys.stderr)
+        elif isinstance(exc, MissingResourceError):
+            print(MISSING_RESOURCE_HINT["account" if args.account else "policy"], file=sys.stderr)
         return EXIT_INPUT_ERROR
 
     print(format_result(result, request.context))

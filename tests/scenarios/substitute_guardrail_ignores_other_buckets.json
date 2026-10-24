@@ -29,6 +29,7 @@
       ]
     }
   },
+  "resource_policy": null,
   "request": {
     "action": "s3:PutObject",
     "resource": "arn:aws:s3:::district-lesson-plans/week1.pdf"

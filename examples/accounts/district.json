@@ -226,5 +226,10 @@
       ],
       "PermissionsBoundary": "GradebookVendorBoundary"
     }
+  },
+  "Resources": {
+    "arn:aws:s3:::district-student-records": {},
+    "arn:aws:s3:::district-staff-files": {},
+    "arn:aws:s3:::district-gradebook-app": {}
   }
 }

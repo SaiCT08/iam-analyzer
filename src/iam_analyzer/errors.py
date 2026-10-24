@@ -41,3 +41,16 @@ class MissingContextError(RequestError):
     def __init__(self, message: str, keys: Iterable[str]) -> None:
         super().__init__(message)
         self.keys = tuple(keys)
+
+
+class MissingResourceError(RequestError):
+    """The request is on a resource that can have a resource-based policy, and nothing describes it.
+
+    Treating it as having none, in the principal's own account, could leave out a bucket policy's
+    Deny or Allow, so the analyzer refuses instead. `resource` is the ARN that needs describing:
+    for an S3 object, its bucket.
+    """
+
+    def __init__(self, message: str, resource: str) -> None:
+        super().__init__(message)
+        self.resource = resource

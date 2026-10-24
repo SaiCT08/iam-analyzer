@@ -5,6 +5,7 @@
       "Statement": [{ "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs" }]
     }
   },
+  "resource_policy": null,
   "request": {
     "action": "sqs:SendMessage",
     "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"

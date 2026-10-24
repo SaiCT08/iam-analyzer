@@ -33,10 +33,15 @@ policies (SCPs)**:
   refused with a clear error instead of being evaluated. Examples: a repeated JSON key, an unknown
   `Version`, a `Sid` with characters other than letters and digits, or an action without a service
   prefix.
+- A request on a specific resource needs that resource described: whether it has a resource-based
+  policy, and that it's in the principal's own account. The analyzer never assumes either (see
+  [Resources](#resources)).
 
 Not supported yet:
 - `Principal` and `NotPrincipal` are rejected with a clear error.
-- Resource-based policies, such as S3 bucket policies, aren't evaluated.
+- Resource-based policies, such as S3 bucket policies, aren't evaluated yet. A resource can only be
+  described as having none.
+- Cross-account requests, KMS keys and role trust policies are refused.
 
 ## Setup
 
@@ -52,6 +57,7 @@ pip install -e ".[dev]"
 iam-analyzer check \
   --policy examples/policies/teacher_read_grades.json \
   --policy examples/policies/deny_student_records_delete.json \
+  --no-resource-policy \
   --action s3:DeleteObject \
   --resource arn:aws:s3:::district-student-records/2026/roster.csv
 ```
@@ -66,6 +72,10 @@ EXPLICIT_DENY
 `--action` names one action, as a real AWS request does. A wildcard such as `s3:*` is an input
 error.
 
+`--no-resource-policy` says the bucket is in the same account and has no bucket policy (see
+[Resources](#resources)). An S3 ARN doesn't say either, so without the flag the analyzer stops
+and asks.
+
 ### Permissions boundaries
 
 `--boundary FILE` adds a permissions boundary. Here a gradebook vendor's role has full S3 access,
@@ -75,6 +85,7 @@ but its boundary only covers the gradebook app's own bucket, so it can't read st
 iam-analyzer check \
   --policy examples/policies/it_admin_full_s3.json \
   --boundary examples/policies/gradebook_vendor_boundary.json \
+  --no-resource-policy \
   --action s3:GetObject \
   --resource arn:aws:s3:::district-student-records/2026/roster.csv
 ```
@@ -94,10 +105,11 @@ An account file defines policies once, by name, and attaches them to users, grou
 
 ```json
 {
-  "Policies": { "TeacherReadGrades": { "Statement": [ ... ] } },
-  "Groups":   { "Teachers": { "Policies": ["TeacherReadGrades"] } },
-  "Users":    { "jsmith": { "Groups": ["Teachers"], "Policies": [] } },
-  "Roles":    { "ITAdmin": { "Policies": ["..."], "PermissionsBoundary": "..." } }
+  "Policies":  { "TeacherReadGrades": { "Statement": [ ... ] } },
+  "Groups":    { "Teachers": { "Policies": ["TeacherReadGrades"] } },
+  "Users":     { "jsmith": { "Groups": ["Teachers"], "Policies": [] } },
+  "Roles":     { "ITAdmin": { "Policies": ["..."], "PermissionsBoundary": "..." } },
+  "Resources": { "arn:aws:s3:::district-student-records": {} }
 }
 ```
 
@@ -136,6 +148,66 @@ IAM, groups can't be tagged.
 ```json
 "rnguyen": { "Groups": ["Registrars"], "Tags": [{ "Key": "campus", "Value": "campus-02" }] }
 ```
+
+### Resources
+
+AWS also consults a policy attached to the resource a request is on, such as an S3 bucket policy.
+That policy can allow a request the identity policies don't, or deny one they allow. A resource's
+ARN doesn't say whether it has such a policy, or which account the resource is in: an S3 ARN names
+no account at all. So a request on a specific resource needs the resource *described*, and without
+a description the analyzer stops instead of assuming it has none.
+
+In an account file, `Resources` describes resources by ARN. `{}` says the resource is in this
+account and has no resource-based policy:
+
+```json
+"Resources": {
+  "arn:aws:s3:::district-student-records": {},
+  "arn:aws:s3:::district-staff-files": {}
+}
+```
+
+For an S3 object, describe its bucket: a bucket policy covers the bucket's objects. With
+`--policy`, `--no-resource-policy` says the same thing about the request's resource: it's in the
+same account and has no resource-based policy.
+
+Describing a bucket also says its ACLs are disabled, meaning its Object Ownership setting is
+"Bucket owner enforced". That has been S3's default for new buckets since April 2023, and it makes
+the bucket policy the only resource-based control on the bucket's objects. With ACLs on, ACL grants
+can add access, and objects can be owned by other accounts. The analyzer models neither. Check the
+setting (`aws s3api get-bucket-ownership-controls`) rather than assume the default: AWS's
+create-bucket page also says the AWS CLI creates buckets with ACLs enabled when the setting isn't
+given.
+
+Without a description, the check stops:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/jsmith \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::district-lesson-plans/week1.pdf
+```
+
+```
+error: nothing describes arn:aws:s3:::district-lesson-plans: it can have a resource-based policy, and the analyzer can't tell whether it has one, or which account it is in
+hint: describe it in the account file's Resources, as {} if it has no resource-based policy
+```
+
+Some requests need no description:
+- `"*"`, which names no resource, as for `s3:ListAllMyBuckets`.
+- IAM and STS resources. AWS says the only IAM resource-based policy is a role's trust policy, and
+  STS has none. Their ARNs name an account, so the analyzer needs the principal's account,
+  `aws:PrincipalAccount`. With `--account`, the file's `AccountId` fills it in; with `--policy`,
+  give it with `--context`.
+
+The analyzer refuses:
+- A request on a resource in another account. Cross-account requests also need the other
+  account's policies, which aren't modeled yet.
+- Requests on KMS keys, because every key has a key policy that must allow the request.
+- S3 resources other than buckets and objects, such as access points.
+- Role trust policies (for `sts:AssumeRole` and the other STS actions on a role), and
+  resource-based policies themselves, which come in later phases.
 
 ### Organizations and SCPs
 
@@ -216,6 +288,7 @@ The values come from the *request context*: the condition keys a request carries
 ```sh
 iam-analyzer check \
   --policy examples/policies/staff_home_folder.json \
+  --no-resource-policy \
   --action s3:PutObject \
   --resource arn:aws:s3:::district-staff-files/home/jsmith/lesson-plan.docx
 ```
@@ -340,5 +413,6 @@ pytest tests/test_evaluator.py -k deny   # tests whose name matches "deny"
 ```
 
 Data-driven scenarios live in `tests/scenarios/*.json`. Each one holds policies, a request and the
-expected decision, plus an optional request `context` (`null` marks a key as absent). To add a
-case, drop in a new file.
+expected decision, plus an optional request `context` (`null` marks a key as absent). A request on a
+specific resource also needs `"resource_policy": null`, which describes the resource as having no
+resource-based policy, as `--no-resource-policy` does. To add a case, drop in a new file.

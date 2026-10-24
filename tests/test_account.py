@@ -5,7 +5,13 @@ import pytest
 
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import AccountError, PolicyParseError, RequestError
+from iam_analyzer.errors import (
+    AccountError,
+    PolicyParseError,
+    RequestError,
+    UnsupportedPolicyFeature,
+)
+from iam_analyzer.models import Resource
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "accounts" / "district.json"
 
@@ -356,3 +362,76 @@ def test_principal_arn_needs_an_account_id():
 def test_principal_context_for_an_unknown_principal():
     with pytest.raises(AccountError, match="no user named 'nobody'"):
         account(Users={"jsmith": {}}).principal_context("user/nobody")
+
+
+# --- Resources -------------------------------------------------------------------------
+
+RECORDS = "arn:aws:s3:::district-student-records"
+ALERTS = "arn:aws:sqs:us-east-1:111122223333:district-alerts"
+
+
+def test_resources_describe_buckets_and_other_resources():
+    acct = account(AccountId="111122223333", Resources={RECORDS: {}, ALERTS: {}})
+    assert acct.resources == {RECORDS: Resource(RECORDS), ALERTS: Resource(ALERTS)}
+    # A bucket is described for its objects.
+    assert acct.resource_for(f"{RECORDS}/2026/roster.csv", "s3:GetObject") == Resource(RECORDS)
+    assert acct.resource_for(ALERTS, "sqs:SendMessage") == Resource(ALERTS)
+
+
+def test_resource_for_is_none_when_nothing_is_described_or_needed():
+    acct = account(Resources={RECORDS: {}})
+    assert acct.resource_for("arn:aws:s3:::district-lesson-plans/week1.pdf", "s3:GetObject") is None
+    assert acct.resource_for("arn:aws:iam::111122223333:user/jsmith", "iam:GetUser") is None
+    assert acct.resource_for("*", "s3:ListAllMyBuckets") is None
+
+
+def test_example_account_describes_its_buckets():
+    assert set(load_account_file(EXAMPLE).resources) == {
+        RECORDS,
+        "arn:aws:s3:::district-staff-files",
+        "arn:aws:s3:::district-gradebook-app",
+    }
+
+
+@pytest.mark.parametrize(
+    "described, error, message",
+    [
+        ([], AccountError, "'Resources' must be a JSON object"),
+        ({RECORDS: []}, AccountError, f"resource '{RECORDS}': must be a JSON object"),
+        ({RECORDS: {"Tags": []}}, AccountError, "unknown key"),
+        ({"district-student-records": {}}, AccountError, "must be the full ARN of one resource"),
+        ({"arn:aws:s3:::district-*": {}}, AccountError, "must be the full ARN of one resource"),
+        ({"arn:aws:iam::111122223333:role/ITAdmin": {}}, AccountError, "IAM and STS resources"),
+        ({"arn:aws:sts::111122223333:federated-user/bob": {}}, AccountError, "IAM and STS"),
+        ({f"{RECORDS}/2026/roster.csv": {}}, AccountError, "describe the bucket, not an object"),
+        (
+            {"arn:aws:kms:us-east-1:111122223333:key/1234abcd": {}},
+            UnsupportedPolicyFeature,
+            "KMS isn't supported yet",
+        ),
+        (
+            {"arn:aws:s3:us-east-1:111122223333:accesspoint/records": {}},
+            UnsupportedPolicyFeature,
+            "such as access points",
+        ),
+        (
+            {"arn:aws:sqs:us-east-1:444455556666:alerts": {}},
+            AccountError,
+            "is in account 444455556666, not this file's account 111122223333; cross-account",
+        ),
+        ({"arn:aws:sqs:us-east-1:aws:alerts": {}}, AccountError, "empty or a 12-digit account ID"),
+        (
+            {RECORDS: {"Policy": {"Statement": []}}},
+            UnsupportedPolicyFeature,
+            "resource-based policies aren't supported yet",
+        ),
+    ],
+)
+def test_invalid_resources(described, error, message):
+    with pytest.raises(error, match=message):
+        account(AccountId="111122223333", Resources=described)
+
+
+def test_a_resource_that_names_an_account_needs_the_files_account_id():
+    with pytest.raises(AccountError, match="names account 111122223333, so the account file needs"):
+        account(Resources={ALERTS: {}})

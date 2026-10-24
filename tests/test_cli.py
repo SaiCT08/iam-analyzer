@@ -11,6 +11,8 @@ NO_DELETE = str(POLICIES / "deny_student_records_delete.json")
 IT_ADMIN = str(POLICIES / "it_admin_full_s3.json")
 VENDOR_BOUNDARY = str(POLICIES / "gradebook_vendor_boundary.json")
 ROSTER = "arn:aws:s3:::district-student-records/2026/roster.csv"
+# With --policy, a request on a specific resource needs it described.
+NO_RESOURCE_POLICY = "--no-resource-policy"
 
 
 def run(capsys, *args):
@@ -21,7 +23,7 @@ def run(capsys, *args):
 
 def test_explicit_deny(capsys):
     code, out, _ = run(
-        capsys, "--policy", TEACHER, "--policy", NO_DELETE,
+        capsys, "--policy", TEACHER, "--policy", NO_DELETE, NO_RESOURCE_POLICY,
         "--action", "s3:DeleteObject", "--resource", ROSTER,
     )
     assert code == EXIT_DENIED
@@ -32,7 +34,7 @@ def test_explicit_deny(capsys):
 
 def test_allow(capsys):
     code, out, _ = run(
-        capsys, "--policy", TEACHER, "--policy", NO_DELETE,
+        capsys, "--policy", TEACHER, "--policy", NO_DELETE, NO_RESOURCE_POLICY,
         "--action", "s3:GetObject", "--resource", ROSTER,
     )
     assert code == EXIT_ALLOWED
@@ -65,8 +67,8 @@ def test_conditional_deny(capsys, tmp_path):
         '{"Statement": [{"Sid": "HttpsOnly", "Effect": "Deny", "Action": "*", "Resource": "*",'
         ' "Condition": {"Bool": {"aws:SecureTransport": "false"}}}]}'
     )
-    args = ["--policy", TEACHER, "--policy", str(path), "--action", "s3:GetObject",
-            "--resource", ROSTER]
+    args = ["--policy", TEACHER, "--policy", str(path), NO_RESOURCE_POLICY,
+            "--action", "s3:GetObject", "--resource", ROSTER]
     code, out, _ = run(capsys, *args, "--context", "aws:SecureTransport=false")
     assert code == EXIT_DENIED
     assert out.splitlines() == [
@@ -151,7 +153,7 @@ def test_account_argument_misuse_exits_with_usage_error(args):
 
 def test_boundary_blocks_what_identity_allows(capsys):
     code, out, _ = run(
-        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY,
+        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY, NO_RESOURCE_POLICY,
         "--action", "s3:GetObject", "--resource", ROSTER,
     )
     assert code == EXIT_DENIED
@@ -160,7 +162,7 @@ def test_boundary_blocks_what_identity_allows(capsys):
 
 def test_boundary_allow_lists_both_layers(capsys):
     code, out, _ = run(
-        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY,
+        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY, NO_RESOURCE_POLICY,
         "--action", "s3:PutObject", "--resource", "arn:aws:s3:::district-gradebook-app/grades.csv",
     )
     assert code == EXIT_ALLOWED
@@ -173,7 +175,7 @@ def test_boundary_allow_lists_both_layers(capsys):
 
 def test_boundary_deny_is_explicit(capsys):
     code, out, _ = run(
-        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY,
+        capsys, "--policy", IT_ADMIN, "--boundary", VENDOR_BOUNDARY, NO_RESOURCE_POLICY,
         "--action", "s3:DeleteBucket", "--resource", "arn:aws:s3:::district-gradebook-app",
     )
     assert code == EXIT_DENIED
@@ -281,7 +283,8 @@ OWN_PASSWORD = {"Version": "2012-10-17", "Statement": [{
 
 def test_aws_username_is_replaced_by_the_callers_name(capsys, tmp_path):
     # Review finding F1: AWS fills in ${aws:username} with "jsmith" and allows this.
-    path = account_file(tmp_path, {"Policies": {"ChangeOwnPassword": OWN_PASSWORD},
+    path = account_file(tmp_path, {"AccountId": "111122223333",
+                                   "Policies": {"ChangeOwnPassword": OWN_PASSWORD},
                                    "Users": {"jsmith": {"Policies": ["ChangeOwnPassword"]}}})
     args = ["--account", path, "--principal", "user/jsmith", "--action", "iam:ChangePassword"]
     code, _, _ = run(capsys, *args, "--resource", "arn:aws:iam::111122223333:user/jsmith")
@@ -293,6 +296,7 @@ def test_aws_username_is_replaced_by_the_callers_name(capsys, tmp_path):
 def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
     # Matched as literal text, this Deny would never apply and the request would be allowed.
     path = account_file(tmp_path, {
+        "AccountId": "111122223333",
         "Policies": {
             "AdminAll": {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
             "NoSelfDelete": {"Version": "2012-10-17", "Statement": [{
@@ -310,7 +314,8 @@ def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
 
 def test_a_role_has_no_user_name(capsys, tmp_path):
     # AWS's docs disagree on a variable with no value, so the analyzer refuses.
-    path = account_file(tmp_path, {"Policies": {"ChangeOwnPassword": OWN_PASSWORD},
+    path = account_file(tmp_path, {"AccountId": "111122223333",
+                                   "Policies": {"ChangeOwnPassword": OWN_PASSWORD},
                                    "Roles": {"Helper": {"Policies": ["ChangeOwnPassword"]}}})
     code, out, err = run(capsys, "--account", path, "--principal", "role/Helper",
                          "--action", "iam:ChangePassword",
@@ -385,8 +390,8 @@ LESSON = "arn:aws:s3:::district-staff-files/home/jsmith/lesson-plan.docx"
 
 
 def test_policy_mode_names_a_missing_key(capsys):
-    code, out, err = run(capsys, "--policy", HOME_FOLDER, "--action", "s3:PutObject",
-                         "--resource", LESSON)
+    code, out, err = run(capsys, "--policy", HOME_FOLDER, NO_RESOURCE_POLICY,
+                         "--action", "s3:PutObject", "--resource", LESSON)
     assert code == EXIT_INPUT_ERROR
     assert out == ""
     assert err.splitlines() == [
@@ -398,7 +403,8 @@ def test_policy_mode_names_a_missing_key(capsys):
 
 
 def test_context_gives_a_key_its_value(capsys):
-    args = ["--policy", HOME_FOLDER, "--action", "s3:PutObject", "--resource", LESSON]
+    args = ["--policy", HOME_FOLDER, NO_RESOURCE_POLICY, "--action", "s3:PutObject",
+            "--resource", LESSON]
     code, _, _ = run(capsys, *args, "--context", "aws:username=jsmith")
     assert code == EXIT_ALLOWED
     code, _, _ = run(capsys, *args, "--context", "aws:username=mgarcia")
@@ -406,8 +412,8 @@ def test_context_gives_a_key_its_value(capsys):
 
 
 def test_absent_key_with_no_default_is_refused(capsys):
-    code, _, err = run(capsys, "--policy", HOME_FOLDER, "--action", "s3:PutObject",
-                       "--resource", LESSON, "--absent", "aws:username")
+    code, _, err = run(capsys, "--policy", HOME_FOLDER, NO_RESOURCE_POLICY,
+                       "--action", "s3:PutObject", "--resource", LESSON, "--absent", "aws:username")
     assert code == EXIT_INPUT_ERROR
     assert "policy variable '${aws:username}' has no value in this request" in err
 
@@ -457,6 +463,7 @@ TAGGED_ROLE = {
         "Resource": "arn:aws:s3:::district-student-records/${aws:PrincipalTag/campus}/*"}]}},
     "Roles": {"CampusApp": {"Policies": ["CampusRecords"],
                             "Tags": [{"Key": "campus", "Value": "campus-01"}]}},
+    "Resources": {"arn:aws:s3:::district-student-records": {}},
 }
 
 
@@ -528,9 +535,9 @@ def test_allow_reasons_show_their_conditions(capsys, tmp_path):
         "Sid": "DistrictNetwork", "Effect": "Allow", "Action": "s3:GetObject", "Resource": "*",
         "Condition": {"IpAddress": {"aws:SourceIp": ["10.0.0.0/8", "192.0.2.0/24"]},
                       "StringLike": {"s3:prefix": ""}}}]}))
-    code, out, _ = run(capsys, "--policy", str(path), "--action", "s3:GetObject",
-                       "--resource", ROSTER, "--context", "aws:SourceIp=10.1.2.3",
-                       "--context", "s3:prefix=")
+    code, out, _ = run(capsys, "--policy", str(path), NO_RESOURCE_POLICY,
+                       "--action", "s3:GetObject", "--resource", ROSTER,
+                       "--context", "aws:SourceIp=10.1.2.3", "--context", "s3:prefix=")
     assert code == EXIT_ALLOWED
     assert out.splitlines() == [
         "ALLOW",
@@ -538,3 +545,66 @@ def test_allow_reasons_show_their_conditions(capsys, tmp_path):
         "         IpAddress aws:SourceIp: 10.0.0.0/8, 192.0.2.0/24 (request: 10.1.2.3)",
         '         StringLike s3:prefix: "" (request: "")',
     ]
+
+
+# --- Describing resources --------------------------------------------------------------
+
+NOTHING_DESCRIBES = (
+    "error: nothing describes {}: it can have a resource-based policy, and the analyzer can't "
+    "tell whether it has one, or which account it is in"
+)
+
+
+def test_policy_mode_needs_the_resource_described(capsys):
+    code, out, err = run(capsys, "--policy", TEACHER, "--action", "s3:GetObject",
+                         "--resource", ROSTER)
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert err.splitlines() == [
+        NOTHING_DESCRIBES.format("arn:aws:s3:::district-student-records"),
+        "hint: give --no-resource-policy if it is in the same account and has no "
+        "resource-based policy",
+    ]
+
+
+def test_account_mode_names_an_undescribed_bucket(capsys):
+    code, out, err = run(capsys, "--account", ACCOUNT, "--principal", "user/jsmith",
+                         "--action", "s3:GetObject",
+                         "--resource", "arn:aws:s3:::district-lesson-plans/week1.pdf")
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert err.splitlines() == [
+        NOTHING_DESCRIBES.format("arn:aws:s3:::district-lesson-plans"),
+        "hint: describe it in the account file's Resources, as {} if it has no resource-based "
+        "policy",
+    ]
+
+
+def test_no_resource_policy_only_works_with_policy(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["check", "--account", ACCOUNT, "--principal", "user/jsmith", NO_RESOURCE_POLICY,
+              "--action", "s3:GetObject", "--resource", ROSTER])
+    assert exc.value.code == 2
+    assert "--no-resource-policy only works with --policy" in capsys.readouterr().err
+
+
+def test_kms_requests_are_refused(capsys):
+    key = "arn:aws:kms:us-east-1:111122223333:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+    code, out, err = run(capsys, "--policy", IT_ADMIN, NO_RESOURCE_POLICY,
+                         "--action", "kms:Decrypt", "--resource", key)
+    assert code == EXIT_INPUT_ERROR
+    assert out == ""
+    assert "KMS isn't supported yet: every KMS key has a key policy" in err
+
+
+def test_an_iam_request_needs_the_principals_account(capsys):
+    user = "arn:aws:iam::111122223333:user/jsmith"
+    args = ["--policy", IT_ADMIN, "--action", "iam:GetUser", "--resource", user]
+    code, _, err = run(capsys, *args)
+    assert code == EXIT_INPUT_ERROR
+    assert f"  aws:PrincipalAccount, used by the check that {user} is in the principal's" in err
+    code, _, err = run(capsys, *args, "--context", "aws:PrincipalAccount=444455556666")
+    assert code == EXIT_INPUT_ERROR
+    assert "cross-account requests aren't supported yet" in err
+    code, _, _ = run(capsys, *args, "--context", "aws:PrincipalAccount=111122223333")
+    assert code == EXIT_DENIED  # the policy only allows S3

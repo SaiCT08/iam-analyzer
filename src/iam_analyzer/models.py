@@ -111,6 +111,24 @@ class Policy:
 
 
 @dataclass(frozen=True)
+class Resource:
+    """What the analyzer can't tell from a resource's ARN: its resource-based policy, and that it
+    is in the principal's own account.
+
+    `arn` is the resource the policy is attached to. For an S3 object, that is its bucket, whose
+    policy covers its objects. `policy` is None when the resource has no resource-based policy.
+
+    Describing an S3 bucket also says its ACLs are disabled (Object Ownership "Bucket owner
+    enforced"). Then the bucket policy is the only resource-based control on its objects: with
+    ACLs on, ACL grants could add access and objects could belong to other accounts, and the
+    analyzer models neither.
+    """
+
+    arn: str
+    policy: Policy | None = None
+
+
+@dataclass(frozen=True)
 class Request:
     """The question being asked: can the principal perform `action` on `resource`?
 

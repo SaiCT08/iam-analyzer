@@ -21,13 +21,25 @@ policies allow.
 When matching a statement needs a condition key the request context says nothing about,
 there is no answer to give: evaluation raises one MissingContextError that names every such
 key and the statements that use it.
+
+A request on a specific resource also needs that resource described (`models.Resource`, and
+`resources` for which requests need one), because the analyzer can't tell from an ARN whether the
+resource has a resource-based policy or which account it is in. Without a description, evaluation
+raises MissingResourceError. Requests on a resource in another account are refused, since they
+also need that account's policies.
 """
 
 from collections.abc import Iterable, Sequence
 
-from iam_analyzer import conditions, variables
+from iam_analyzer import conditions, resources, variables
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import MissingContextError, PolicyError, UnsupportedPolicyFeature
+from iam_analyzer.errors import (
+    MissingContextError,
+    MissingResourceError,
+    PolicyError,
+    RequestError,
+    UnsupportedPolicyFeature,
+)
 from iam_analyzer.matching import Pattern, match_action, match_resource
 from iam_analyzer.models import (
     Decision,
@@ -38,9 +50,14 @@ from iam_analyzer.models import (
     Policy,
     PolicyType,
     Request,
+    Resource,
     ScpLevel,
     Statement,
 )
+
+# The principal's account, which a request on an IAM or STS resource needs, so that a request on
+# another account's resource isn't mistaken for one within the principal's own account.
+PRINCIPAL_ACCOUNT = "aws:PrincipalAccount"
 
 
 def statement_matches(statement: Statement, request: Request) -> bool:
@@ -86,16 +103,24 @@ def evaluate(
     *,
     boundary: Policy | None = None,
     scps: Sequence[ScpLevel] = (),
+    resource: Resource | None = None,
 ) -> EvaluationResult:
     """Evaluate `request` against identity `policies`, an optional permissions boundary,
-    and the SCP levels from the organization root down to the principal's account."""
+    and the SCP levels from the organization root down to the principal's account.
+
+    `resource` describes the resource the request is on. Every request on a specific resource
+    needs one, except a request on an IAM or STS resource.
+    """
+    missing: list[tuple[str, str]] = []
+    described = _check_resource(request, resource)
+    _check_same_account(request, described, missing)
+
     layers = [(Layer(PolicyType.IDENTITY), tuple(policies))]
     if boundary is not None:
         layers.append((Layer(PolicyType.PERMISSIONS_BOUNDARY), (boundary,)))
     # A level with no SCPs has no Allow, so it denies: the safe default.
     layers += [(Layer(PolicyType.SCP, level.target), level.policies) for level in scps]
 
-    missing: list[tuple[str, str]] = []
     matched = [
         (layer, _matching(request, layer, layer_policies, missing))
         for layer, layer_policies in layers
@@ -114,6 +139,64 @@ def evaluate(
         return EvaluationResult(Decision.IMPLICIT_DENY, not_allowed_by=not_allowed_by)
 
     return EvaluationResult(Decision.ALLOW, tuple(every))
+
+
+def _check_resource(request: Request, resource: Resource | None) -> bool:
+    """Check that `resource` describes what the request needs. Returns whether it needed one."""
+    governing = resources.governing_arn(request.resource, request.action)
+    if governing is None:
+        if resource is not None and resource.policy is not None:
+            raise RequestError(
+                f"no resource-based policy applies to {request.action} on {request.resource}"
+            )
+        return False
+    if resources.is_role_arn(governing):
+        raise UnsupportedPolicyFeature(
+            f"{request.action} on {governing}: role trust policies aren't supported yet"
+        )
+    if resource is None:
+        raise MissingResourceError(
+            f"nothing describes {governing}: it can have a resource-based policy, and the analyzer "
+            "can't tell whether it has one, or which account it is in",
+            governing,
+        )
+    if resource.arn != governing:
+        raise RequestError(
+            f"a request on {request.resource} needs {governing} described, not {resource.arn}"
+        )
+    if resource.policy is not None:
+        raise UnsupportedPolicyFeature(f"{governing}: resource-based policies aren't supported yet")
+    return True
+
+
+def _check_same_account(request: Request, described: bool, missing: list[tuple[str, str]]) -> None:
+    """Refuse a request on a resource in another account, which also needs that account's
+    policies.
+
+    A described resource is in the principal's account by its description. For an IAM or STS
+    resource, whose ARN names its account, the principal's account must be known: if it isn't,
+    PRINCIPAL_ACCOUNT is added to `missing`.
+    """
+    account = resources.account_of(request.resource)
+    if account is None:
+        return
+    context = request.context
+    if not context.knows(PRINCIPAL_ACCOUNT):
+        if not described:
+            check = f"the check that {request.resource} is in the principal's account"
+            missing.append((PRINCIPAL_ACCOUNT, check))
+        return
+    found = context.get(PRINCIPAL_ACCOUNT)
+    if found is None or len(found) != 1:
+        raise RequestError(
+            f"condition key {PRINCIPAL_ACCOUNT!r} needs exactly one value: every request has one, "
+            "the principal's account"
+        )
+    if found[0] != account:
+        raise UnsupportedPolicyFeature(
+            f"{request.resource} is in account {account}, and the principal is in account "
+            f"{found[0]}: cross-account requests aren't supported yet"
+        )
 
 
 def _matching(

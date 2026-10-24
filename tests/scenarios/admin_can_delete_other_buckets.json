@@ -14,6 +14,7 @@
       ]
     }
   },
+  "resource_policy": null,
   "request": {
     "action": "s3:DeleteObject",
     "resource": "arn:aws:s3:::district-cafeteria-menus/week-40.pdf"

@@ -14,6 +14,7 @@
   "boundary": {
     "Statement": [{ "Effect": "Allow", "Action": "s3:*", "Resource": "*" }]
   },
+  "resource_policy": null,
   "request": {
     "action": "s3:PutObject",
     "resource": "arn:aws:s3:::district-student-records/campus-01/grades.csv"
