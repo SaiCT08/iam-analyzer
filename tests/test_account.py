@@ -425,7 +425,7 @@ def test_example_account_describes_its_buckets():
         (
             {ALERTS: {"Policy": BUCKET_POLICY}},
             UnsupportedPolicyFeature,
-            f"resource '{ALERTS}': only S3 bucket policies are evaluated so far",
+            f"resource '{ALERTS}': only S3 bucket policies and role trust policies",
         ),
         (
             {RECORDS: {"Policy": {"Statement": [{**READ_STATEMENT}]}}},
@@ -462,3 +462,93 @@ def test_example_account_has_a_bucket_policy_on_student_records():
         "OnlyITAdminChangesThePolicy",
         "CounselorsReadCounselingNotes",
     ]
+
+
+# --- Trust policies --------------------------------------------------------------------
+
+ADMIN_ARN = "arn:aws:iam::111122223333:role/district/ITAdmin"
+TRUST_ACCOUNT = {"Statement": [{"Effect": "Allow", "Principal": {"AWS": "111122223333"},
+                                "Action": "sts:AssumeRole"}]}
+TRUST_SAML = {"Statement": [{
+    "Effect": "Allow", "Principal": {"Federated": "arn:aws:iam::111122223333:saml-provider/IdP"},
+    "Action": "sts:AssumeRoleWithSAML"}]}
+
+
+def with_role(trust=TRUST_ACCOUNT, **role):
+    return account(AccountId="111122223333", Roles={"ITAdmin": {
+        "Path": "/district/", "AssumeRolePolicyDocument": trust, **role}})
+
+
+def test_a_roles_trust_policy_is_named_after_the_role():
+    trust_policy = with_role().roles["ITAdmin"].trust_policy
+    assert trust_policy.name == ADMIN_ARN
+    assert trust_policy.statements[0].resources == ()
+
+
+def test_a_trust_policy_needs_the_files_account_id():
+    message = "role 'ITAdmin': a trust policy names principals by ARN"
+    with pytest.raises(AccountError, match=message):
+        account(Roles={"ITAdmin": {"AssumeRolePolicyDocument": TRUST_ACCOUNT}})
+
+
+def test_resource_for_finds_a_role_and_its_trust_policy():
+    acct = with_role()
+    found = acct.resource_for(ADMIN_ARN, "sts:AssumeRole")
+    assert found == Resource(ADMIN_ARN, acct.roles["ITAdmin"].trust_policy)
+    # The trust policy only covers the STS actions on the role.
+    assert acct.resource_for(ADMIN_ARN, "iam:GetRole") is None
+
+
+def test_resource_for_a_role_the_file_cant_describe():
+    acct = account(AccountId="111122223333", Roles={"Helper": {}})
+    # No trust policy in the file: the evaluator says it needs one.
+    assert acct.resource_for("arn:aws:iam::111122223333:role/Helper", "sts:AssumeRole") is None
+    # Another account's role: the evaluator refuses it as cross-account.
+    assert acct.resource_for("arn:aws:iam::444455556666:role/Helper", "sts:AssumeRole") is None
+
+
+@pytest.mark.parametrize(
+    "arn, error, message",
+    [
+        ("arn:aws:iam::111122223333:role/district/Nobody", AccountError, "no role named 'Nobody'"),
+        (
+            "arn:aws:iam::111122223333:role/ITAdmin",
+            AccountError,
+            "role 'ITAdmin' has the path '/district/', not '/'",
+        ),
+        (
+            "arn:aws:iam::111122223333:role/district/itadmin",
+            UnsupportedPolicyFeature,
+            "IAM role names ignore case, and AWS doesn't say whether a role ARN does too",
+        ),
+    ],
+)
+def test_role_arns_that_dont_name_a_role_in_the_file(arn, error, message):
+    with pytest.raises(error, match=message):
+        with_role().resource_for(arn, "sts:AssumeRole")
+
+
+@pytest.mark.parametrize(
+    "trust, complete",
+    [
+        # Only identity providers can assume the role, and sts:TagSession isn't allowed.
+        (TRUST_SAML, True),
+        # A role session in the account could chain in with transitive session tags.
+        (TRUST_ACCOUNT, False),
+    ],
+)
+def test_a_trust_policy_can_rule_out_session_tags(trust, complete):
+    acct = with_role(trust, Tags=[{"Key": "campus", "Value": "campus-01"}])
+    context = acct.principal_context("role/ITAdmin")
+    assert context.knows("aws:PrincipalTag/campus") is complete
+    assert context.knows("aws:PrincipalTag/grade") is complete
+    # Saying the session has no session tags still works either way.
+    assert acct.principal_context("role/ITAdmin", session_tags=False).get(
+        "aws:PrincipalTag/campus"
+    ) == ("campus-01",)
+
+
+def test_example_teacher_sign_in_role_has_only_its_own_tags():
+    context = load_account_file(EXAMPLE).principal_context("role/TeacherSignIn")
+    assert context.get("aws:PrincipalTag/campus") == ("campus-01",)
+    assert context.get("aws:PrincipalTag/grade") is None

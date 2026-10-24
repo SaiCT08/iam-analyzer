@@ -7,7 +7,8 @@ A request is checked against one or more layers of policy:
   - the SCPs of the principal's AWS organization, if it is in one. Each level of the
     organization (the root, each OU, then the account) is a layer of its own, and
   - the resource-based policy of the resource the request is on, if it has one, such as an S3
-    bucket policy.
+    bucket policy. For the STS actions on a role, such as sts:AssumeRole, it is the role's trust
+    policy, which must allow the request.
 
 The logic, in three steps:
   1. Match:   in each layer, keep statements whose Action AND Resource both match the request,
@@ -24,6 +25,9 @@ The logic, in three steps:
                 - the caller's role: the boundary must still allow;
                 - the caller's account: AWS says that "delegates authority to the account",
                   so the identity policies and the boundary must allow, as with no grant.
+              A trust policy must allow too, as AWS says role trust policies "must explicitly
+              allow access". If it names the caller directly while the caller's boundary doesn't
+              allow the request, AWS's docs disagree, so the analyzer refuses.
               Otherwise -> IMPLICIT_DENY (the default is "no")
 
 So boundaries and SCPs never grant anything by themselves; they only limit what identity
@@ -70,6 +74,8 @@ from iam_analyzer.models import (
 # The principal's account, which a request on an IAM or STS resource needs, so that a request on
 # another account's resource isn't mistaken for one within the principal's own account.
 PRINCIPAL_ACCOUNT = "aws:PrincipalAccount"
+# Requests that SAML and OIDC users make, rather than IAM users and role sessions.
+FEDERATED_ACTIONS = ("sts:assumerolewithsaml", "sts:assumerolewithwebidentity")
 
 
 def statement_matches(statement: Statement, request: Request) -> bool:
@@ -89,10 +95,11 @@ def _applies(statement: Statement, request: Request) -> tuple[bool, PrincipalMat
     action_ok = any(match_action(p, request.action) for p in statement.actions)
     if action_ok == statement.not_action:
         return False, None
-    patterns = _resource_patterns(statement, request.context)
-    resource_ok = any(match_resource(p, request.resource) for p in patterns)
-    if resource_ok == statement.not_resource:
-        return False, None
+    if statement.resources:  # a trust policy names none: it covers the role it belongs to
+        patterns = _resource_patterns(statement, request.context)
+        resource_ok = any(match_resource(p, request.resource) for p in patterns)
+        if resource_ok == statement.not_resource:
+            return False, None
     found = refused = None
     if statement.principals is not None:
         if principals.needs_caller(statement.principals):
@@ -145,9 +152,15 @@ def evaluate(
     `resource` describes the resource the request is on. Every request on a specific resource
     needs one, except a request on an IAM or STS resource.
     """
+    if request.action.casefold() in FEDERATED_ACTIONS:
+        raise UnsupportedPolicyFeature(
+            f"{request.action} is called by a SAML or OIDC user, not an IAM user or a role "
+            "session, and the analyzer doesn't evaluate requests by federated users yet"
+        )
     missing: list[tuple[str, str]] = []
-    governing = _check_resource(request, resource)
-    _check_same_account(request, governing is not None, missing)
+    governing = resources.governing_arn(request.resource, request.action)
+    _check_same_account(request, governing is not None and resource is not None, missing)
+    _check_resource(request, governing, resource)
 
     layers = [(Layer(PolicyType.IDENTITY), tuple(policies))]
     if boundary is not None:
@@ -156,7 +169,7 @@ def evaluate(
     layers += [(Layer(PolicyType.SCP, level.target), level.policies) for level in scps]
     resource_layer = None
     if governing is not None and resource.policy is not None:
-        resource_layer = Layer(PolicyType.RESOURCE_BASED, resource=governing)
+        resource_layer = Layer(resources.policy_kind(governing), resource=governing)
         layers.append((resource_layer, (resource.policy,)))
 
     matched = [
@@ -173,6 +186,8 @@ def evaluate(
 
     # No Deny matched, so every matched statement is an Allow.
     grant = principals.strongest(m.principal_match for m in every if m.layer == resource_layer)
+    if resource_layer is not None and resource_layer.policy_type is PolicyType.TRUST:
+        _check_trust_boundary(matched, grant)
     not_allowed_by = _not_allowed_by(matched, grant, resource_layer)
     if not_allowed_by:
         return EvaluationResult(Decision.IMPLICIT_DENY, not_allowed_by=not_allowed_by)
@@ -187,14 +202,15 @@ def _not_allowed_by(
 ) -> tuple[Layer, ...]:
     """The layers whose missing Allow stops the request.
 
-    Every SCP level needs an Allow, and so do the identity policies and the boundary, unless the
-    resource-based policy's `grant` spares them. When that policy grants nothing and the identity
-    side doesn't allow either, it is listed too: it was the other way in.
+    Every SCP level and a role's trust policy need an Allow, and so do the identity policies and
+    the boundary, unless the resource-based policy's `grant` spares them. When a resource-based
+    policy such as a bucket policy grants nothing and the identity side doesn't allow either, it
+    is listed too: it was the other way in.
     """
     blocked = [layer for layer, found in matched if not found and _needed(layer, grant)]
     identity_side = (PolicyType.IDENTITY, PolicyType.PERMISSIONS_BOUNDARY)
-    if resource_layer is not None and grant is None:
-        if any(layer.policy_type in identity_side for layer in blocked):
+    if resource_layer is not None and resource_layer.policy_type is PolicyType.RESOURCE_BASED:
+        if grant is None and any(layer.policy_type in identity_side for layer in blocked):
             blocked.append(resource_layer)
     return tuple(blocked)
 
@@ -205,9 +221,9 @@ def _needed(layer: Layer, grant: PrincipalMatch | None) -> bool:
     AWS: grants to a user ARN "are not limited by an implicit deny in an identity-based policy or
     permissions boundary", and grants to a role ARN "are limited by an implicit deny in a
     permissions boundary". A grant to everyone ("*") counts as direct, and one to the account
-    grants nothing by itself.
+    grants nothing by itself. AWS: "IAM role trust policies ... must explicitly allow access".
     """
-    if layer.policy_type is PolicyType.SCP:
+    if layer.policy_type in (PolicyType.SCP, PolicyType.TRUST):
         return True
     if layer.policy_type is PolicyType.IDENTITY:
         return grant in (None, PrincipalMatch.ACCOUNT)
@@ -216,33 +232,58 @@ def _needed(layer: Layer, grant: PrincipalMatch | None) -> bool:
     return False
 
 
-def _check_resource(request: Request, resource: Resource | None) -> str | None:
-    """Check that `resource` describes what the request needs. Returns the described resource's
-    ARN, or None when the request needs no description."""
-    governing = resources.governing_arn(request.resource, request.action)
+def _check_resource(request: Request, governing: str | None, resource: Resource | None) -> None:
+    """Check that `resource` describes what the request needs: the resource whose ARN is
+    `governing`, or nothing when that is None."""
     if governing is None:
         if resource is not None and resource.policy is not None:
             raise RequestError(
                 f"no resource-based policy applies to {request.action} on {request.resource}"
             )
-        return None
-    if resources.is_role_arn(governing):
-        raise UnsupportedPolicyFeature(
-            f"{request.action} on {governing}: role trust policies aren't supported yet"
-        )
+        return
+    role = resources.is_role_arn(governing)
     if resource is None:
-        raise MissingResourceError(
-            f"nothing describes {governing}: it can have a resource-based policy, and the analyzer "
-            "can't tell whether it has one, or which account it is in",
-            governing,
+        message = (
+            f"nothing gives the trust policy of {governing}, which every role has and which must "
+            "allow this request"
+            if role
+            else f"nothing describes {governing}: it can have a resource-based policy, and the "
+            "analyzer can't tell whether it has one, or which account it is in"
         )
+        raise MissingResourceError(message, governing)
     if resource.arn != governing:
         raise RequestError(
             f"a request on {request.resource} needs {governing} described, not {resource.arn}"
         )
     if resource.policy is not None:
         resources.check_policy_support(governing, where=resource.policy.name)
-    return governing
+    elif role:
+        raise RequestError(
+            f"{governing} is a role, and every role has a trust policy that must allow this "
+            "request: give it instead of saying there is none"
+        )
+
+
+def _check_trust_boundary(
+    matched: list[tuple[Layer, list[MatchedStatement]]], grant: PrincipalMatch | None
+) -> None:
+    """Refuse where AWS's docs disagree: a trust policy that names the caller directly, when the
+    caller's permissions boundary doesn't allow the request.
+
+    The trust policy page says "If a permissions boundary is set for the user, then it must allow
+    the sts:AssumeRole action". The evaluation logic page says grants to an IAM user ARN "are not
+    limited by an implicit deny in an identity-based policy or permissions boundary".
+    """
+    if grant is None or not grant.direct:
+        return
+    for layer, found in matched:
+        if layer.policy_type is PolicyType.PERMISSIONS_BOUNDARY and not found:
+            raise UnsupportedPolicyFeature(
+                "the trust policy names the caller directly, and the caller's permissions "
+                "boundary doesn't allow this: AWS's trust policy page says the boundary must "
+                "allow it, but its evaluation logic page says a boundary doesn't limit a grant "
+                "to a user ARN"
+            )
 
 
 def _check_same_account(request: Request, described: bool, missing: list[tuple[str, str]]) -> None:

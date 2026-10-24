@@ -703,4 +703,93 @@ def test_only_bucket_policies_are_evaluated(capsys):
     code, _, err = run(capsys, "--policy", TEACHER, "--resource-policy", BUCKET_POLICY,
                        "--action", "sqs:SendMessage", "--resource", queue)
     assert code == EXIT_INPUT_ERROR
-    assert "only S3 bucket policies are evaluated so far" in err
+    assert "only S3 bucket policies and role trust policies are evaluated" in err
+
+
+# --- Trust policies --------------------------------------------------------------------
+
+IT_ADMIN_ROLE = "arn:aws:iam::111122223333:role/ITAdmin"
+TRUST_POLICY = str(POLICIES / "it_admin_trust_policy.json")
+
+
+def assume_it_admin(capsys, principal, *flags):
+    return run(capsys, "--account", ACCOUNT, "--principal", principal,
+               "--action", "sts:AssumeRole", "--resource", IT_ADMIN_ROLE, *flags)
+
+
+def test_it_staff_assume_the_admin_role_with_mfa(capsys):
+    mfa = ["--context", "aws:MultiFactorAuthPresent=true"]
+    code, out, _ = assume_it_admin(capsys, "user/alee", *mfa)
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == [
+        "ALLOW",
+        "  Allow  AssumeITAdminRole (via group ITStaff)  Sid=AssumeITAdmin",
+        f"  Allow  {IT_ADMIN_ROLE} (trust policy, names the account)  Sid=AccountWithMfa",
+        "         Bool aws:MultiFactorAuthPresent: true (request: true)",
+    ]
+
+
+def test_without_mfa_the_trust_policy_doesnt_allow(capsys):
+    code, out, _ = assume_it_admin(capsys, "user/alee", "--absent", "aws:MultiFactorAuthPresent")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "IMPLICIT_DENY",
+        f"  The trust policy of {IT_ADMIN_ROLE} does not allow this.",
+    ]
+    code, _, err = assume_it_admin(capsys, "user/alee")
+    assert code == EXIT_INPUT_ERROR
+    assert (f"  aws:MultiFactorAuthPresent, used by {IT_ADMIN_ROLE} statement 0 "
+            "(Sid=AccountWithMfa)") in err
+
+
+def test_trusting_the_account_still_needs_an_identity_policy(capsys):
+    code, out, _ = assume_it_admin(capsys, "user/jsmith", "--context",
+                                   "aws:MultiFactorAuthPresent=true")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "IMPLICIT_DENY",
+        "  No identity policy allows this; access is denied by default.",
+    ]
+
+
+def test_a_role_without_a_trust_policy_in_the_file(capsys, tmp_path):
+    path = account_file(tmp_path, {"AccountId": "111122223333", "Policies": {},
+                                   "Users": {"u": {}}, "Roles": {"Helper": {}}})
+    code, _, err = run(capsys, "--account", path, "--principal", "user/u",
+                       "--action", "sts:AssumeRole",
+                       "--resource", "arn:aws:iam::111122223333:role/Helper")
+    assert code == EXIT_INPUT_ERROR
+    assert err.splitlines() == [
+        "error: nothing gives the trust policy of arn:aws:iam::111122223333:role/Helper, which "
+        "every role has and which must allow this request",
+        "hint: give the role its trust policy as AssumeRolePolicyDocument in the account file",
+    ]
+
+
+def test_a_saml_roles_tags_need_no_flag(capsys):
+    # Only the district's SAML identity provider can assume TeacherSignIn, and its trust policy
+    # doesn't allow sts:TagSession, so the role's own campus tag is all there is.
+    args = ["--account", ACCOUNT, "--principal", "role/TeacherSignIn", "--action", "s3:GetObject"]
+    record = "arn:aws:s3:::district-student-records/{}/grades.csv"
+    code, out, _ = run(capsys, *args, "--resource", record.format("campus-01"))
+    assert code == EXIT_ALLOWED
+    assert out.splitlines() == ["ALLOW", "  Allow  CampusTeacherRecords  Sid=ReadOwnCampusRecords"]
+    code, _, _ = run(capsys, *args, "--resource", record.format("campus-02"))
+    assert code == EXIT_DENIED
+
+
+def test_policy_mode_reads_a_trust_policy_file(capsys):
+    args = ["--policy", IT_ADMIN, "--resource-policy", TRUST_POLICY,
+            "--action", "sts:AssumeRole", "--resource", IT_ADMIN_ROLE,
+            "--context", "aws:PrincipalArn=arn:aws:iam::111122223333:user/alee",
+            "--context", "aws:MultiFactorAuthPresent=true"]
+    code, out, _ = run(capsys, *args)
+    assert code == EXIT_DENIED  # the trust policy trusts the account, but no identity policy allows
+    assert out.splitlines()[1] == "  No identity policy allows this; access is denied by default."
+
+
+def test_a_role_always_has_a_trust_policy(capsys):
+    code, _, err = run(capsys, "--policy", IT_ADMIN, NO_RESOURCE_POLICY,
+                       "--action", "sts:AssumeRole", "--resource", IT_ADMIN_ROLE)
+    assert code == EXIT_INPUT_ERROR
+    assert "every role has a trust policy that must allow this request" in err

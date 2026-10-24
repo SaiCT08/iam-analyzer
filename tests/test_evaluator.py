@@ -611,16 +611,20 @@ def test_kms_keys_are_refused():
         evaluate(Request(action="kms:Decrypt", resource=key), [ALLOW_ALL])
 
 
-def test_trust_policies_are_refused_until_supported():
-    request = in_account("111122223333", "sts:AssumeRole", "arn:aws:iam::111122223333:role/ITAdmin")
-    with pytest.raises(UnsupportedPolicyFeature, match="role trust policies aren't supported yet"):
+def test_a_role_needs_its_trust_policy():
+    role = "arn:aws:iam::111122223333:role/ITAdmin"
+    request = in_account("111122223333", "sts:AssumeRole", role)
+    message = f"^nothing gives the trust policy of {role}, which every role has"
+    with pytest.raises(MissingResourceError, match=message):
         evaluate(request, [ALLOW_ALL])
+    with pytest.raises(RequestError, match="every role has a trust policy that must allow"):
+        evaluate(request, [ALLOW_ALL], resource=Resource(role))
 
 
-def test_only_s3_bucket_policies_are_evaluated():
+def test_only_s3_bucket_policies_and_trust_policies_are_evaluated():
     queue = "arn:aws:sqs:us-east-1:111122223333:district-alerts"
     send = Request(action="sqs:SendMessage", resource=queue)
-    with pytest.raises(UnsupportedPolicyFeature, match="only S3 bucket policies are evaluated"):
+    with pytest.raises(UnsupportedPolicyFeature, match="only S3 bucket policies and role trust"):
         evaluate(send, [ALLOW_ALL], resource=Resource(queue, policy=ALLOW_ALL))
 
 
@@ -810,6 +814,115 @@ def test_resource_based_policies_are_for_iam_users_and_role_sessions():
     root = get_by("arn:aws:iam::111122223333:root")
     with pytest.raises(UnsupportedPolicyFeature, match="IAM users and role sessions"):
         with_bucket_policy(root, [], grant({"AWS": KWONG}))
+
+
+# --- Trust policies --------------------------------------------------------------------
+
+ITADMIN = "arn:aws:iam::111122223333:role/ITAdmin"
+ALEE = "arn:aws:iam::111122223333:user/alee"
+TRUST = Layer(PolicyType.TRUST, resource=ITADMIN)
+ASSUME = policy("Assume", allow("sts:AssumeRole", ITADMIN, sid="Assume"))
+
+
+def trust_policy(*statements):
+    document = {"Version": "2012-10-17", "Statement": list(statements)}
+    return parse_policy(document, name=ITADMIN, kind=PolicyType.TRUST)
+
+
+def trusts(principal, effect="Allow", action="sts:AssumeRole", **elements):
+    return {"Effect": effect, "Principal": principal, "Action": action, **elements}
+
+
+def assume_by(arn, action="sts:AssumeRole"):
+    context = RequestContext.of(
+        [("aws:PrincipalArn", arn), ("aws:PrincipalAccount", "111122223333")]
+    )
+    return Request(action=action, resource=ITADMIN, context=context)
+
+
+def with_trust_policy(request, policies, *statements, **layers):
+    described = Resource(ITADMIN, trust_policy(*statements))
+    return evaluate(request, policies, resource=described, **layers)
+
+
+@pytest.mark.parametrize(
+    "principal, identity, decision, blocked",
+    [
+        # AWS's AssumeRole page: within one account, either the trust policy names the user...
+        ({"AWS": ALEE}, [], Decision.ALLOW, ()),
+        # ...or it trusts the account, and an identity policy allows sts:AssumeRole.
+        ({"AWS": "111122223333"}, [ASSUME], Decision.ALLOW, ()),
+        ({"AWS": "111122223333"}, [], Decision.IMPLICIT_DENY, (IDENTITY,)),
+        # Unlike a bucket policy, a trust policy must allow, whatever the identity policies say.
+        ({"AWS": "444455556666"}, [ASSUME], Decision.IMPLICIT_DENY, (TRUST,)),
+        ({"AWS": "444455556666"}, [], Decision.IMPLICIT_DENY, (IDENTITY, TRUST)),
+        ({"Service": "ec2.amazonaws.com"}, [ASSUME], Decision.IMPLICIT_DENY, (TRUST,)),
+        ("*", [], Decision.ALLOW, ()),
+    ],
+)
+def test_what_a_trust_policy_needs(principal, identity, decision, blocked):
+    result = with_trust_policy(assume_by(ALEE), identity, trusts(principal))
+    assert result.decision is decision
+    assert result.not_allowed_by == blocked
+
+
+def test_allow_reasons_include_the_trust_policy():
+    result = with_trust_policy(assume_by(ALEE), [ASSUME], trusts({"AWS": "111122223333"}))
+    assert [(r.statement.sid, r.layer, r.principal_match) for r in result.reasons] == [
+        ("Assume", IDENTITY, None),
+        (None, TRUST, PrincipalMatch.ACCOUNT),
+    ]
+
+
+def test_a_trust_policy_deny_wins():
+    no_alee = trusts({"AWS": ALEE}, effect="Deny", Sid="NoAlee")
+    statements = [trusts({"AWS": "111122223333"}), no_alee]
+    result = with_trust_policy(assume_by(ALEE), [ASSUME], *statements)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert reasons(result) == [(ITADMIN, "NoAlee", TRUST)]
+
+
+def test_role_chaining_is_limited_by_the_calling_roles_boundary():
+    by_campus_app = assume_by(CAMPUS_APP)
+    trusted = trusts({"AWS": CAMPUS_APP})
+    assert with_trust_policy(by_campus_app, [], trusted).allowed
+    result = with_trust_policy(by_campus_app, [], trusted, boundary=NO_S3)
+    assert result.not_allowed_by == (BOUNDARY,)
+
+
+def test_a_direct_grant_with_a_boundary_that_doesnt_allow_is_refused():
+    # AWS's trust policy page and its evaluation logic page disagree here.
+    message = "the trust policy names the caller directly, and the caller's permissions boundary"
+    for principal in ({"AWS": ALEE}, "*"):
+        with pytest.raises(UnsupportedPolicyFeature, match=message):
+            with_trust_policy(assume_by(ALEE), [], trusts(principal), boundary=NO_S3)
+    # Both pages agree when the boundary allows it.
+    allows_sts = policy("AllowsSts", allow("sts:*", "*"))
+    alee = trusts({"AWS": ALEE})
+    assert with_trust_policy(assume_by(ALEE), [], alee, boundary=allows_sts).allowed
+
+
+def test_a_trust_policy_covers_every_sts_action_on_its_role():
+    tag_session = assume_by(ALEE, "sts:TagSession")
+    tagging = trusts({"AWS": ALEE}, action="sts:TagSession")
+    assert with_trust_policy(tag_session, [], tagging).allowed
+    # But not the IAM actions on the role, which have no resource-based policy.
+    get_role = assume_by(ALEE, "iam:GetRole")
+    with pytest.raises(RequestError, match="no resource-based policy applies to iam:GetRole"):
+        with_trust_policy(get_role, [ALLOW_ALL], trusts("*"))
+    assert evaluate(get_role, [ALLOW_ALL]).allowed
+
+
+def test_requests_by_federated_users_are_refused():
+    with pytest.raises(UnsupportedPolicyFeature, match="called by a SAML or OIDC user"):
+        with_trust_policy(assume_by(ALEE, "sts:AssumeRoleWithSAML"), [], trusts("*"))
+
+
+def test_a_role_in_another_account_is_refused_before_its_trust_policy_is_needed():
+    other = Request(action="sts:AssumeRole", resource="arn:aws:iam::444455556666:role/Vendor",
+                    context=RequestContext.of([("aws:PrincipalAccount", "111122223333")]))
+    with pytest.raises(UnsupportedPolicyFeature, match="cross-account requests aren't supported"):
+        evaluate(other, [ALLOW_ALL])
 
 
 # --- Data-driven scenarios -------------------------------------------------------------

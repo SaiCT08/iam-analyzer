@@ -53,6 +53,7 @@ MISSING_CONTEXT_HINT = (
 MISSING_RESOURCE_HINT = {
     "account": "hint: describe it in the account file's Resources, as {} if it has no "
     "resource-based policy",
+    "role": "hint: give the role its trust policy as AssumeRolePolicyDocument in the account file",
     "policy": "hint: give its resource-based policy with --resource-policy FILE, or "
     "--no-resource-policy if it has none; either says it is in the same account",
 }
@@ -145,7 +146,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-session-tags",
         action="store_true",
         help="with --account: a role's session has no session tags, so the role's own tags are "
-        "its only aws:PrincipalTag keys",
+        "its only aws:PrincipalTag keys. Not needed for a role whose trust policy rules session "
+        "tags out",
     )
     check.add_argument("--action", action=_StoreOnce, required=True, help="e.g. s3:GetObject")
     check.add_argument(
@@ -205,6 +207,10 @@ def _source(reason: MatchedStatement) -> str:
         resource = reason.layer.resource
         on = "" if reason.policy_name == resource else f" on {resource}"
         source += f" (resource-based policy{on}, names {NAMES[reason.principal_match]})"
+    elif reason.layer.policy_type is PolicyType.TRUST:
+        role = reason.layer.resource
+        of = "" if reason.policy_name == role else f" of {role}"
+        source += f" (trust policy{of}, names {NAMES[reason.principal_match]})"
     return source
 
 
@@ -215,6 +221,8 @@ def _not_allowed_message(layer: Layer) -> str:
         return f"No SCP attached to {_target(layer.org_target)} allows this."
     if layer.policy_type is PolicyType.RESOURCE_BASED:
         return f"The resource-based policy on {layer.resource} does not allow this either."
+    if layer.policy_type is PolicyType.TRUST:
+        return f"The trust policy of {layer.resource} does not allow this."
     return "No identity policy allows this; access is denied by default."
 
 
@@ -280,7 +288,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if isinstance(exc, MissingContextError):
             print(MISSING_CONTEXT_HINT, file=sys.stderr)
         elif isinstance(exc, MissingResourceError):
-            print(MISSING_RESOURCE_HINT["account" if args.account else "policy"], file=sys.stderr)
+            mode = "policy"
+            if args.account:
+                mode = "role" if resources.is_role_arn(exc.resource) else "account"
+            print(MISSING_RESOURCE_HINT[mode], file=sys.stderr)
         return EXIT_INPUT_ERROR
 
     print(format_result(result, request.context))

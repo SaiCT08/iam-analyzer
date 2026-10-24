@@ -24,8 +24,11 @@ Policies read them as aws:PrincipalTag/campus. Groups can't be tagged, as in IAM
 needs (see `resources`): {"arn:aws:s3:::district-staff-files": {}} says the bucket is in this
 account and has no resource-based policy, and {"Policy": {...}} gives a bucket its bucket policy.
 Describing a bucket also says its ACLs are disabled (Object Ownership "Bucket owner enforced").
-For an S3 object, its bucket is described. A bucket policy's Principal elements name ARNs, so a
-file with one needs an `AccountId`.
+For an S3 object, its bucket is described.
+
+A role's `AssumeRolePolicyDocument` is its trust policy, which the STS actions on the role, such
+as sts:AssumeRole, need. Bucket and trust policies' Principal elements name ARNs, so a file with
+either needs an `AccountId`.
 """
 
 import re
@@ -77,6 +80,7 @@ class Role:
     boundary: str | None = None
     path: str = "/"
     tags: tuple[tuple[str, str], ...] = ()
+    trust_policy: Policy | None = None  # None when the file doesn't give it
 
     @property
     def service_linked(self) -> bool:
@@ -129,12 +133,15 @@ class Account:
           ARN is the role's own, not the session's.
         - aws:PrincipalTag/KEY comes from Tags, and a user's tags are all there is. A role's
           session can carry session tags, which override the role's tags and can add new
-          ones, so a role's tag keys are unknown unless `session_tags` is False. A session
+          ones, so a role's tag keys are unknown unless `session_tags` is False, or its trust
+          policy rules session tags out (see `resources.session_tags_possible`). A session
           tag can't remove a role's tag, though, so the role's own keys are always present.
 
         Other keys, such as aws:userid, aren't in the file, so the caller has to give them.
         """
         entity = self._principal(principal)
+        if isinstance(entity, Role) and entity.trust_policy is not None:
+            session_tags = session_tags and resources.session_tags_possible(entity.trust_policy)
         kind, _, name = principal.partition("/")
         source = f"{self.name} {principal}"
         values: list[tuple[str, str]] = []
@@ -162,12 +169,40 @@ class Account:
 
     def resource_for(self, resource: str, action: str) -> Resource | None:
         """What this file says about the resource that a request for `action` on `resource`
-        needs described: for an S3 object, its bucket.
+        needs described: for an S3 object, its bucket, and for the STS actions on a role, the
+        role with its trust policy.
 
         None when the request needs no description, or when the file doesn't describe it.
         """
         governing = resources.governing_arn(resource, action)
-        return None if governing is None else self.resources.get(governing)
+        if governing is None:
+            return None
+        if resources.is_role_arn(governing):
+            return self._role_resource(governing)
+        return self.resources.get(governing)
+
+    def _role_resource(self, arn: str) -> Resource | None:
+        """The role `arn` names, with its trust policy. None when the role is in another account,
+        which the evaluator refuses, or when the file doesn't give its trust policy."""
+        _, _, _, _, account, resource = arn.split(":", 5)
+        if account != self.account_id:
+            return None
+        path, _, name = resource.removeprefix("role").rpartition("/")
+        path += "/"
+        if name not in self.roles:
+            same = [role for role in self.roles if role.casefold() == name.casefold()]
+            if same:
+                raise UnsupportedPolicyFeature(
+                    f"{self.name}: {arn} names role {name!r}, and the file has {same[0]!r}: IAM "
+                    "role names ignore case, and AWS doesn't say whether a role ARN does too"
+                )
+            raise AccountError(f"{self.name}: no role named {name!r}, which {arn} names")
+        role = self.roles[name]
+        if role.path != path:
+            raise AccountError(
+                f"{self.name}: role {name!r} has the path {role.path!r}, not {path!r} as {arn} says"
+            )
+        return None if role.trust_policy is None else Resource(arn, role.trust_policy)
 
     def _principal(self, principal: str) -> User | Role:
         kind, _, name = principal.partition("/")
@@ -231,12 +266,26 @@ def parse_account(document: Any, name: str) -> Account:
     roles = {}
     for role_name, raw in _section(document, "Roles", name).items():
         where = f"{name} role {role_name!r}"
-        fields = _entry(raw, {"Policies", "PermissionsBoundary", "Path", "Tags"}, where)
+        allowed = {"Policies", "PermissionsBoundary", "Path", "Tags", "AssumeRolePolicyDocument"}
+        fields = _entry(raw, allowed, where)
+        path = _path(fields, where)
+        trust_policy = None
+        if "AssumeRolePolicyDocument" in fields:
+            if account_id is None:
+                raise AccountError(
+                    f"{where}: a trust policy names principals by ARN, so the account file needs "
+                    "an 'AccountId' to know which ARNs are its users' and roles'"
+                )
+            arn = f"arn:aws:iam::{account_id}:role{path}{role_name}"
+            trust_policy = parse_policy(
+                fields["AssumeRolePolicyDocument"], name=arn, kind=PolicyType.TRUST
+            )
         roles[role_name] = Role(
             policies=_refs(fields, "Policies", policies, "policy", where),
             boundary=_ref(fields, "PermissionsBoundary", policies, "policy", where),
-            path=_path(fields, where),
+            path=path,
             tags=_tags(fields, where),
+            trust_policy=trust_policy,
         )
 
     described = {

@@ -1,8 +1,9 @@
 import pytest
 
 from iam_analyzer.errors import RequestError, UnsupportedPolicyFeature
-from iam_analyzer.models import Resource
-from iam_analyzer.resources import account_of, describe, governing_arn
+from iam_analyzer.loader import parse_policy
+from iam_analyzer.models import PolicyType, Resource
+from iam_analyzer.resources import account_of, describe, governing_arn, session_tags_possible
 
 BUCKET = "arn:aws:s3:::district-student-records"
 ROLE = "arn:aws:iam::111122223333:role/ITAdmin"
@@ -65,6 +66,73 @@ def test_which_resource_a_request_needs_described(resource, action, expected):
 def test_resources_the_analyzer_refuses(resource, action, error, message):
     with pytest.raises(error, match=message):
         governing_arn(resource, action)
+
+
+@pytest.mark.parametrize(
+    "action, resource",
+    [
+        ("sts:AssumeRole", "*"),
+        ("sts:TagSession", f"{BUCKET}/x"),
+        ("sts:AssumeRole", "arn:aws:iam::111122223333:user/jsmith"),
+        ("sts:SetSourceIdentity", "arn:aws:sts::111122223333:self"),
+    ],
+)
+def test_the_sts_actions_on_a_role_need_a_role(action, resource):
+    with pytest.raises(RequestError, match="is a request on a role"):
+        governing_arn(resource, action)
+
+
+def test_set_context_can_also_be_on_the_callers_own_session():
+    # The Service Authorization Reference gives sts:SetContext two resource types: role and
+    # self-session. A session isn't a role, so it has no trust policy.
+    assert governing_arn("arn:aws:sts::111122223333:self", "sts:SetContext") is None
+    assert governing_arn(ROLE, "sts:SetContext") == ROLE
+
+
+def test_describe_parses_a_roles_policy_as_its_trust_policy():
+    document = {"Statement": [{"Effect": "Allow", "Principal": "*", "Action": "sts:AssumeRole"}]}
+    described = describe(ROLE, "sts:AssumeRole", document, name="trust.json")
+    assert described.arn == ROLE
+    assert described.policy.statements[0].resources == ()
+
+
+def trust(*statements):
+    return parse_policy({"Statement": list(statements)}, name="t", kind=PolicyType.TRUST)
+
+
+def trusts(principal, action="sts:AssumeRole", effect="Allow", **elements):
+    return {"Effect": effect, "Principal": principal, "Action": action, **elements}
+
+
+JSMITH = "arn:aws:iam::111122223333:user/jsmith"
+SAML = {"Federated": "arn:aws:iam::111122223333:saml-provider/DistrictIdP"}
+
+
+@pytest.mark.parametrize(
+    "statements, possible",
+    [
+        # IAM users and identity providers start a session with no calling session, and passing
+        # tags needs sts:TagSession, so their sessions carry none.
+        ([trusts({"AWS": JSMITH})], False),
+        ([trusts(SAML, "sts:AssumeRoleWithSAML")], False),
+        ([trusts({"AWS": JSMITH}), trusts(SAML, "sts:AssumeRoleWithSAML")], False),
+        # A Deny can't make tags possible, and statements for other actions don't matter.
+        ([trusts({"AWS": JSMITH}), trusts("*", "sts:TagSession", "Deny")], False),
+        ([trusts({"AWS": JSMITH}), trusts("*", "sts:SetSourceIdentity")], False),
+        # Allowing sts:TagSession, directly or through a wildcard or NotAction, makes them possible.
+        ([trusts({"AWS": JSMITH}), trusts({"AWS": JSMITH}, "sts:TagSession")], True),
+        ([trusts({"AWS": JSMITH}, "sts:*")], True),
+        ([{"Effect": "Allow", "Principal": {"AWS": JSMITH}, "NotAction": "sts:AssumeRole"}], True),
+        # A role session could chain in with transitive tags, and AWS doesn't say whether those
+        # need sts:TagSession. So could a session through the account, everyone, or a service.
+        ([trusts({"AWS": "arn:aws:iam::111122223333:role/Other"})], True),
+        ([trusts({"AWS": "111122223333"})], True),
+        ([trusts("*")], True),
+        ([trusts({"Service": "ec2.amazonaws.com"})], True),
+    ],
+)
+def test_session_tags_possible(statements, possible):
+    assert session_tags_possible(trust(*statements)) is possible
 
 
 def test_wildcards_in_an_iam_resource_need_no_description():

@@ -1,0 +1,36 @@
+{
+  "description": "AWS's AssumeRole page: within one account, a policy that allows the user to call AssumeRole works \"as long as the role's trust policy trusts the account\".",
+  "policies": {
+    "assume_it_admin.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "sts:AssumeRole",
+          "Resource": "arn:aws:iam::111122223333:role/ITAdmin"
+        }
+      ]
+    }
+  },
+  "resource_policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::111122223333:root"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  },
+  "context": {
+    "aws:PrincipalArn": "arn:aws:iam::111122223333:user/alee",
+    "aws:PrincipalAccount": "111122223333"
+  },
+  "request": {
+    "action": "sts:AssumeRole",
+    "resource": "arn:aws:iam::111122223333:role/ITAdmin"
+  },
+  "expected": "ALLOW"
+}

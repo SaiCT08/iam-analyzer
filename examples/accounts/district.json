@@ -148,6 +148,28 @@
           }
         }
       ]
+    },
+    "AssumeITAdminRole": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AssumeITAdmin",
+          "Effect": "Allow",
+          "Action": "sts:AssumeRole",
+          "Resource": "arn:aws:iam::111122223333:role/ITAdmin"
+        }
+      ]
+    },
+    "CampusTeacherRecords": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadOwnCampusRecords",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::district-student-records/${aws:PrincipalTag/campus}/*"
+        }
+      ]
     }
   },
   "Groups": {
@@ -166,7 +188,8 @@
     "ITStaff": {
       "Policies": [
         "StaffReadOnlyEc2AndLogs",
-        "DenyStudentRecordsDelete"
+        "DenyStudentRecordsDelete",
+        "AssumeITAdminRole"
       ]
     },
     "Registrars": {
@@ -219,13 +242,78 @@
       "Policies": [
         "ITAdminFullS3",
         "DenyStudentRecordsDelete"
-      ]
+      ],
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "AccountWithMfa",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111122223333:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "Bool": {
+                "aws:MultiFactorAuthPresent": "true"
+              }
+            }
+          }
+        ]
+      }
     },
     "GradebookVendor": {
       "Policies": [
         "ITAdminFullS3"
       ],
-      "PermissionsBoundary": "GradebookVendorBoundary"
+      "PermissionsBoundary": "GradebookVendorBoundary",
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "VendorAccount",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::444455556666:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "StringEquals": {
+                "sts:ExternalId": "district-gradebook-7f3a"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "TeacherSignIn": {
+      "Policies": [
+        "CampusTeacherRecords"
+      ],
+      "Tags": [
+        {
+          "Key": "campus",
+          "Value": "campus-01"
+        }
+      ],
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "DistrictSignIn",
+            "Effect": "Allow",
+            "Principal": {
+              "Federated": "arn:aws:iam::111122223333:saml-provider/DistrictIdP"
+            },
+            "Action": "sts:AssumeRoleWithSAML",
+            "Condition": {
+              "StringEquals": {
+                "SAML:aud": "https://signin.aws.amazon.com/saml"
+              }
+            }
+          }
+        ]
+      }
     }
   },
   "Resources": {

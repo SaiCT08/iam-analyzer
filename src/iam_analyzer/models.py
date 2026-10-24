@@ -35,6 +35,9 @@ class PolicyType(str, Enum):
     PERMISSIONS_BOUNDARY = "permissions boundary"
     SCP = "SCP"
     RESOURCE_BASED = "resource-based"  # attached to a resource, such as an S3 bucket policy
+    # A role's trust policy, IAM's kind of resource-based policy. It must allow the STS actions on
+    # its role, such as sts:AssumeRole.
+    TRUST = "trust"
 
 
 class PrincipalType(str, Enum):
@@ -123,6 +126,9 @@ class Statement:
 
     `principals` is the Principal element of a resource-based policy's statement: it applies only
     when one of them names the caller. It is None in identity-based policies, which have none.
+
+    `resources` is empty in a role's trust policy, which has no Resource element: its statements
+    cover the role the policy belongs to.
     """
 
     effect: Effect

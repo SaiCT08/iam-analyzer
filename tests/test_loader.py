@@ -347,6 +347,37 @@ def test_invalid_resource_based_statements(changes, error, message):
         resource_policy(statement)
 
 
+TRUST_KWONG = {"Effect": "Allow", "Principal": {"AWS": KWONG}, "Action": "sts:AssumeRole"}
+
+
+def trust_policy(*statements, **top):
+    document = {"Version": "2012-10-17", "Statement": list(statements), **top}
+    return parse_policy(document, name="trust", kind=PolicyType.TRUST)
+
+
+def test_a_trust_policy_names_no_resources():
+    [statement] = trust_policy(TRUST_KWONG, Id="trust-1").statements
+    assert statement.resources == ()
+    assert statement.principals == (Principal(PrincipalType.AWS, KWONG),)
+
+
+@pytest.mark.parametrize(
+    "changes, message",
+    [
+        ({"Resource": "*"}, "a role trust policy has no 'Resource' or 'NotResource'"),
+        ({"NotResource": "arn:aws:s3:::b"}, "a role trust policy has no 'Resource'"),
+        ({"Principal": None, "NotPrincipal": {"AWS": KWONG}, "Effect": "Deny"},
+         "AWS doesn't allow 'NotPrincipal' in a role trust policy"),
+        ({"Principal": None}, "statement needs a 'Principal'"),
+    ],
+)
+def test_invalid_trust_policies(changes, message):
+    merged = {**TRUST_KWONG, **changes}
+    statement = {key: value for key, value in merged.items() if value is not None}
+    with pytest.raises(PolicyParseError, match=message):
+        trust_policy(statement)
+
+
 def test_principal_forms_aws_documents_are_accepted():
     principals = {"AWS": [
         "*", "111122223333", "arn:aws:iam::111122223333:root", KWONG,

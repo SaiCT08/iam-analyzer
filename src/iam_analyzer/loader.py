@@ -58,10 +58,11 @@ def parse_policy(document: Any, name: str, *, kind: PolicyType = PolicyType.IDEN
     """Build a Policy from an already-decoded JSON document.
 
     `kind` is PolicyType.RESOURCE_BASED for a resource-based policy, such as an S3 bucket policy,
-    which may have an Id and whose statements need a Principal. Identity policies, permissions
-    boundaries and SCPs (every other kind) can have neither.
+    which may have an Id and whose statements need a Principal. PolicyType.TRUST is a role's trust
+    policy, a resource-based policy with no Resource and no NotPrincipal. Identity policies,
+    permissions boundaries and SCPs (every other kind) can have neither an Id nor a Principal.
     """
-    resource_based = kind is PolicyType.RESOURCE_BASED
+    resource_based = kind in (PolicyType.RESOURCE_BASED, PolicyType.TRUST)
     if not isinstance(document, dict):
         raise PolicyParseError(f"{name}: policy must be a JSON object")
     if "Id" in document:
@@ -84,14 +85,15 @@ def parse_policy(document: Any, name: str, *, kind: PolicyType = PolicyType.IDEN
     if not raw_statements:
         raise PolicyParseError(f"{name}: 'Statement' must not be empty")
     statements = tuple(
-        _parse_statement(raw, f"{name} statement {index}", version, resource_based)
+        _parse_statement(raw, f"{name} statement {index}", version, kind)
         for index, raw in enumerate(raw_statements)
     )
     _check_unique_sids(statements, name)
     return Policy(name=name, statements=statements)
 
 
-def _parse_statement(raw: Any, where: str, version: str | None, resource_based: bool) -> Statement:
+def _parse_statement(raw: Any, where: str, version: str | None, kind: PolicyType) -> Statement:
+    resource_based = kind in (PolicyType.RESOURCE_BASED, PolicyType.TRUST)
     if not isinstance(raw, dict):
         raise PolicyParseError(f"{where}: statement must be a JSON object")
 
@@ -118,12 +120,23 @@ def _parse_statement(raw: Any, where: str, version: str | None, resource_based: 
         raise PolicyParseError(
             f"{where}: 'Effect' must be \"Allow\" or \"Deny\", got {raw.get('Effect')!r}"
         ) from None
+    if kind is PolicyType.TRUST and "NotPrincipal" in raw:
+        raise PolicyParseError(f"{where}: AWS doesn't allow 'NotPrincipal' in a role trust policy")
     statement_principals = _principals(raw, effect, where) if resource_based else None
 
     actions, not_action = _patterns(raw, "Action", "NotAction", where)
     action_key = "NotAction" if not_action else "Action"
     _check_actions(actions, action_key, where)
-    resources, not_resource = _patterns(raw, "Resource", "NotResource", where)
+    if kind is PolicyType.TRUST:
+        # The policy belongs to its role, so it names no resources.
+        if "Resource" in raw or "NotResource" in raw:
+            raise PolicyParseError(
+                f"{where}: a role trust policy has no 'Resource' or 'NotResource': it applies to "
+                "the role it belongs to"
+            )
+        resources, not_resource = (), False
+    else:
+        resources, not_resource = _patterns(raw, "Resource", "NotResource", where)
     policy_variables = version == CURRENT_VERSION
     if policy_variables:
         _check_no_variables(actions, action_key, where)

@@ -11,7 +11,7 @@ It works entirely on local policy JSON files. No AWS account or credentials are 
 ## Status
 
 The analyzer currently covers **identity policies**, **permissions boundaries**, **service control
-policies (SCPs)** and **S3 bucket policies**:
+policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
 - Allow/Deny statements, where an explicit deny always wins and the default is an implicit deny.
 - `*` / `?` wildcards in actions and resources. In a resource ARN, a wildcard stays inside one
   colon-separated part, except a `*` at the end of a part, which can run on past colons. So
@@ -27,6 +27,9 @@ policies (SCPs)** and **S3 bucket policies**:
 - S3 bucket policies, with their `Principal` element. Within one account, a bucket policy can allow
   a request on its own. Who its `Principal` names decides whether the identity policies and the
   boundary must allow too (see [Resource-based policies](#resource-based-policies)).
+- Role trust policies, for `sts:AssumeRole` and the other STS actions on a role. A trust policy
+  must allow the request, and when it trusts the account, an identity policy must allow it too
+  (see [Trust policies](#trust-policies)).
 - Policy variables such as `${aws:username}` in `Resource` and `NotResource`, filled in from the
   request context. The analyzer never guesses a value: if a statement needs one that nobody gave,
   it says which.
@@ -42,9 +45,9 @@ policies (SCPs)** and **S3 bucket policies**:
 
 Not supported yet:
 - `NotPrincipal` is refused with a clear error.
-- Resource-based policies other than S3 bucket policies. Another service's resource can only be
-  described as having none.
-- Cross-account requests, KMS keys and role trust policies are refused.
+- Resource-based policies other than S3 bucket policies and role trust policies. Another service's
+  resource can only be described as having none.
+- Cross-account requests, KMS keys, and requests by SAML or OIDC users are refused.
 
 ## Setup
 
@@ -210,10 +213,12 @@ The analyzer refuses:
   account's policies, which aren't modeled yet.
 - Requests on KMS keys, because every key has a key policy that must allow the request.
 - S3 resources other than buckets and objects, such as access points.
-- Resource-based policies of services other than S3. AWS says they "may also require an explicit
-  Allow statement within the same account", and the analyzer doesn't know which ones do.
-- Role trust policies (for `sts:AssumeRole` and the other STS actions on a role), which come in a
-  later phase.
+- Resource-based policies of services other than S3 and IAM roles. AWS says they "may also require
+  an explicit Allow statement within the same account", and the analyzer doesn't know which ones
+  do.
+
+A role isn't described in `Resources`. Its trust policy goes on the role itself (see
+[Trust policies](#trust-policies)).
 
 ### Resource-based policies
 
@@ -301,6 +306,80 @@ principals within your account, no other permissions are required", and that bou
 limit permissions granted using the aws:PrincipalArn condition key with a wildcard(*) in the
 Principal element". S3 Block Public Access isn't modeled. Its `RestrictPublicBuckets` setting can
 block grants in a public bucket policy.
+
+### Trust policies
+
+A role's trust policy says who can assume the role. In an account file it is the role's
+`AssumeRolePolicyDocument`, AWS's own name for it:
+
+```json
+"ITAdmin": {
+  "Policies": ["ITAdminFullS3", "DenyStudentRecordsDelete"],
+  "AssumeRolePolicyDocument": {
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "AccountWithMfa",
+      "Effect": "Allow",
+      "Principal": { "AWS": "arn:aws:iam::111122223333:root" },
+      "Action": "sts:AssumeRole",
+      "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } }
+    }]
+  }
+}
+```
+
+A trust policy has no `Resource`: it covers its own role. It applies to the six STS actions whose
+resource is a role: `sts:AssumeRole`, `sts:AssumeRoleWithSAML`, `sts:AssumeRoleWithWebIdentity`,
+`sts:TagSession`, `sts:SetSourceIdentity` and `sts:SetContext`. Unlike a bucket policy, AWS says a
+trust policy "must explicitly allow access", so the request is denied without an Allow from it.
+The [table above](#resource-based-policies) then says what else has to allow. AWS's AssumeRole
+page gives the two ways within one account: "Attach a policy to the user that allows the user to
+call AssumeRole (as long as the role's trust policy trusts the account)", or "Add the user as a
+principal directly in the role's trust policy".
+
+The example's `ITAdmin` trusts the account when the caller signed in with MFA, and the ITStaff
+group's `AssumeITAdminRole` policy lets IT staff call `sts:AssumeRole` on it:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/district.json \
+  --principal user/alee \
+  --action sts:AssumeRole \
+  --resource arn:aws:iam::111122223333:role/ITAdmin \
+  --context aws:MultiFactorAuthPresent=true
+```
+
+```
+ALLOW
+  Allow  AssumeITAdminRole (via group ITStaff)  Sid=AssumeITAdmin
+  Allow  arn:aws:iam::111122223333:role/ITAdmin (trust policy, names the account)  Sid=AccountWithMfa
+         Bool aws:MultiFactorAuthPresent: true (request: true)
+```
+
+With `--absent aws:MultiFactorAuthPresent` instead, which describes a request made with access
+keys, the answer is `IMPLICIT_DENY`, because the trust policy doesn't allow it. A teacher such as
+`user/jsmith` gets `IMPLICIT_DENY` even with MFA: trusting the account leaves the decision to the
+teacher's identity policies, and none of them allows `sts:AssumeRole`.
+
+A role in an account file without an `AssumeRolePolicyDocument` can't be assumed in a check: the
+analyzer says it needs the trust policy. With `--policy`, give one with `--resource-policy`.
+
+The analyzer refuses:
+- A trust policy that names the caller directly, as a user ARN or `"*"`, when the caller's
+  permissions boundary doesn't allow the request. AWS's trust policy page says "If a permissions
+  boundary is set for the user, then it must allow the sts:AssumeRole action", but its evaluation
+  logic page says a boundary doesn't limit a grant to a user ARN.
+- `sts:AssumeRoleWithSAML` and `sts:AssumeRoleWithWebIdentity` requests. SAML and OIDC users make
+  them, and the analyzer only models IAM users and role sessions.
+- `NotPrincipal` or `Resource` in a trust policy, which AWS doesn't allow.
+
+A trust policy can also settle a role's session tags. Passing session tags needs `sts:TagSession`
+in the trust policy. A session made by role chaining "inherits any transitive session tags from
+the calling session", though, and AWS doesn't say whether that needs `sts:TagSession` too. So the
+analyzer counts a role's own tags as complete only when its trust policy allows no
+`sts:TagSession`, and only IAM users and SAML or OIDC providers can assume it. The example's
+`TeacherSignIn` role, assumed through the district's SAML provider and tagged `campus=campus-01`,
+reads its own campus's records with no `--no-session-tags`.
 
 ### Organizations and SCPs
 
@@ -428,7 +507,9 @@ The same request for `campus-01` gives `IMPLICIT_DENY`.
 A role's session can carry *session tags*, which override the role's own tags and can add new ones.
 So for a role, every `aws:PrincipalTag/` key is unknown until you give it with `--context` or
 `--absent`. `--no-session-tags` says the session has none, so the role's own tags are all there
-is. A session tag can't remove one of the role's tags, so `--absent` is refused for those.
+is. A session tag can't remove one of the role's tags, so `--absent` is refused for those. A role's
+trust policy can rule session tags out, and then no flag is needed (see
+[Trust policies](#trust-policies)).
 
 AWS's documentation doesn't settle a few cases, so the analyzer refuses them:
 - A variable with no value and no default, such as `${aws:username}` for a role. A default, as in

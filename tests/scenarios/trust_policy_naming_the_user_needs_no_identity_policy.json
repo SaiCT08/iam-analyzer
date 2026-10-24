@@ -1,0 +1,25 @@
+{
+  "description": "AWS's AssumeRole page: within one account, adding the user as a principal in the role's trust policy is enough, because \"no additional identity-based policy is required\".",
+  "policies": {},
+  "resource_policy": {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Principal": {
+          "AWS": "arn:aws:iam::111122223333:user/alee"
+        },
+        "Action": "sts:AssumeRole"
+      }
+    ]
+  },
+  "context": {
+    "aws:PrincipalArn": "arn:aws:iam::111122223333:user/alee",
+    "aws:PrincipalAccount": "111122223333"
+  },
+  "request": {
+    "action": "sts:AssumeRole",
+    "resource": "arn:aws:iam::111122223333:role/ITAdmin"
+  },
+  "expected": "ALLOW"
+}
