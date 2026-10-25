@@ -1,0 +1,214 @@
+{
+  "title": "Wildcards and colons",
+  "question": "Can a * in the middle of an ARN segment, or a ?, match a colon, in Resource and in ArnLike? The analyzer assumes not: only a * that ends a segment runs on past colons (review finding F6).",
+  "defaults": {"resource_policy": null},
+  "cases": [
+    {
+      "name": "lambda_alias_mid_segment_star",
+      "description": "A * before -prod, against a Lambda alias whose ARN has a colon at that point.",
+      "readings": {
+        "ALLOW": "a * in the middle of a segment matches a colon",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "invoke_prod.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-east-1:111122223333:function:*-prod"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary-prod"}
+    },
+    {
+      "name": "lambda_mid_segment_star_control",
+      "description": "The same pattern against a function name with no colon.",
+      "readings": {"ALLOW": "the pattern works at all"},
+      "policies": {
+        "invoke_prod.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-east-1:111122223333:function:*-prod"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing-prod"}
+    },
+    {
+      "name": "lambda_alias_end_of_segment_star",
+      "description": "A * that ends the segment, against the function's alias.",
+      "readings": {
+        "ALLOW": "a * that ends a segment runs on past colons, as AWS documents and the analyzer assumes",
+        "IMPLICIT_DENY": "it doesn't"
+      },
+      "policies": {
+        "invoke_billing.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-east-1:111122223333:function:billing*"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
+    },
+    {
+      "name": "s3_key_colon_mid_segment_star",
+      "description": "An S3 object key with a timestamp in it, against *.json.",
+      "readings": {
+        "ALLOW": "the * matches the colons in the key, so the analyzer under-reports this access",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "read_json_logs.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-logs/*.json"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-logs/2026-10-25T10:00:00.json"}
+    },
+    {
+      "name": "s3_key_colon_mid_segment_star_deny",
+      "description": "The same pattern in a Deny, under an Allow for all of S3.",
+      "readings": {
+        "EXPLICIT_DENY": "the Deny's * matches the colons, so the analyzer's ALLOW misses a Deny",
+        "ALLOW": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "broad_s3.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+        },
+        "no_json_logs.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Deny", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-logs/*.json"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-logs/2026-10-25T10:00:00.json"}
+    },
+    {
+      "name": "s3_key_colon_end_of_segment_star",
+      "description": "A * that ends the pattern, against the same key.",
+      "readings": {"ALLOW": "a * that ends a segment runs on past colons", "IMPLICIT_DENY": "it doesn't"},
+      "policies": {
+        "read_logs.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-logs/*"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-logs/2026-10-25T10:00:00.json"}
+    },
+    {
+      "name": "s3_key_colon_question_mark",
+      "description": "A ? against a colon in an object key.",
+      "readings": {
+        "ALLOW": "a ? matches a colon",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "campus_records.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/campus?01/*"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/campus:01/roster.csv"}
+    },
+    {
+      "name": "s3_key_question_mark_control",
+      "description": "The same pattern against a key with a hyphen where the ? is.",
+      "readings": {"ALLOW": "the pattern works at all"},
+      "policies": {
+        "campus_records.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/campus?01/*"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/campus-01/roster.csv"}
+    },
+    {
+      "name": "arn_like_mid_segment_star",
+      "description": "ArnLike with the Lambda pattern, against the alias's ARN.",
+      "readings": {
+        "ALLOW": "in ArnLike, a * in the middle of a segment matches a colon",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "alerts_from_prod.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:*-prod"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary-prod"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "arn_like_s3_key_colon_star",
+      "description": "ArnLike with *.json, against an object ARN whose key has colons.",
+      "readings": {
+        "ALLOW": "in ArnLike, the * matches the colons in the key",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "alerts_from_json_logs.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:s3:::district-logs/*.json"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:s3:::district-logs/2026-10-25T10:00:00.json"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "arn_like_question_mark",
+      "description": "ArnLike with a ?, against a colon in an object key.",
+      "readings": {
+        "ALLOW": "in ArnLike, a ? matches a colon",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer assumes"
+      },
+      "policies": {
+        "alerts_from_campus_records.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:s3:::district-student-records/campus?01/roster.csv"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:s3:::district-student-records/campus:01/roster.csv"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "arn_like_control",
+      "description": "ArnLike with the Lambda pattern, against a function name with no colon.",
+      "readings": {"ALLOW": "the pattern works at all"},
+      "policies": {
+        "alerts_from_prod.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:*-prod"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:billing-prod"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "string_like_crosses_colons",
+      "description": "StringLike with the Lambda pattern, against the alias's ARN. Strings have no segments.",
+      "readings": {
+        "ALLOW": "StringLike's * matches anything, colons included, as the analyzer assumes",
+        "IMPLICIT_DENY": "StringLike keeps * out of colons too"
+      },
+      "policies": {
+        "alerts_from_prod.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"StringLike": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:*-prod"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary-prod"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "title": "A * grant when the boundary doesn't allow",
+  "question": "Does a permissions boundary that doesn't allow the request limit a bucket policy that grants it to everyone (*)? The analyzer treats * as a direct grant, which a boundary doesn't limit: a judgment call.",
+  "defaults": {
+    "caller": "arn:aws:iam::111122223333:user/kwong",
+    "policies": {
+      "no_s3.json": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "ec2:DescribeInstances", "Resource": "*"}]
+      }
+    },
+    "boundary": {
+      "Version": "2012-10-17",
+      "Statement": [{"Effect": "Allow", "Action": "ec2:*", "Resource": "*"}]
+    },
+    "readings": {
+      "ALLOW": "the boundary doesn't limit a grant to everyone, as the analyzer assumes",
+      "IMPLICIT_DENY": "the boundary limits it"
+    },
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-kwong-files/notes.txt"}
+  },
+  "cases": [
+    {
+      "name": "star_principal",
+      "description": "\"Principal\": \"*\", with an IAM user as the caller.",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "EveryoneReads", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "aws_star_principal",
+      "description": "\"Principal\": {\"AWS\": \"*\"}, which AWS documents as the same as \"*\".",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "EveryoneReads", "Effect": "Allow", "Principal": {"AWS": "*"}, "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "star_principal_with_principal_arn_condition",
+      "description": "\"*\" with an ArnEquals condition on aws:PrincipalArn. AWS: \"Permissions boundaries and session policies do not limit permissions granted using the aws:PrincipalArn condition key with a wildcard(*) in the Principal element, unless the identity-based policies contain an explicit deny.\"",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Sid": "KwongReads", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*",
+          "Condition": {"ArnEquals": {"aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"}}
+        }]
+      },
+      "context": {"aws:PrincipalArn": "arn:aws:iam::111122223333:user/kwong"}
+    },
+    {
+      "name": "star_principal_role_caller",
+      "description": "\"Principal\": \"*\", with a role as the caller.",
+      "caller": "arn:aws:iam::111122223333:role/district/CampusApp",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "EveryoneReads", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "account_principal",
+      "description": "The account as the principal, with an identity policy that allows the read. The analyzer's judgment call: naming the account delegates to its identity policies, so the boundary must allow too.",
+      "readings": {
+        "IMPLICIT_DENY": "naming the account delegates to the identity policies, which the boundary limits, as the analyzer assumes",
+        "ALLOW": "naming the account is a grant the boundary doesn't limit"
+      },
+      "policies": {
+        "read_kwong_files.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+        }
+      },
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "AccountReads", "Effect": "Allow", "Principal": {"AWS": "111122223333"}, "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "star_principal_no_boundary_control",
+      "description": "\"Principal\": \"*\" with no boundary: the grant on its own.",
+      "readings": {"ALLOW": "a grant to everyone works at all"},
+      "boundary": null,
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "EveryoneReads", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "title": "An ARN operator value with fewer than six fields",
+  "question": "AWS checks each of an ARN's six fields separately in the ARN operators, and doesn't say how a value with fewer fields matches. The analyzer refuses.",
+  "defaults": {
+    "resource_policy": null,
+    "context_types": {"aws:SourceArn": "string"},
+    "context": {"aws:SourceArn": "arn:aws:sns:us-east-1:111122223333:district-alerts"},
+    "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+  },
+  "cases": [
+    {
+      "name": "three_fields",
+      "description": "ArnLike arn:aws:sns, against a full SNS topic ARN.",
+      "readings": {"ALLOW": "it is completed with * fields, as a short Resource ARN is", "IMPLICIT_DENY": "it isn't"},
+      "policies": {
+        "alerts_from_sns.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+                         "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:sns"}}}]
+        }
+      }
+    },
+    {
+      "name": "four_fields_ending_in_star",
+      "description": "ArnLike arn:aws:sns:*, against a full SNS topic ARN.",
+      "readings": {"ALLOW": "it is completed, or its last * runs on to the end", "IMPLICIT_DENY": "neither"},
+      "policies": {
+        "alerts_from_sns.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+                         "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:sns:*"}}}]
+        }
+      }
+    }
+  ]
+}

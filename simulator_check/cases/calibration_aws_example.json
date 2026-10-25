@@ -1,0 +1,38 @@
+{
+  "title": "AWS's own example",
+  "question": "Does the harness get the documented answer to AWS's own 'Same-Account Simulation' example for SimulateCustomPolicy?",
+  "cases": [
+    {
+      "name": "same_account_simulation",
+      "description": "The 'Example: Same-Account Simulation' request from the SimulateCustomPolicy API reference. Only the sample's invalid JSON is fixed: [] in place of {} around the Action and Resource lists of all three policies, and a comma after the bucket policy's Principal.",
+      "documented": {
+        "decision": "ALLOW",
+        "AllowedByPermissionsBoundary": false,
+        "source": "Both policies allow IAM actions only. However, a resource-based policy permits Mateo to perform the actions s3:Put* or s3:List* on the Production bucket. As a result, the simulation allows the action.",
+        "link": "https://docs.aws.amazon.com/IAM/latest/APIReference/API_SimulateCustomPolicy.html"
+      },
+      "caller": "arn:aws:iam::111122223333:user/mateo",
+      "resource_owner": "arn:aws:iam::111122223333:root",
+      "policies": {
+        "PolicyInputList.1": {
+          "Version": "2012-10-17",
+          "Statement": {"Effect": "Allow", "Action": ["iam:*"], "Resource": ["*"]}
+        }
+      },
+      "boundary": {
+        "Version": "2012-10-17",
+        "Statement": {"Effect": "Allow", "Action": ["iam:*"], "Resource": ["*"]}
+      },
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": {
+          "Effect": "Allow",
+          "Principal": {"AWS": "arn:aws:iam::111122223333:user/mateo"},
+          "Action": ["s3:List*", "s3:Put*"],
+          "Resource": ["arn:aws:s3:::production/*"]
+        }
+      },
+      "request": {"action": "s3:PutObject", "resource": "arn:aws:s3:::production/Test"}
+    }
+  ]
+}

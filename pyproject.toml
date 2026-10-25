@@ -12,6 +12,9 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Only for simulator_check/record.py, the dev tool that checks the analyzer against AWS's IAM
+# policy simulator (docs/simulator-check.md). The analyzer itself needs nothing.
+simulator = ["boto3>=1.43.118"]
 
 [project.scripts]
 iam-analyzer = "iam_analyzer.cli:main"
@@ -21,3 +24,5 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# So the tests can import simulator_check, which isn't part of the installed package.
+pythonpath = ["."]

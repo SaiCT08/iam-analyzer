@@ -1,0 +1,40 @@
+{
+  "title": "A policy variable in a Bool condition",
+  "question": "Are policy variables filled in in a Bool value? The condition operators page says Bool supports them, and the policy variables page says it doesn't. The analyzer refuses.",
+  "defaults": {
+    "policies": {
+      "secure_when_mfa.json": {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+          "Condition": {"Bool": {"aws:SecureTransport": "${aws:MultiFactorAuthPresent}"}}
+        }]
+      }
+    },
+    "resource_policy": null,
+    "context_types": {"aws:SecureTransport": "boolean", "aws:MultiFactorAuthPresent": "boolean"},
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+  },
+  "cases": [
+    {
+      "name": "mfa_true",
+      "description": "Both keys are true.",
+      "readings": {
+        "ALLOW": "the variable is filled in",
+        "IMPLICIT_DENY": "it isn't: the text ${aws:MultiFactorAuthPresent} never equals true",
+        "rejected": "AWS refuses the policy"
+      },
+      "context": {"aws:SecureTransport": "true", "aws:MultiFactorAuthPresent": "true"}
+    },
+    {
+      "name": "mfa_false",
+      "description": "aws:SecureTransport is true and aws:MultiFactorAuthPresent is false.",
+      "readings": {
+        "IMPLICIT_DENY": "the variable is filled in, and true isn't false; or it isn't filled in at all",
+        "ALLOW": "something else",
+        "rejected": "AWS refuses the policy"
+      },
+      "context": {"aws:SecureTransport": "true", "aws:MultiFactorAuthPresent": "false"}
+    }
+  ]
+}

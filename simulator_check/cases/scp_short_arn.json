@@ -1,0 +1,37 @@
+{
+  "title": "A short ARN in an SCP",
+  "question": "Does AWS complete a short ARN in an SCP with * fields? AWS documents the completion only for identity-based policies. The analyzer completes it in every layer (review finding F3).",
+  "cases": [
+    {
+      "name": "short_arn_in_an_scp_deny",
+      "description": "A root SCP denies s3:* on arn:aws:s3. The request reads a student record.",
+      "readings": {
+        "EXPLICIT_DENY": "AWS completes the short ARN in an SCP too, as the analyzer assumes",
+        "ALLOW": "it doesn't"
+      },
+      "policies": {
+        "broad_s3.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+        }
+      },
+      "organization": {
+        "ManagementAccountId": "999988887777",
+        "ServiceControlPolicies": {
+          "FullAWSAccess": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+          "NoS3": {"Version": "2012-10-17", "Statement": [{"Effect": "Deny", "Action": "s3:*", "Resource": "arn:aws:s3"}]}
+        },
+        "Root": {
+          "ServiceControlPolicies": ["FullAWSAccess", "NoS3"],
+          "Accounts": {
+            "111122223333": {"ServiceControlPolicies": ["FullAWSAccess"]},
+            "999988887777": {"ServiceControlPolicies": ["FullAWSAccess"]}
+          }
+        }
+      },
+      "account_id": "111122223333",
+      "resource_policy": null,
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+    }
+  ]
+}

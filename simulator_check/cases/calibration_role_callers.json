@@ -1,0 +1,55 @@
+{
+  "title": "Role callers with a bucket policy",
+  "question": "Does the simulator use a resource-based policy when the caller is a role? AWS says \"Simulation of resource-based policies isn't supported for IAM roles\", which could mean roles' own trust policies, or any resource-based policy when a role is the caller. In each case the bucket policy should decide the answer, so it should show up in MatchedStatements.",
+  "defaults": {
+    "caller": "arn:aws:iam::111122223333:role/district/CampusApp",
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-kwong-files/notes.txt"}
+  },
+  "cases": [
+    {
+      "name": "bucket_policy_grants_to_the_role",
+      "description": "The bucket policy grants the role read access. The role has no identity policy that allows it, and no boundary.",
+      "documented": {
+        "decision": "ALLOW",
+        "source": "For most resources, you only need an explicit Allow for the principal in either an identity-based policy or a resource-based policy to grant access.",
+        "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-denyallow.html"
+      },
+      "policies": {},
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Sid": "CampusAppReads",
+          "Effect": "Allow",
+          "Principal": {"AWS": "arn:aws:iam::111122223333:role/district/CampusApp"},
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::district-kwong-files/*"
+        }]
+      }
+    },
+    {
+      "name": "bucket_policy_denies_everyone",
+      "description": "The role's identity policy allows S3, and the bucket policy denies everyone.",
+      "documented": {
+        "decision": "EXPLICIT_DENY",
+        "source": "If the enforcement code finds even one explicit deny that applies, the enforcement code returns a final decision of Deny.",
+        "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-denyallow.html"
+      },
+      "policies": {
+        "broad_s3.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+        }
+      },
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{
+          "Sid": "NoOneReads",
+          "Effect": "Deny",
+          "Principal": "*",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::district-kwong-files/*"
+        }]
+      }
+    }
+  ]
+}

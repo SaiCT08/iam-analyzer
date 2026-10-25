@@ -1,0 +1,24 @@
+{
+  "title": "ForAnyValue with IfExists, on a missing key",
+  "question": "On a missing key, IfExists says the condition holds and ForAnyValue says it doesn't. AWS doesn't say which wins. The analyzer refuses.",
+  "cases": [
+    {
+      "name": "key_absent",
+      "description": "ForAnyValue:StringEqualsIfExists aws:TagKeys campus, for a request with no tags.",
+      "readings": {
+        "ALLOW": "IfExists wins: a missing key passes",
+        "IMPLICIT_DENY": "ForAnyValue wins: no values, no match. Or the simulator's handling of a key left out of the call (see calibration)"
+      },
+      "policies": {
+        "campus_tag_if_any.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"ForAnyValue:StringEqualsIfExists": {"aws:TagKeys": "campus"}}}]
+        }
+      },
+      "resource_policy": null,
+      "context": {"aws:TagKeys": null},
+      "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+    }
+  ]
+}

@@ -1,0 +1,75 @@
+{
+  "title": "Absent keys with documented answers",
+  "question": "Does a key left out of the simulator call act like a key absent from a real request? AWS says: \"If you do not provide a value for a context key, the simulation still runs and returns an implicit deny.\" Each case's documented answer is something else.",
+  "cases": [
+    {
+      "name": "string_not_equals_on_an_absent_tag",
+      "description": "A negated operator holds when its key is missing.",
+      "documented": {
+        "decision": "ALLOW",
+        "source": "If the policy condition requires that the key is not matched, such as StringNotLike or ArnNotLike, and the right key is not present, the condition is true.",
+        "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html"
+      },
+      "policies": {
+        "not_team_blue.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::district-student-records/*",
+            "Condition": {"StringNotEquals": {"aws:PrincipalTag/team": "blue"}}
+          }]
+        }
+      },
+      "resource_policy": null,
+      "context": {"aws:PrincipalTag/team": null},
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+    },
+    {
+      "name": "string_like_if_exists_on_an_absent_instance_type",
+      "description": "The condition from AWS's StringLikeIfExists example, whose table says a request with no ec2:InstanceType is a match.",
+      "documented": {
+        "decision": "ALLOW",
+        "source": "If the key is not present, evaluate the condition element as true.",
+        "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_IfExists"
+      },
+      "policies": {
+        "instance_types.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Sid": "RunInstance",
+            "Effect": "Allow",
+            "Action": "ec2:StartInstances",
+            "Resource": "*",
+            "Condition": {"StringLikeIfExists": {"ec2:InstanceType": ["t1.*", "t2.*", "m3.*"]}}
+          }]
+        }
+      },
+      "resource_policy": null,
+      "context": {"ec2:InstanceType": null},
+      "request": {"action": "ec2:StartInstances", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+    },
+    {
+      "name": "null_true_on_an_absent_token_issue_time",
+      "description": "Null true holds when the key is missing, as for a request made with access keys.",
+      "documented": {
+        "decision": "ALLOW",
+        "source": "In the policy statement, use either true (the key doesn't exist — it is null) or false (the key exists and its value is not null).",
+        "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_Null"
+      },
+      "policies": {
+        "long_term_keys_only.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Action": "ec2:DescribeInstances",
+            "Resource": "*",
+            "Condition": {"Null": {"aws:TokenIssueTime": "true"}}
+          }]
+        }
+      },
+      "context": {"aws:TokenIssueTime": null},
+      "request": {"action": "ec2:DescribeInstances", "resource": "*"}
+    }
+  ]
+}

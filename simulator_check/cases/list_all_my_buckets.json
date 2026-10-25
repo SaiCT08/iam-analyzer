@@ -1,0 +1,34 @@
+{
+  "title": "The resource for s3:ListAllMyBuckets",
+  "question": "Which resource does a request for an action with no resource type use? AWS's own examples allow s3:ListAllMyBuckets on arn:aws:s3:::*, but the analyzer only matches the request's * against a policy's * (review open question 3).",
+  "defaults": {
+    "request": {"action": "s3:ListAllMyBuckets", "resource": "*"}
+  },
+  "cases": [
+    {
+      "name": "allowed_on_every_bucket_arn",
+      "description": "An Allow on arn:aws:s3:::*, as in AWS's examples.",
+      "readings": {
+        "ALLOW": "arn:aws:s3:::* covers a request with no resource, as AWS's examples assume",
+        "IMPLICIT_DENY": "it doesn't, as the analyzer says today"
+      },
+      "policies": {
+        "list_buckets.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:ListAllMyBuckets", "Resource": "arn:aws:s3:::*"}]
+        }
+      }
+    },
+    {
+      "name": "allowed_on_star_control",
+      "description": "An Allow on *.",
+      "readings": {"ALLOW": "the request works at all"},
+      "policies": {
+        "list_buckets.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:ListAllMyBuckets", "Resource": "*"}]
+        }
+      }
+    }
+  ]
+}

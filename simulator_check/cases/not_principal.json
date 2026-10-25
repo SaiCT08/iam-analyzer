@@ -1,0 +1,65 @@
+{
+  "title": "NotPrincipal with Deny",
+  "question": "Which principals does a NotPrincipal Deny exclude? AWS says it \"might validate the account first\", depending on the service. The analyzer refuses NotPrincipal. The simulator's caller can only be an IAM user here, not a role session.",
+  "defaults": {
+    "policies": {
+      "broad_s3.json": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+      }
+    },
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-kwong-files/notes.txt"}
+  },
+  "cases": [
+    {
+      "name": "names_the_caller",
+      "description": "NotPrincipal names user kwong, and kwong is the caller.",
+      "readings": {
+        "ALLOW": "only the user is checked, so the Deny skips kwong",
+        "EXPLICIT_DENY": "the account is checked first, and it isn't excluded"
+      },
+      "caller": "arn:aws:iam::111122223333:user/kwong",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Deny", "NotPrincipal": {"AWS": ["arn:aws:iam::111122223333:user/kwong"]},
+                       "Action": "s3:*", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "names_the_account_and_the_caller",
+      "description": "NotPrincipal names the account and user kwong, and kwong is the caller.",
+      "readings": {"ALLOW": "either reading: kwong is excluded"},
+      "caller": "arn:aws:iam::111122223333:user/kwong",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Deny", "NotPrincipal": {"AWS": ["arn:aws:iam::111122223333:root", "arn:aws:iam::111122223333:user/kwong"]},
+                       "Action": "s3:*", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "names_the_account_and_another_user",
+      "description": "NotPrincipal names the account and user kwong, and alee is the caller.",
+      "readings": {
+        "ALLOW": "naming the account excludes everyone in it",
+        "EXPLICIT_DENY": "only the users it names are excluded"
+      },
+      "caller": "arn:aws:iam::111122223333:user/alee",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Deny", "NotPrincipal": {"AWS": ["arn:aws:iam::111122223333:root", "arn:aws:iam::111122223333:user/kwong"]},
+                       "Action": "s3:*", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "names_another_user_control",
+      "description": "NotPrincipal names user kwong, and alee is the caller.",
+      "readings": {"EXPLICIT_DENY": "either reading: alee isn't excluded"},
+      "caller": "arn:aws:iam::111122223333:user/alee",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Deny", "NotPrincipal": {"AWS": ["arn:aws:iam::111122223333:user/kwong"]},
+                       "Action": "s3:*", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    }
+  ]
+}

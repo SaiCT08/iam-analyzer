@@ -1,0 +1,38 @@
+{
+  "title": "A * in a policy variable's value or default",
+  "question": "Does a * that a policy variable fills in act as a wildcard? AWS doesn't say. The analyzer refuses.",
+  "defaults": {
+    "resource_policy": null,
+    "readings": {"ALLOW": "the * acts as a wildcard", "IMPLICIT_DENY": "it is a literal *"}
+  },
+  "cases": [
+    {
+      "name": "star_in_a_value",
+      "description": "The caller's team tag is b*. IAM's tag rules don't allow a * in a tag value, but the simulator takes any value.",
+      "policies": {
+        "team_bucket.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-teams-${aws:PrincipalTag/team}/*"}]
+        }
+      },
+      "context": {"aws:PrincipalTag/team": "b*"},
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-blue/handbook.pdf"}
+    },
+    {
+      "name": "star_in_a_default",
+      "description": "The default is class-of-*, and the caller has no team tag.",
+      "readings": {
+        "ALLOW": "the * acts as a wildcard",
+        "IMPLICIT_DENY": "it is a literal *, or the simulator's handling of a key left out of the call (see calibration)"
+      },
+      "policies": {
+        "team_bucket.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-teams-${aws:PrincipalTag/team, 'class-of-*'}/*"}]
+        }
+      },
+      "context": {"aws:PrincipalTag/team": null},
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-class-of-2026/handbook.pdf"}
+    }
+  ]
+}

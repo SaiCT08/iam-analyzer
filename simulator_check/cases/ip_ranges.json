@@ -1,0 +1,37 @@
+{
+  "title": "A bare IPv6 address, and a range with host bits set",
+  "question": "AWS gives a bare address the default prefix /32, which only fits IPv4, and doesn't say what a range with host bits set means. The analyzer refuses both.",
+  "defaults": {
+    "resource_policy": null,
+    "context_types": {"aws:SourceIp": "ip"},
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+  },
+  "cases": [
+    {
+      "name": "bare_ipv6_address",
+      "description": "IpAddress 2001:db8::1, for a request from 2001:db8::2.",
+      "readings": {"ALLOW": "a bare IPv6 address gets /32, AWS's default", "IMPLICIT_DENY": "it gets /128"},
+      "policies": {
+        "from_one_address.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"IpAddress": {"aws:SourceIp": "2001:db8::1"}}}]
+        }
+      },
+      "context": {"aws:SourceIp": "2001:db8::2"}
+    },
+    {
+      "name": "range_with_host_bits",
+      "description": "IpAddress 203.0.113.5/24, for a request from 203.0.113.77.",
+      "readings": {"ALLOW": "the host bits are masked, giving 203.0.113.0/24", "IMPLICIT_DENY": "they aren't"},
+      "policies": {
+        "from_the_campus_network.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"IpAddress": {"aws:SourceIp": "203.0.113.5/24"}}}]
+        }
+      },
+      "context": {"aws:SourceIp": "203.0.113.77"}
+    }
+  ]
+}

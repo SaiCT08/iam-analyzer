@@ -1,0 +1,32 @@
+{
+  "title": "A role ARN that matches the caller only if case is ignored",
+  "question": "Does a role ARN in a Principal element match the caller's role regardless of case? AWS says the user name part of a user ARN is case sensitive, but says nothing about roles. The analyzer refuses.",
+  "defaults": {
+    "policies": {},
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-kwong-files/notes.txt"}
+  },
+  "cases": [
+    {
+      "name": "role_name_in_lowercase",
+      "description": "The bucket policy names role/district/campusapp, and the caller is role/district/CampusApp.",
+      "readings": {"ALLOW": "role names in a principal ignore case", "IMPLICIT_DENY": "they don't"},
+      "caller": "arn:aws:iam::111122223333:role/district/CampusApp",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::111122223333:role/district/campusapp"},
+                       "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    },
+    {
+      "name": "user_name_in_uppercase_control",
+      "description": "The bucket policy names user/KWONG, and the caller is user/kwong.",
+      "readings": {"IMPLICIT_DENY": "user names are case sensitive, as AWS documents", "ALLOW": "they aren't"},
+      "caller": "arn:aws:iam::111122223333:user/kwong",
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Principal": {"AWS": "arn:aws:iam::111122223333:user/KWONG"},
+                       "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
+    }
+  ]
+}

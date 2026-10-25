@@ -1,0 +1,35 @@
+{
+  "title": "A request whose only value is empty",
+  "question": "Does a key whose only value is \"\" count as missing? AWS calls it a \"null dataset\" only for ForAllValues. The analyzer refuses it under ForAnyValue and Null.",
+  "defaults": {
+    "resource_policy": null,
+    "context": {"aws:TagKeys": [""]},
+    "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+  },
+  "cases": [
+    {
+      "name": "for_any_value",
+      "description": "ForAnyValue:StringNotEquals aws:TagKeys campus, with aws:TagKeys [\"\"].",
+      "readings": {"ALLOW": "the empty string is a value, and it isn't campus", "IMPLICIT_DENY": "it counts as no values"},
+      "policies": {
+        "any_tag_but_campus.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"ForAnyValue:StringNotEquals": {"aws:TagKeys": "campus"}}}]
+        }
+      }
+    },
+    {
+      "name": "null_true",
+      "description": "Null aws:TagKeys true, with aws:TagKeys [\"\"].",
+      "readings": {"ALLOW": "an empty value counts as missing", "IMPLICIT_DENY": "it counts as present"},
+      "policies": {
+        "no_tags.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"Null": {"aws:TagKeys": "true"}}}]
+        }
+      }
+    }
+  ]
+}

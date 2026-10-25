@@ -1,0 +1,65 @@
+{
+  "title": "ForAllValues:StringNotLike",
+  "question": "Does ForAllValues:StringNotLike follow its definitions, as the analyzer does, or the evaluation table under AWS's aws:ResourceOrgPaths example, which says the opposite in all three rows? The example's Deny is copied word for word, beside an Allow for all of S3.",
+  "defaults": {
+    "policies": {
+      "broad_s3.json": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+      },
+      "aws_example.json": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "DenyS3AccessOutsideMyBoundary",
+            "Effect": "Deny",
+            "Action": [
+              "s3:*"
+            ],
+            "Resource": "*",
+            "Condition": {
+              "ForAllValues:StringNotLike": {
+                "aws:ResourceOrgPaths": [
+                  "o-acorg/r-acroot/ou-acroot-mediaou/",
+                  "o-acorg/r-acroot/ou-acroot-sportsou/*"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "resource_policy": null,
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+  },
+  "cases": [
+    {
+      "name": "sportsou_costcenter",
+      "description": "The table's first row: the table says Match.",
+      "readings": {
+        "ALLOW": "the definitions: the path matches sportsou/*, so the condition fails and the Deny doesn't apply",
+        "EXPLICIT_DENY": "the table: Match"
+      },
+      "context": {"aws:ResourceOrgPaths": ["o-acorg/r-acroot/ou-acroot-sportsou/costcenter/"]}
+    },
+    {
+      "name": "mediaou_costcenter",
+      "description": "The table's second row: the table says No match.",
+      "readings": {
+        "EXPLICIT_DENY": "the definitions: the path matches neither pattern, so the condition holds",
+        "ALLOW": "the table: No match"
+      },
+      "context": {"aws:ResourceOrgPaths": ["o-acorg/r-acroot/ou-acroot-mediaou/costcenter/"]}
+    },
+    {
+      "name": "no_resource_org_paths",
+      "description": "The table's third row, with no aws:ResourceOrgPaths: the table says No match.",
+      "readings": {
+        "EXPLICIT_DENY": "the definitions: ForAllValues holds when the key is missing",
+        "ALLOW": "the table: No match",
+        "IMPLICIT_DENY": "neither: the simulator's handling of a key left out of the call (see calibration)"
+      },
+      "context": {"aws:ResourceOrgPaths": null}
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "title": "A set operator on a Numeric operator",
+  "question": "Do ForAllValues and ForAnyValue work with Numeric operators? AWS's tables only show String, Bool and ARN examples. The analyzer assumes they do: a judgment call.",
+  "cases": [
+    {
+      "name": "for_any_value_numeric_less_than",
+      "description": "ForAnyValue:NumericLessThan s3:max-keys 10, with the values 5 and 20.",
+      "readings": {
+        "ALLOW": "set operators work with Numeric operators, as the analyzer assumes",
+        "IMPLICIT_DENY": "they don't"
+      },
+      "policies": {
+        "small_listings.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::district-student-records",
+                         "Condition": {"ForAnyValue:NumericLessThan": {"s3:max-keys": "10"}}}]
+        }
+      },
+      "resource_policy": null,
+      "context": {"s3:max-keys": ["5", "20"]},
+      "request": {"action": "s3:ListBucket", "resource": "arn:aws:s3:::district-student-records"}
+    }
+  ]
+}

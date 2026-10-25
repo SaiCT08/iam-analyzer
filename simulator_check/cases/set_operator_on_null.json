@@ -1,0 +1,26 @@
+{
+  "title": "A set operator on Null",
+  "question": "Does AWS accept ForAllValues:Null, and what does it do? AWS doesn't say what a set operator does on Null. The analyzer refuses the policy.",
+  "cases": [
+    {
+      "name": "for_all_values_null_false",
+      "description": "ForAllValues:Null aws:TagKeys false, for a request that adds the tag campus.",
+      "readings": {
+        "ALLOW": "AWS accepts it, and the key is there",
+        "IMPLICIT_DENY": "AWS accepts it, and the condition doesn't hold",
+        "rejected": "AWS refuses the operator"
+      },
+      "policies": {
+        "some_tags.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"ForAllValues:Null": {"aws:TagKeys": "false"}}}]
+        }
+      },
+      "resource_policy": null,
+      "context": {"aws:TagKeys": ["campus"]},
+      "context_types": {"aws:TagKeys": "stringList"},
+      "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+    }
+  ]
+}

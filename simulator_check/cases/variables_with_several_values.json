@@ -1,0 +1,27 @@
+{
+  "title": "A policy variable from a key with several values",
+  "question": "What does AWS do with a policy variable whose key has several values? AWS says \"You can't use a multivalued condition key as a variable\", but not what happens if a policy does. The analyzer refuses.",
+  "defaults": {
+    "policies": {
+      "tagged_team_bucket.json": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-teams-${aws:TagKeys}/*"}]
+      }
+    },
+    "resource_policy": null,
+    "context": {"aws:TagKeys": ["blue", "red"]},
+    "readings": {"ALLOW": "this value is used", "IMPLICIT_DENY": "it isn't"}
+  },
+  "cases": [
+    {
+      "name": "first_value",
+      "description": "A request on the bucket named after the first value.",
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-blue/handbook.pdf"}
+    },
+    {
+      "name": "second_value",
+      "description": "A request on the bucket named after the second value.",
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-red/handbook.pdf"}
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "title": "Several request values with no set operator",
+  "question": "How does an operator without ForAllValues or ForAnyValue treat a key with several values? AWS says such keys need a set operator, but not what happens without one. The analyzer refuses.",
+  "defaults": {
+    "resource_policy": null,
+    "context": {"aws:TagKeys": ["campus", "grade"]},
+    "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+  },
+  "cases": [
+    {
+      "name": "string_equals",
+      "description": "StringEquals aws:TagKeys campus, for a request that adds the tags campus and grade.",
+      "readings": {"ALLOW": "it acts like ForAnyValue", "IMPLICIT_DENY": "it acts like ForAllValues"},
+      "policies": {
+        "tag_campus.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"StringEquals": {"aws:TagKeys": "campus"}}}]
+        }
+      }
+    },
+    {
+      "name": "string_not_equals",
+      "description": "StringNotEquals aws:TagKeys campus, for the same request.",
+      "readings": {"ALLOW": "it acts like ForAnyValue: grade differs", "IMPLICIT_DENY": "it acts like ForAllValues: campus matches"},
+      "policies": {
+        "tag_anything_but_campus.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"StringNotEquals": {"aws:TagKeys": "campus"}}}]
+        }
+      }
+    }
+  ]
+}

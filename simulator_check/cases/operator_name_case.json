@@ -1,0 +1,26 @@
+{
+  "title": "An operator name in the wrong case",
+  "question": "Does AWS accept a condition operator spelled in lowercase? AWS doesn't say whether operator names ignore case. The analyzer rejects the policy.",
+  "cases": [
+    {
+      "name": "lowercase_string_equals",
+      "description": "stringequals aws:PrincipalTag/campus campus-01, for a caller tagged campus-01.",
+      "readings": {
+        "ALLOW": "operator names ignore case",
+        "rejected": "AWS refuses the policy, as the analyzer does",
+        "IMPLICIT_DENY": "AWS accepts the policy, but the condition never holds"
+      },
+      "policies": {
+        "campus_01.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"stringequals": {"aws:PrincipalTag/campus": "campus-01"}}}]
+        }
+      },
+      "resource_policy": null,
+      "context": {"aws:PrincipalTag/campus": "campus-01"},
+      "context_types": {"aws:PrincipalTag/campus": "string"},
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+    }
+  ]
+}

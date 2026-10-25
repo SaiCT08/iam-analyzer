@@ -1,0 +1,104 @@
+{
+  "title": "SCP Allow statements that use the full policy language",
+  "question": "Do SCP Allow statements honor a Resource ARN and NotAction? AWS's SCP syntax page says SCP Allows may only use \"Resource\": \"*\", while its September 2025 announcement says SCPs support the full IAM policy language, which the analyzer follows (review open question 2). The simulator's User Guide page says it evaluates \"resource scoping in deny statements\", so a difference here may be a simulator limit.",
+  "defaults": {
+    "policies": {
+      "broad.json": {
+        "Version": "2012-10-17",
+        "Statement": [{"Effect": "Allow", "Action": ["s3:*", "ec2:*"], "Resource": "*"}]
+      }
+    },
+    "account_id": "111122223333"
+  },
+  "cases": [
+    {
+      "name": "resource_scoped_allow_inside",
+      "description": "The account's SCP allows s3:GetObject only on the gradebook app's bucket. The request reads an object in that bucket.",
+      "readings": {"ALLOW": "the SCP's Allow covers this object", "IMPLICIT_DENY": "the SCP's Allow covers nothing"},
+      "organization": {
+        "ManagementAccountId": "999988887777",
+        "ServiceControlPolicies": {
+          "FullAWSAccess": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+          "GradebookReadsOnly": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-gradebook-app/*"}]}
+        },
+        "Root": {
+          "ServiceControlPolicies": ["FullAWSAccess"],
+          "Accounts": {
+            "111122223333": {"ServiceControlPolicies": ["GradebookReadsOnly"]},
+            "999988887777": {"ServiceControlPolicies": ["FullAWSAccess"]}
+          }
+        }
+      },
+      "resource_policy": null,
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-gradebook-app/exports/grades.csv"}
+    },
+    {
+      "name": "resource_scoped_allow_outside",
+      "description": "The same SCP. The request reads a student record, which its Resource doesn't cover.",
+      "readings": {
+        "IMPLICIT_DENY": "the SCP's Allow is limited to its Resource, as the analyzer assumes",
+        "ALLOW": "the SCP's Resource is ignored in an Allow"
+      },
+      "organization": {
+        "ManagementAccountId": "999988887777",
+        "ServiceControlPolicies": {
+          "FullAWSAccess": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+          "GradebookReadsOnly": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-gradebook-app/*"}]}
+        },
+        "Root": {
+          "ServiceControlPolicies": ["FullAWSAccess"],
+          "Accounts": {
+            "111122223333": {"ServiceControlPolicies": ["GradebookReadsOnly"]},
+            "999988887777": {"ServiceControlPolicies": ["FullAWSAccess"]}
+          }
+        }
+      },
+      "resource_policy": null,
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+    },
+    {
+      "name": "not_action_allow_s3",
+      "description": "The account's SCP allows everything but EC2, with NotAction. The request is an S3 read.",
+      "readings": {"ALLOW": "NotAction in an SCP Allow covers S3", "IMPLICIT_DENY": "the SCP's Allow covers nothing"},
+      "organization": {
+        "ManagementAccountId": "999988887777",
+        "ServiceControlPolicies": {
+          "FullAWSAccess": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+          "EverythingButEc2": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "NotAction": "ec2:*", "Resource": "*"}]}
+        },
+        "Root": {
+          "ServiceControlPolicies": ["FullAWSAccess"],
+          "Accounts": {
+            "111122223333": {"ServiceControlPolicies": ["EverythingButEc2"]},
+            "999988887777": {"ServiceControlPolicies": ["FullAWSAccess"]}
+          }
+        }
+      },
+      "resource_policy": null,
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+    },
+    {
+      "name": "not_action_allow_ec2",
+      "description": "The same SCP. The request is an EC2 call, which its NotAction leaves out.",
+      "readings": {
+        "IMPLICIT_DENY": "NotAction in an SCP Allow works, as the analyzer assumes",
+        "ALLOW": "the SCP's NotAction is ignored"
+      },
+      "organization": {
+        "ManagementAccountId": "999988887777",
+        "ServiceControlPolicies": {
+          "FullAWSAccess": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+          "EverythingButEc2": {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "NotAction": "ec2:*", "Resource": "*"}]}
+        },
+        "Root": {
+          "ServiceControlPolicies": ["FullAWSAccess"],
+          "Accounts": {
+            "111122223333": {"ServiceControlPolicies": ["EverythingButEc2"]},
+            "999988887777": {"ServiceControlPolicies": ["FullAWSAccess"]}
+          }
+        }
+      },
+      "request": {"action": "ec2:DescribeInstances", "resource": "*"}
+    }
+  ]
+}

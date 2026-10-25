@@ -1,0 +1,76 @@
+{
+  "title": "Dates without a time or a time zone",
+  "question": "Which moment does a date without a time or a time zone stand for, and is a bare four-digit number a year or epoch seconds? AWS accepts W3C's ISO 8601 forms but doesn't say. The analyzer refuses.",
+  "defaults": {
+    "resource_policy": null,
+    "context_types": {"aws:CurrentTime": "date"},
+    "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
+  },
+  "cases": [
+    {
+      "name": "date_only_just_after_midnight_utc",
+      "description": "DateGreaterThan 2026-08-15, one second after midnight UTC on that day.",
+      "readings": {"ALLOW": "consistent with midnight UTC at the start of the day", "IMPLICIT_DENY": "a later moment"},
+      "policies": {
+        "after_the_date.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08-15"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-15T00:00:01Z"}
+    },
+    {
+      "name": "date_only_just_before_midnight_utc",
+      "description": "DateGreaterThan 2026-08-15, one second before midnight UTC.",
+      "readings": {"IMPLICIT_DENY": "consistent with midnight UTC at the start of the day", "ALLOW": "an earlier moment"},
+      "policies": {
+        "after_the_date.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08-15"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-14T23:59:59Z"}
+    },
+    {
+      "name": "time_without_a_zone_just_after",
+      "description": "DateGreaterThan 2026-08-15T07:30:00 with no time zone, one second after 07:30 UTC.",
+      "readings": {"ALLOW": "consistent with UTC", "IMPLICIT_DENY": "a later moment"},
+      "policies": {
+        "after_the_time.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08-15T07:30:00"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-15T07:30:01Z"}
+    },
+    {
+      "name": "time_without_a_zone_just_before",
+      "description": "DateGreaterThan 2026-08-15T07:30:00 with no time zone, one second before 07:30 UTC.",
+      "readings": {"IMPLICIT_DENY": "consistent with UTC", "ALLOW": "an earlier moment"},
+      "policies": {
+        "after_the_time.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08-15T07:30:00"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-15T07:29:59Z"}
+    },
+    {
+      "name": "four_digits",
+      "description": "DateGreaterThan 2026, at the start of the year 2000.",
+      "readings": {"ALLOW": "2026 is epoch seconds (1970-01-01T00:33:46Z)", "IMPLICIT_DENY": "2026 is the year"},
+      "policies": {
+        "after_2026.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2000-01-01T00:00:00Z"}
+    }
+  ]
+}
