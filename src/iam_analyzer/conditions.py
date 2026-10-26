@@ -232,8 +232,12 @@ def _in_network(address: Any, network: Any) -> bool:
 
 
 def _arn_like(request: list[str], fields: list[Pattern]) -> bool:
-    # Each of the six fields is matched on its own, with the Resource element's wildcard rules.
-    return all(wildcard_match(p, r, segmented=True) for p, r in zip(fields, request, strict=True))
+    # AWS: "Each of the six colon-delimited components of the ARN is checked separately", and the
+    # IAM policy simulator agrees (wildcards_and_colons/arn_like_star_ending_the_region_field):
+    # unlike in Resource, a * that ends the region field doesn't run on into the account field.
+    # Within a field, * and ? match any characters. Only the resource part holds colons, and there
+    # they match them, as in Resource (wildcards_and_colons/arn_like_*).
+    return all(wildcard_match(p, r) for p, r in zip(fields, request, strict=True))
 
 
 @dataclass(frozen=True)

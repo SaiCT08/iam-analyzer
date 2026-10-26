@@ -13,10 +13,11 @@ It works entirely on local policy JSON files. No AWS account or credentials are 
 The analyzer currently covers **identity policies**, **permissions boundaries**, **service control
 policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
 - Allow/Deny statements, where an explicit deny always wins and the default is an implicit deny.
-- `*` / `?` wildcards in actions and resources. In a resource ARN, a wildcard stays inside one
-  colon-separated part, except a `*` at the end of a part, which can run on past colons. So
-  `function:*` covers Lambda aliases such as `function:billing:canary`. A short ARN such as
-  `arn:aws:s3` is completed with wildcards (`arn:aws:s3:*:*:*`), as AWS does.
+- `*` / `?` wildcards in actions and resources. In a resource ARN they match colons too, as AWS's
+  IAM policy simulator does, so `function:*-prod` covers the Lambda alias
+  `function:billing:canary-prod`. A short ARN such as `arn:aws:s3` is completed with wildcards
+  (`arn:aws:s3:*:*:*`), as AWS does. The ARN condition operators, such as `ArnLike`, compare an
+  ARN's six colon-separated fields one by one instead.
 - `NotAction` / `NotResource`, which mean "everything except these". For example, a Deny with
   `NotAction: ["s3:Get*"]` is a read-only guardrail.
 - Permissions boundaries. A boundary caps what a user or role can do: a request needs an Allow in

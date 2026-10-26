@@ -273,11 +273,18 @@ def test_a_bare_ipv4_address_is_a_32():
     assert not applies(condition, {"aws:SourceIp": "203.0.113.6"})
 
 
-def test_arn_wildcards_follow_the_resource_segment_rule():
-    condition = {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:*:*:function:*-prod"}}
+def test_arn_like_checks_the_six_fields_separately():
     lambda_arn = "arn:aws:lambda:us-east-1:111122223333:function:{}"
+    # In the resource part, a * matches colons, as in Resource (wildcards_and_colons/arn_like_*).
+    condition = {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:*:*:function:*-prod"}}
     assert applies(condition, {"aws:SourceArn": lambda_arn.format("billing-prod")})
-    assert not applies(condition, {"aws:SourceArn": lambda_arn.format("billing:canary-prod")})
+    assert applies(condition, {"aws:SourceArn": lambda_arn.format("billing:canary-prod")})
+    # But a * that ends the region field stays in that field, although the same pattern matches
+    # in Resource (wildcards_and_colons/arn_like_star_ending_the_region_field).
+    region_star = {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:*:function:billing:canary"}}
+    assert not applies(region_star, {"aws:SourceArn": lambda_arn.format("billing:canary")})
+    lined_up = {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:*:*:function:billing:canary"}}
+    assert applies(lined_up, {"aws:SourceArn": lambda_arn.format("billing:canary")})
 
 
 def test_arn_fields_are_split_before_variables_are_filled_in():

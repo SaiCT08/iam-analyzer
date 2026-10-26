@@ -270,51 +270,6 @@
       "verdict": "analyzer refuses",
       "note": "EXPLICIT_DENY: the variable's resource matches nothing, so NotResource covers the request and the Deny applies. That is the \"will not match any resource\" reading."
     },
-    "wildcards_and_colons/arn_like_mid_segment_star": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "In ArnLike, function:*-prod matched function:billing:canary-prod: the * crossed a colon in the resource part."
-    },
-    "wildcards_and_colons/arn_like_question_mark": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "In ArnLike, campus?01 matched campus:01: the ? matched a colon."
-    },
-    "wildcards_and_colons/arn_like_s3_key_colon_star": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "In ArnLike, district-logs/*.json matched a key with colons in it."
-    },
-    "wildcards_and_colons/lambda_alias_mid_segment_star": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "function:*-prod matched the alias function:billing:canary-prod: the * crossed a colon in the resource part."
-    },
-    "wildcards_and_colons/mid_field_question_mark_crossing_a_colon": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "us-east-1?111122223333 matched us-east-1:111122223333: a ? in the region field matched the colon after it. The control us-east-? matched on both sides. With mid_field_star_crossing_a_colon, Resource is a plain glob over the whole ARN."
-    },
-    "wildcards_and_colons/mid_field_star_crossing_a_colon": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "us-*3 matched us-east-1:111122223333: a * in the middle of the region field crossed a colon. The control us-*-1 needs no crossing and matched on both sides."
-    },
-    "wildcards_and_colons/s3_key_colon_mid_segment_star": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "district-logs/*.json matched the key 2026-10-25T10:00:00.json across its colons."
-    },
-    "wildcards_and_colons/s3_key_colon_mid_segment_star_deny": {
-      "analyzer": "ALLOW",
-      "verdict": "differs",
-      "note": "The same * in a Deny applies in the simulator, so the analyzer's ALLOW misses a Deny. That over-reports access: wrong, but on the safe side."
-    },
-    "wildcards_and_colons/s3_key_colon_question_mark": {
-      "analyzer": "IMPLICIT_DENY",
-      "verdict": "differs",
-      "note": "campus?01 matched campus:01: the ? matched a colon."
-    },
     "wildcards_and_colons/short_pattern_star_across_fields": {
       "analyzer": "IMPLICIT_DENY",
       "verdict": "simulator limit",

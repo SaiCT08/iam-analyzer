@@ -9,16 +9,17 @@ rounds.
 - **Offline replay:** [`tests/test_simulator_fixtures.py`](../tests/test_simulator_fixtures.py)
   replays the fixtures without AWS, so the comparison keeps running after the AWS account is
   closed.
-- **No engine changes:** the differences below were decided on 2026-10-25, and a third round of
+- **Engine changes:** the differences below were decided on 2026-10-25, and a third round of
   probes on 2026-10-26 settled the questions still open (see
-  [Differences and decisions](#differences-and-decisions)). The engine changes come later.
+  [Differences and decisions](#differences-and-decisions)). Since 2026-10-26 the engine follows
+  difference 1. The others come next.
 
 ## Summary
 
 | Verdict | Cases | Meaning |
 |---|---|---|
-| agrees | 61 | Both sides gave the same answer. |
-| differs | 10 | A real mismatch. |
+| agrees | 70 | Both sides gave the same answer. |
+| differs | 1 | A real mismatch. |
 | simulator limit | 9 | AWS documents a behavior that the simulator doesn't follow. |
 | analyzer refuses | 41 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
 | can't express | 4 | The simulator can't be given the case faithfully. |
@@ -40,13 +41,14 @@ rounds.
     follow-up).
   - Every existing scenario the simulator can express agrees, except the four that simulator
     limits explain.
-- **The main difference: wildcards can match a colon.** In `Resource` and in `ArnLike`, a `*` in
-  the middle of the resource part, or a `?`, matches a colon (7 cases). In `Resource`, a `*` or a
-  `?` in the middle of the region field crosses a colon too (2 cases).
-  - The analyzer says they can't, so in eight cases it misses an `Allow`. It says someone can't
+- **The main difference was that wildcards can match a colon.** In `Resource` and in `ArnLike`, a
+  `*` in the middle of the resource part, or a `?`, matches a colon (7 cases). In `Resource`, a `*`
+  or a `?` in the middle of the region field crosses a colon too (2 cases).
+  - The analyzer said they can't, so in eight cases it missed an `Allow`. It said someone couldn't
     get in when AWS would let them: the unsafe direction.
-  - In the ninth it misses a `Deny` written as `*.json` for S3 keys that contain colons. That
-    over-reports access, which is wrong but errs on the safe side.
+  - In the ninth it missed a `Deny` written as `*.json` for S3 keys that contain colons. That
+    over-reported access, which is wrong but errs on the safe side.
+  - Since 2026-10-26 the analyzer matches as the simulator does, and all nine agree.
 - **The simulator's own limits.** Against AWS's documentation, it:
   - doesn't complete short ARNs;
   - doesn't exempt service-linked roles from SCPs;
@@ -220,22 +222,22 @@ The tables come from `python -m simulator_check.report`:
 | Case | Analyzer | Simulator | Verdict | Missing context values | Matched | Details |
 |---|---|---|---|---|---|---|
 | `wildcards_and_colons/arn_like_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/arn_like_mid_segment_star` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/arn_like_question_mark` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/arn_like_s3_key_colon_star` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/arn_like_mid_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/arn_like_question_mark` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/arn_like_s3_key_colon_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/arn_like_star_ending_the_region_field` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
 | `wildcards_and_colons/arn_like_star_ending_the_region_field_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/lambda_alias_end_of_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/lambda_alias_mid_segment_star` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/lambda_alias_mid_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/lambda_mid_segment_star_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/mid_field_question_mark_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/mid_field_question_mark_crossing_a_colon` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/mid_field_question_mark_crossing_a_colon` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/mid_field_star_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/mid_field_star_crossing_a_colon` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/mid_field_star_crossing_a_colon` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/s3_key_colon_end_of_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/s3_key_colon_mid_segment_star` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
-| `wildcards_and_colons/s3_key_colon_mid_segment_star_deny` | ALLOW | EXPLICIT_DENY | differs | - | PolicyInputList.2 | - |
-| `wildcards_and_colons/s3_key_colon_question_mark` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/s3_key_colon_mid_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/s3_key_colon_mid_segment_star_deny` | EXPLICIT_DENY | EXPLICIT_DENY | agrees | - | PolicyInputList.2 | - |
+| `wildcards_and_colons/s3_key_colon_question_mark` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/s3_key_question_mark_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/short_pattern_star_across_fields` | IMPLICIT_DENY | ALLOW | simulator limit | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/star_ending_the_region_field` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
@@ -368,14 +370,15 @@ The tables come from `python -m simulator_check.report`:
 ## Differences and decisions
 
 This section covers every case marked `differs`, `simulator limit` or `analyzer refuses`, and the
-decision for each, made on 2026-10-25. The engine hasn't changed yet.
+decision for each, made on 2026-10-25 and 2026-10-26. The engine follows a decision once its
+section says "Done".
 
 The decisions follow the project's rule for AWS's docs:
 - where AWS's docs clearly settle a question, the analyzer follows them, even when the simulator
   disagrees;
 - where they contradict each other or don't say, a recorded simulator answer can settle it.
 
-### 1. Wildcards match colons (9 cases, differs)
+### 1. Wildcards match colons (9 cases, which now agree)
 - **What the simulator did:**
 
   | Pattern | Request | Where | Answer |
@@ -436,13 +439,13 @@ The decisions follow the project's rule for AWS's docs:
 - **Short patterns:** `short_pattern_star_across_fields` ran across fields only because the
   simulator doesn't complete short ARNs, which is a simulator limit (section 4). Completion stays
   as AWS documents it.
-- **Code:**
-  - `matching.py`: the segmented mode of `_compile`, and the module docstring;
-  - `conditions._arn_like`, which already splits six fields but then segments each one;
-  - tests: `test_matching.py` (`test_star_inside_a_segment_does_not_cross_colons`,
-    `test_question_mark_does_not_match_a_colon`) and `test_conditions.py`
-    (`test_arn_wildcards_follow_the_resource_segment_rule`);
-  - the README's Status section.
+- **Done (2026-10-26):** the nine cases now agree.
+  - `matching.py` no longer has a segmented mode: a resource pattern is a plain glob, completed
+    first if it's a short ARN.
+  - `conditions._arn_like` matches each of the six fields as a plain glob.
+  - Tests: `test_matching.py` (`test_wildcards_match_colons_anywhere`,
+    `test_the_patterns_still_need_the_rest_to_match`) and `test_conditions.py`
+    (`test_arn_like_checks_the_six_fields_separately`).
 
 ### 2. A bucket policy naming the account (2 cases, simulator limit)
 - **What the simulator did:**

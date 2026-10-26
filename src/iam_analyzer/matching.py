@@ -9,13 +9,16 @@ Every other character is literal. (Python's `fnmatch` is not used because it tre
 Actions are case-insensitive ("S3:getobject" == "s3:GetObject"); resource ARNs are
 case-sensitive.
 
-Resource ARNs follow two more rules from AWS's documentation:
-  - Wildcards stay inside one colon-separated segment of the ARN. The exception is a `*`
-    that ends a segment, which can run on past colons. So "function:*" covers the Lambda
-    alias "function:billing:canary", but "function:*-prod" does not cover
-    "function:billing:canary-prod", and `?` never matches a colon.
+Resource ARNs follow two more rules:
+  - Wildcards match colons too, anywhere in the ARN. So "function:*-prod" covers the Lambda
+    alias "function:billing:canary-prod", and "us-*3" in the region field runs on into the
+    account ID. AWS's Resource page only implies that wildcards stay inside one colon-separated
+    segment, and AWS's IAM policy simulator matched across colons with both wildcards, in every
+    field (tests/simulator_fixtures/wildcards_and_colons).
   - An ARN with fewer than the standard six fields is completed with `*` fields:
     "arn:aws:s3" means "arn:aws:s3:*:*:*".
+The ARN condition operators, such as ArnLike, compare an ARN's six fields one by one instead
+(see `conditions`).
 
 Once policy variables are filled in, a pattern can also be *pieces*: (text, literal) pairs. In
 a literal piece, such as the `*` that `${*}` stands for, `*` and `?` are ordinary characters.
@@ -29,31 +32,21 @@ Pattern = str | Pieces
 
 
 @lru_cache(maxsize=1024)
-def _compile(pieces: Pieces, ignore_case: bool, segmented: bool) -> re.Pattern[str]:
-    chars = [(char, literal) for text, literal in pieces for char in text]
+def _compile(pieces: Pieces, ignore_case: bool) -> re.Pattern[str]:
     parts = []
-    for index, (char, literal) in enumerate(chars):
-        if literal or char not in "*?":
-            parts.append(re.escape(char))
-        elif char == "*":
-            # The pattern ends here, or a colon comes next.
-            following = chars[index + 1][0] if index + 1 < len(chars) else ""
-            parts.append(".*" if following in ("", ":") or not segmented else "[^:]*")
-        else:
-            parts.append("[^:]" if segmented else ".")
+    for text, literal in pieces:
+        for char in text:
+            if literal or char not in "*?":
+                parts.append(re.escape(char))
+            else:
+                parts.append(".*" if char == "*" else ".")
     flags = re.DOTALL | (re.IGNORECASE if ignore_case else 0)
     return re.compile("".join(parts), flags)
 
 
-def wildcard_match(
-    pattern: Pattern, value: str, *, ignore_case: bool = False, segmented: bool = False
-) -> bool:
-    """Return True if `value` matches the IAM wildcard `pattern` in full.
-
-    With `segmented`, wildcards stay inside one colon-separated segment, except a `*` that
-    ends a segment.
-    """
-    return _compile(_pieces(pattern), ignore_case, segmented).fullmatch(value) is not None
+def wildcard_match(pattern: Pattern, value: str, *, ignore_case: bool = False) -> bool:
+    """Return True if `value` matches the IAM wildcard `pattern` in full."""
+    return _compile(_pieces(pattern), ignore_case).fullmatch(value) is not None
 
 
 def match_action(pattern: str, action: str) -> bool:
@@ -61,7 +54,7 @@ def match_action(pattern: str, action: str) -> bool:
 
 
 def match_resource(pattern: Pattern, resource: str) -> bool:
-    return wildcard_match(_complete_arn(_pieces(pattern)), resource, segmented=True)
+    return wildcard_match(_complete_arn(_pieces(pattern)), resource)
 
 
 def _pieces(pattern: Pattern) -> Pieces:

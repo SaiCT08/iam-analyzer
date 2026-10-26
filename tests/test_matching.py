@@ -64,21 +64,37 @@ def test_resource_star_spans_slashes():
     assert match_resource("arn:aws:s3:::bucket/*", "arn:aws:s3:::bucket/a/b/c.csv")
 
 
-# --- ARN segments ------------------------------------------------------------------------
+# --- ARNs and colons ---------------------------------------------------------------------
 
 LAMBDA = "arn:aws:lambda:us-east-1:111122223333:function"
 LOGS = "arn:aws:logs:us-east-1:111122223333:log-group"
+CANARY = f"{LAMBDA}:billing:canary"
 
 
-def test_star_inside_a_segment_does_not_cross_colons():
-    pattern = f"{LAMBDA}:*-prod"
-    assert not match_resource(pattern, f"{LAMBDA}:billing:canary-prod")
-    assert match_resource(pattern, f"{LAMBDA}:billing-prod")
+@pytest.mark.parametrize(
+    "pattern, resource",
+    [
+        # Each one matched in AWS's IAM policy simulator (tests/simulator_fixtures, the
+        # wildcards_and_colons group).
+        (f"{LAMBDA}:*-prod", f"{LAMBDA}:billing:canary-prod"),
+        ("arn:aws:s3:::district-logs/*.json", "arn:aws:s3:::district-logs/2026-10-25T10:00:00.json"),
+        ("arn:aws:s3:::district-student-records/campus?01/*",
+         "arn:aws:s3:::district-student-records/campus:01/roster.csv"),
+        # In the region field too: a * runs on into the account ID, and a ? stands for a colon.
+        ("arn:aws:lambda:us-*3:function:billing:canary", CANARY),
+        ("arn:aws:lambda:us-east-1?111122223333:function:billing:canary", CANARY),
+    ],
+)
+def test_wildcards_match_colons_anywhere(pattern, resource):
+    assert match_resource(pattern, resource)
 
 
-def test_question_mark_does_not_match_a_colon():
-    assert not match_resource("arn:aws:s3:::b?c", "arn:aws:s3:::b:c")
+def test_the_patterns_still_need_the_rest_to_match():
+    assert match_resource(f"{LAMBDA}:*-prod", f"{LAMBDA}:billing-prod")
+    assert not match_resource(f"{LAMBDA}:*-prod", f"{LAMBDA}:billing:canary")
+    # A ? is still exactly one character, a colon or not.
     assert match_resource("arn:aws:s3:::b?c", "arn:aws:s3:::bxc")
+    assert not match_resource("arn:aws:s3:::b?c", "arn:aws:s3:::b::c")
 
 
 @pytest.mark.parametrize(
@@ -130,12 +146,9 @@ def test_literal_pieces_are_not_wildcards():
     assert not wildcard_match((("a", False), ("*", True)), "ab")
 
 
-def test_the_segment_rule_looks_across_pieces():
-    # A * just before a colon ends a segment, even when the colon is in the next piece.
-    ends = (("arn:aws:s3:::b/*", False), (":x", True))
-    assert match_resource(ends, "arn:aws:s3:::b/a:b:x")
-    inside = (("arn:aws:s3:::b/*", False), ("-x", True))
-    assert not match_resource(inside, "arn:aws:s3:::b/a:b-x")
+def test_a_wildcard_before_a_literal_piece_matches_colons():
+    pattern = (("arn:aws:s3:::b/*", False), ("-x", True))
+    assert match_resource(pattern, "arn:aws:s3:::b/a:b-x")
 
 
 def test_a_short_arn_in_pieces_is_completed():
