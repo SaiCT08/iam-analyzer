@@ -22,6 +22,44 @@
       "name": "second_value",
       "description": "A request on the bucket named after the second value.",
       "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-red/handbook.pdf"}
+    },
+    {
+      "name": "not_resource_on_a_value",
+      "description": "Second follow-up: a Deny on every bucket but the one ${aws:TagKeys} names, under an Allow for all of S3, on the bucket named after the first value.",
+      "readings": {
+        "EXPLICIT_DENY": "the variable's resource matches nothing, so NotResource covers every bucket, as with a variable that has no value",
+        "ALLOW": "the statement is dropped, or blue is used"
+      },
+      "policies": {
+        "broad_s3.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+        },
+        "tagged_team_only.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Deny", "Action": "s3:GetObject", "NotResource": "arn:aws:s3:::district-teams-${aws:TagKeys}/*"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-blue/handbook.pdf"}
+    },
+    {
+      "name": "not_resource_on_another_bucket",
+      "description": "Second follow-up: the same Deny, on a bucket named after neither value.",
+      "readings": {
+        "EXPLICIT_DENY": "the variable's resource matches nothing, or a value is used; with not_resource_on_a_value, this tells them apart",
+        "ALLOW": "the statement is dropped"
+      },
+      "policies": {
+        "broad_s3.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+        },
+        "tagged_team_only.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Deny", "Action": "s3:GetObject", "NotResource": "arn:aws:s3:::district-teams-${aws:TagKeys}/*"}]
+        }
+      },
+      "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-green/handbook.pdf"}
     }
   ]
 }

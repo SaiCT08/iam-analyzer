@@ -21,6 +21,42 @@
       "context": {"aws:TagKeys": ["campus"]},
       "context_types": {"aws:TagKeys": "stringList"},
       "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+    },
+    {
+      "name": "for_all_values_null_false_key_absent",
+      "description": "Second follow-up: ForAllValues:Null aws:TagKeys false, for a request with no tags. Plain Null false fails on a missing key; ForAllValues holds on one.",
+      "readings": {
+        "ALLOW": "the set operator applies: ForAllValues holds on a missing key, as with other operators",
+        "IMPLICIT_DENY": "the set operator is ignored: Null false fails on a missing key"
+      },
+      "policies": {
+        "some_tags.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"ForAllValues:Null": {"aws:TagKeys": "false"}}}]
+        }
+      },
+      "resource_policy": null,
+      "context": {"aws:TagKeys": null},
+      "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
+    },
+    {
+      "name": "for_any_value_null_true_key_absent",
+      "description": "Second follow-up: ForAnyValue:Null aws:TagKeys true, for a request with no tags. Plain Null true holds on a missing key; ForAnyValue fails on one.",
+      "readings": {
+        "IMPLICIT_DENY": "the set operator applies: ForAnyValue fails on a missing key, as with other operators",
+        "ALLOW": "the set operator is ignored: Null true holds on a missing key"
+      },
+      "policies": {
+        "no_tags.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"ForAnyValue:Null": {"aws:TagKeys": "true"}}}]
+        }
+      },
+      "resource_policy": null,
+      "context": {"aws:TagKeys": null},
+      "request": {"action": "ec2:CreateTags", "resource": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"}
     }
   ]
 }

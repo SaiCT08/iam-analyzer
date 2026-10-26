@@ -1,8 +1,9 @@
 # Checking the analyzer against AWS's IAM policy simulator
 
-Recorded on 2026-10-25. For 107 cases, the analyzer and AWS's IAM policy simulator
+Recorded on 2026-10-25. For 113 cases, the analyzer and AWS's IAM policy simulator
 (`iam:SimulateCustomPolicy`) were given the same policies and the same request, and their answers
-were compared. The cases are 98 from the first run and 9 follow-up probes recorded the same day.
+were compared. The cases are 98 from the first run and 15 follow-up probes, recorded in two rounds
+the same day.
 - **Fixtures:** each request and AWS's raw response is a fixture in
   [`tests/simulator_fixtures`](../tests/simulator_fixtures), with AWS's request IDs and the date.
 - **Offline replay:** [`tests/test_simulator_fixtures.py`](../tests/test_simulator_fixtures.py)
@@ -15,10 +16,10 @@ were compared. The cases are 98 from the first run and 9 follow-up probes record
 
 | Verdict | Cases | Meaning |
 |---|---|---|
-| agrees | 57 | Both sides gave the same answer. |
-| differs | 8 | A real mismatch. |
+| agrees | 58 | Both sides gave the same answer. |
+| differs | 9 | A real mismatch. |
 | simulator limit | 9 | AWS documents a behavior that the simulator doesn't follow. |
-| analyzer refuses | 33 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
+| analyzer refuses | 37 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
 | can't express | 4 | The simulator can't be given the case faithfully. |
 
 - **Calibration passed:**
@@ -35,12 +36,12 @@ were compared. The cases are 98 from the first run and 9 follow-up probes record
   - Set operators work with `Numeric` operators. This was a judgment call.
   - Every existing scenario the simulator can express agrees, except the four that simulator
     limits explain.
-- **The main difference: wildcards can match a colon in the resource part of an ARN.** In
-  `Resource` and in `ArnLike`, a `*` in the middle of the resource part, or a `?`, matches a
-  colon (7 cases).
-  - The analyzer says it can't, so in six cases it misses an `Allow`. It says someone can't get
-    in when AWS would let them: the unsafe direction.
-  - In the seventh it misses a `Deny` written as `*.json` for S3 keys that contain colons. That
+- **The main difference: wildcards can match a colon.** In `Resource` and in `ArnLike`, a `*` in
+  the middle of the resource part, or a `?`, matches a colon (7 cases). In `Resource`, a `*` in
+  the middle of the region field crosses a colon too (1 case).
+  - The analyzer says they can't, so in seven cases it misses an `Allow`. It says someone can't
+    get in when AWS would let them: the unsafe direction.
+  - In the eighth it misses a `Deny` written as `*.json` for S3 keys that contain colons. That
     over-reports access, which is wrong but errs on the safe side.
 - **The simulator's own limits.** Against AWS's documentation, it:
   - doesn't complete short ARNs;
@@ -221,6 +222,8 @@ The tables come from `python -m simulator_check.report`:
 | `wildcards_and_colons/lambda_alias_end_of_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/lambda_alias_mid_segment_star` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/lambda_mid_segment_star_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/mid_field_star_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/mid_field_star_crossing_a_colon` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/s3_key_colon_end_of_segment_star` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/s3_key_colon_mid_segment_star` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/s3_key_colon_mid_segment_star_deny` | ALLOW | EXPLICIT_DENY | differs | - | PolicyInputList.2 | - |
@@ -257,6 +260,8 @@ The tables come from `python -m simulator_check.report`:
 | `variables_without_a_value/allow_control` | refused | IMPLICIT_DENY | analyzer refuses | aws:PrincipalTag/team | - | - |
 | `variables_without_a_value/deny_not_resource` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
 | `variables_with_several_values/first_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
+| `variables_with_several_values/not_resource_on_a_value` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
+| `variables_with_several_values/not_resource_on_another_bucket` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
 | `variables_with_several_values/second_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `variables_with_wildcards/star_in_a_default` | refused | IMPLICIT_DENY | analyzer refuses | aws:PrincipalTag/team | - | - |
 | `variables_with_wildcards/star_in_a_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
@@ -283,6 +288,8 @@ The tables come from `python -m simulator_check.report`:
 | `empty_values/null_true` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `for_any_value_if_exists/key_absent` | refused | IMPLICIT_DENY | analyzer refuses | aws:TagKeys | - | - |
 | `set_operator_on_null/for_all_values_null_false` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
+| `set_operator_on_null/for_all_values_null_false_key_absent` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
+| `set_operator_on_null/for_any_value_null_true_key_absent` | refused | IMPLICIT_DENY | analyzer refuses | aws:TagKeys | - | - |
 | `operator_name_case/lowercase_string_equals` | rejected | rejected | agrees | - | - | - |
 | `role_principal_case/role_name_in_lowercase` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `role_principal_case/user_name_in_uppercase_control` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
@@ -356,7 +363,7 @@ The decisions follow the project's rule for AWS's docs:
   disagrees;
 - where they contradict each other or don't say, a recorded simulator answer can settle it.
 
-### 1. Wildcards match colons in the resource part of an ARN (7 cases, differs)
+### 1. Wildcards match colons (8 cases, differs)
 - **What the simulator did:**
 
   | Pattern | Request | Where | Answer |
@@ -365,9 +372,13 @@ The decisions follow the project's rule for AWS's docs:
   | `arn:aws:s3:::district-logs/*.json` | the key `2026-10-25T10:00:00.json` | `Resource`, in an Allow and in a Deny | ALLOW, and the Deny applied |
   | `campus?01` | `campus:01` | `Resource` | ALLOW |
   | the same three patterns | the same values | `ArnLike` | each ALLOW |
+  | `arn:aws:lambda:us-*3:function:billing:canary` | the alias `billing:canary` in us-east-1, account 111122223333 | `Resource` (second follow-up) | ALLOW: the `*` in the region field ran across the colon to the account ID's final `3` |
 
-  The controls agree with the analyzer: a `*` at the end of a segment runs past colons,
-  `StringLike` crosses colons, and the patterns still match values with no colon.
+  The controls agree with the analyzer:
+  - a `*` at the end of a segment runs past colons;
+  - `StringLike` crosses colons;
+  - the patterns still match values with no colon;
+  - `us-*-1` matches `us-east-1` (`mid_field_star_control`).
 - **What AWS says:**
   - [Resource element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_resource.html#reference_policies_elements_resource_wildcards):
     "You can use wildcard characters (`*` and `?`) within the individual segments of an ARN (the
@@ -376,30 +387,36 @@ The decisions follow the project's rule for AWS's docs:
     (`*` and `?`) within ARN segments separated by a colon."
   - [ARN operators](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_ARN):
     "Each of the six colon-delimited components of the ARN is checked separately."
-  - The simulator fits the reading that the segments are the six ARN fields. Colons inside the
-    resource part, after the fifth colon, then aren't segment boundaries. Review finding F6 split
-    at every colon instead.
+  - The `Resource` page only implies that a wildcard stays inside its segment. The `ArnLike` page
+    says outright that each of the six components "is checked separately". Review finding F6
+    split at every colon instead.
 - **Why it matters:**
-  - In six cases the analyzer misses an `Allow`, so it says someone can't get in when AWS would
+  - In seven cases the analyzer misses an `Allow`, so it says someone can't get in when AWS would
     let them. That's the unsafe direction.
   - In one it misses a `Deny`, such as `arn:aws:s3:::district-logs/*.json` on keys with colons,
     so it reports access AWS would deny. That's wrong too, but it errs on the safe side.
-- **Decision:** follow the simulator. Split an ARN at its first five colons, and let `*` and `?`
-  match colons in the resource part, in `Resource` and `ArnLike`.
-- **What the follow-up probes add, for planning the change:**
-  - **The documented rule must be kept.** In `star_ending_the_region_field`, the pattern
-    `arn:aws:lambda:*:function:billing:canary` matched an alias in us-east-1, because the `*` that
-    ends the region field ran on through the account field.
-    - AWS documents this: "If the `*` wildcard is the last character of a resource ARN segment, it
-      can expand to match beyond the colon boundaries". The analyzer does it today.
-    - Splitting at the first five colons alone would stop it. The project's rule says to follow the
-      docs here, so the engine change has to keep this rule.
-  - **A short pattern doesn't settle fields 1–5.** In `short_pattern_star_across_fields`, the
-    simulator let the `*` in `arn:aws:sqs:us-*-alerts` run across fields. That's only because it
-    doesn't complete short ARNs, which is a simulator limit (section 4).
-    - So it's still unprobed whether a `*` in the middle of one of the first five fields can cross
-      a colon in a full ARN. A pattern such as `arn:aws:lambda:us-*3:function:billing:canary`
-      would tell.
+- **Decision (2026-10-25):** follow the simulator.
+  - Split an ARN at its first five colons, and let `*` and `?` match colons in the resource part,
+    in `Resource` and `ArnLike`.
+  - Keep the documented run-on for a `*` that ends one of the first five fields:
+    - in `star_ending_the_region_field`, the pattern `arn:aws:lambda:*:function:billing:canary`
+      matched an alias in us-east-1;
+    - AWS documents it: "If the `*` wildcard is the last character of a resource ARN segment, it
+      can expand to match beyond the colon boundaries";
+    - the analyzer does it today.
+- **What the second follow-up adds:** in `Resource`, a `*` in the
+  middle of one of the first five fields crosses colons too (`mid_field_star_crossing_a_colon`,
+  with its control `mid_field_star_control`).
+  - **`Resource`:** the page only implies segments, so by the rule above the recorded answer
+    settles it. A `*` matches across colons anywhere in the ARN. That's a plain glob over the
+    whole ARN, which also covers the documented run-on.
+  - **`ArnLike`:** "Each of the six colon-delimited components of the ARN is checked separately"
+    settles the split at the first five colons, so it stays.
+  - **Unprobed:** whether a `?` in one of the first five fields can match a colon in `Resource`. A
+    plain glob would let it. One more probe would settle it, or the change can refuse that case.
+- **Short patterns:** `short_pattern_star_across_fields` ran across fields only because the
+  simulator doesn't complete short ARNs, which is a simulator limit (section 4). Completion stays
+  as AWS documents it.
 - **Code:**
   - `matching.py`: the segmented mode of `_compile`, and the module docstring;
   - `conditions._arn_like`, which already splits six fields but then segments each one;
@@ -458,7 +475,7 @@ quote and the link.
   whose answer depends on a statement with a resource ARN. Code: `evaluator.statement_matches`
   and `_applies`.
 
-### 5. Refusals that AWS answered (33 cases)
+### 5. Refusals that AWS answered (37 cases)
 Each row is a case the analyzer refuses because AWS's docs don't settle it, with what the
 simulator answered and the decision. "Adopt" means the engine will give the simulator's answer
 instead of refusing. Each adopted row names its fixtures.
@@ -466,17 +483,17 @@ instead of refusing. Each adopted row names its fixtures.
 | Refusal | Cases | The simulator | Decision | Code |
 |---|---|---|---|---|
 | A policy variable with no value | `variables_without_a_value/*` (2) | It matches nothing: a Deny with `NotResource` applied, and an Allow didn't. The "Policy variables with no value" section says the same | Adopt | `variables._value` |
-| A variable from a multivalued key | `variables_with_several_values/*` (2) | Neither value was used | Keep refusing | |
+| A variable from a multivalued key | `variables_with_several_values/*` (4) | In `Resource`, neither value was used. In `NotResource`, the Deny covered every bucket, including the one named after a value | Adopt, settled by the second follow-up: it matches nothing, as a variable with no value does | `variables._value` |
 | A `*` in a variable's value or default | `variables_with_wildcards/*` (2) | A literal `*` | Adopt: a filled-in value is plain text | `variables._value`, `variables.parse` |
 | A policy variable in a `Bool` value | `bool_with_a_variable/*` (2) | Not filled in, so the condition fails. AWS accepts the policy | Adopt: the text stays as written, as the policy variables page says | `conditions.check` |
 | A date with no time or no zone | `dates_without_a_time_zone/*` (9) | `2026-08-15` is midnight UTC; `2026-08` is midnight UTC on the 1st; a time with no zone is UTC, with seconds (`07:30:00`) or without (`07:30`); `2026` is epoch seconds | Adopt exactly these forms. `2026-08` and the time without seconds were settled by the follow-up probes. Keep refusing any other form, such as fractional seconds with no zone | `conditions._date` |
 | A range with host bits set | `ip_ranges/range_with_host_bits` | The host bits are masked | Adopt | `conditions._network` |
-| A bare IPv6 address | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | It covers itself but not `2001:db8::2`: /128 | Adopt /128, settled by the follow-up probe. This conflicts with the literal text: "If you specify an IP address without the associated routing prefix, IAM uses the default prefix value of /32". The analyzer reads that as IPv4-only, which is why it refused | `conditions._network` |
+| A bare IPv6 address | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | It covers itself but not `2001:db8::2`: /128 | Adopt /128. AWS's "default prefix value of /32" only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses: a doc mismatch (section 6) | `conditions._network` |
 | An ARN operator value with fewer than six fields | `short_arns_in_arn_operators/*` (2) | AWS rejects the simulation (`InvalidInput`), though `GetContextKeysForCustomPolicy` accepts the policy | Keep refusing | |
 | Several request values with no set operator | `several_values_without_a_set_operator/*` (3) | Never a match: IMPLICIT_DENY for `StringEquals` and `StringNotEquals`, even when no value is `campus` | Adopt for those two operators, settled by the follow-up probe: the condition doesn't hold. Keep refusing other operators | `conditions.holds` |
 | A request whose only value is `""` | `empty_values/*` (2) | It counts as a value under `ForAnyValue`, and as present under `Null` | Adopt. Only `ForAllValues` treats `""` as a null dataset, as AWS documents | `conditions.holds` |
 | `ForAnyValue…IfExists` on a missing key | `for_any_value_if_exists/key_absent` | ForAnyValue wins: the condition fails | Adopt | `conditions._missing` |
-| A set operator on `Null` | `set_operator_on_null/for_all_values_null_false` | Accepted. With the key present, `Null` false held | Keep refusing: one probe can't show what the set operator does | |
+| A set operator on `Null` | `set_operator_on_null/*` (3) | Accepted. With the key present, `ForAllValues:Null` false held. With the key missing, `ForAllValues:Null` false held and `ForAnyValue:Null` true failed | Adopt, settled by the second follow-up: the set operator applies as it does to other operators. On a missing key, `ForAllValues` holds and `ForAnyValue` fails; with the key present, `Null`'s own answer stands | `conditions.parse_operator`, `conditions.holds` |
 | A role ARN that matches the caller only if case is ignored | `role_principal_case/role_name_in_lowercase` | Case matters | Keep refusing: a saved policy turns a role ARN into the role's unique ID, which the simulator can't do for an example role | |
 | `NotPrincipal` | `not_principal/*` (3) | Always EXPLICIT_DENY | Keep refusing: the simulator's `NotPrincipal` answers contradict AWS's docs (section 4) | |
 
@@ -484,7 +501,24 @@ AWS's NotPrincipal page also warns that "The `NotPrincipal` element with a `Deny
 deny any IAM principal that has a permissions boundary policy attached, regardless of the values
 specified in the `NotPrincipal` element". That belongs in phase 6's list of findings.
 
+### 6. Doc mismatches
+These are places where AWS's own documentation says one thing and AWS's evaluator, the simulator,
+does another, and the docs can't be taken at their word. The simulator limits in section 4 are the
+other way round: there the docs are right, and the simulator is the one that's off.
+
+| AWS's docs say | What the simulator does | Evidence | The analyzer |
+|---|---|---|---|
+| "If you specify an IP address without the associated routing prefix, IAM uses the default prefix value of /32." ([condition operators](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_IPAddress)) | Treats a bare IPv6 address as /128 | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | Will follow the simulator (decided 2026-10-25). /32 only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses |
+| The evaluation table under the `ForAllValues:StringNotLike` example for `aws:ResourceOrgPaths` says the opposite of the operator definitions in all three rows | Follows the definitions | `for_all_values_string_not_like/*` | Follows the definitions (phase 4b) |
+| "In statements where the Effect element has a value of Allow, you can specify only "\*" in the Resource element of an SCP. You can't specify individual resource Amazon Resource Names (ARNs)." ([SCP syntax](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps_syntax.html#scp-syntax-resource)) | Honors a resource ARN, and `NotAction`, in an SCP Allow, as AWS's September 2025 announcement says | `scp_allow_statements/*` | Follows the announcement (since phase 3b) |
+| "Every SCP must include a Version element with the value "2012-10-17"." (same page, whose own examples leave it out) | Accepts SCPs without a `Version` | the `scenarios/scp_*` fixtures, whose `FullAWSAccess` has none | Doesn't require one (since review fix F7) |
+| "The policy simulator evaluates SCPs, including condition keys and resource scoping in deny statements" ([testing page](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_testing-policies.html)) | Applies resource scoping in an SCP Allow too | `scp_allow_statements/resource_scoped_allow_*` | Nothing to change: this is about the simulator |
+| "If you do not provide a value for a context key, the simulation still runs and returns an implicit deny" ([how to simulate](https://docs.aws.amazon.com/IAM/latest/UserGuide/policies_policy-simulator-how-to.html)) | Treats a key left out as absent. It returns an implicit deny only when a statement fails for lack of the key | `calibration_absent_keys/*`, and the three calibration scenarios | Nothing to change: this is about the simulator |
+| `EvalResourceName` is "The ARN template for the simulated resource type ... This is not a specific customer-provided resource ARN." ([EvaluationResult](https://docs.aws.amazon.com/IAM/latest/APIReference/API_EvaluationResult.html)) | Returns the requested ARN, or `*` | every fixture with an answer | Nothing to change: this is about the simulator |
+
 ## Follow-up probes (recorded 2026-10-25)
+
+### First round
 
 | Probe | Fixtures | The simulator | What it settled |
 |---|---|---|---|
@@ -494,9 +528,16 @@ specified in the `NotPrincipal` element". That belongs in phase 6's list of find
 | `StringNotEquals` on `aws:TagKeys` with [grade, other] | `several_values_without_a_set_operator/string_not_equals_neither_matches` | IMPLICIT_DENY | Several values with no set operator never match |
 | A month-only date, and a time without seconds | `dates_without_a_time_zone/month_only_*`, `dates_without_a_time_zone/time_without_seconds_*` | ALLOW just after, IMPLICIT_DENY just before | Midnight UTC at the start of the month; `07:30` is 07:30:00 UTC |
 
-**Still unprobed:** a `*` in the middle of one of the first five fields of a full ARN (difference
-1), a multivalued variable in `NotResource`, and what a set operator does on `Null`. Each needs
-another call to AWS.
+### Second round
+
+| Probe | Fixtures | The simulator | What it settled |
+|---|---|---|---|
+| A `*` in the middle of the region field that matches only by crossing a colon, with a control that needs no crossing | `wildcards_and_colons/mid_field_star_crossing_a_colon`, `wildcards_and_colons/mid_field_star_control` | ALLOW, ALLOW | In `Resource`, a `*` crosses colons anywhere in the ARN (difference 1) |
+| A variable from a multivalued key in `NotResource`, on a bucket named after a value and on one that isn't | `variables_with_several_values/not_resource_on_a_value`, `variables_with_several_values/not_resource_on_another_bucket` | EXPLICIT_DENY, EXPLICIT_DENY | The variable matches nothing. The statement isn't dropped, and no value is used |
+| `ForAllValues:Null` false and `ForAnyValue:Null` true, with the key missing | `set_operator_on_null/for_all_values_null_false_key_absent`, `set_operator_on_null/for_any_value_null_true_key_absent` | ALLOW, IMPLICIT_DENY | The set operator applies, as it does to other operators |
+
+**Still unprobed:** whether a `?` in one of the first five fields can match a colon in `Resource`
+(difference 1). It needs another call to AWS.
 
 ## Recording again
 Recording calls AWS, through the `iam-simulator` profile.

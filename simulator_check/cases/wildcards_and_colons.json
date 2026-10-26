@@ -239,6 +239,33 @@
         }
       },
       "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
+    },
+    {
+      "name": "mid_field_star_crossing_a_colon",
+      "description": "Second follow-up: the * in the region field us-*3 is in the middle of its field. It matches the alias only by running across the colon after us-east-1, to the 3 that ends the account ID.",
+      "readings": {
+        "ALLOW": "a * in the middle of one of the first five fields crosses colons too",
+        "IMPLICIT_DENY": "it stays in its field, as splitting at the first five colons assumes"
+      },
+      "policies": {
+        "invoke_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-*3:function:billing:canary"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
+    },
+    {
+      "name": "mid_field_star_control",
+      "description": "Second follow-up, the control: the * in the region field us-*-1 matches east without crossing a colon.",
+      "readings": {"ALLOW": "a * in the middle of the region field works at all"},
+      "policies": {
+        "invoke_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-*-1:111122223333:function:billing:canary"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
     }
   ]
 }

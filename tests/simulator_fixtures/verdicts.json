@@ -161,6 +161,16 @@
       "verdict": "analyzer refuses",
       "note": "AWS accepts ForAllValues:Null. With the key present, Null false holds."
     },
+    "set_operator_on_null/for_all_values_null_false_key_absent": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "ALLOW: on a missing key, ForAllValues:Null false holds, as ForAllValues does with other operators. Plain Null false would fail."
+    },
+    "set_operator_on_null/for_any_value_null_true_key_absent": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "IMPLICIT_DENY: on a missing key, ForAnyValue:Null true fails, as ForAnyValue does with other operators. Plain Null true would hold. AWS lists aws:TagKeys in MissingContextValues."
+    },
     "several_values_without_a_set_operator/string_equals": {
       "analyzer": "refused",
       "verdict": "analyzer refuses",
@@ -203,12 +213,22 @@
     "variables_with_several_values/first_value": {
       "analyzer": "refused",
       "verdict": "analyzer refuses",
-      "note": "Neither value is used: a variable from a multivalued key matches nothing."
+      "note": "Neither value is used: a variable from a multivalued key matches nothing. The not_resource cases show the same in NotResource."
+    },
+    "variables_with_several_values/not_resource_on_a_value": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "EXPLICIT_DENY even on the bucket named after a value: in NotResource, the variable's resource matches nothing, so the Deny covers every bucket."
+    },
+    "variables_with_several_values/not_resource_on_another_bucket": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "EXPLICIT_DENY on a bucket named after neither value, as on the one that is: the variable matches nothing; the statement isn't dropped, and no value is used."
     },
     "variables_with_several_values/second_value": {
       "analyzer": "refused",
       "verdict": "analyzer refuses",
-      "note": "Neither value is used: a variable from a multivalued key matches nothing."
+      "note": "Neither value is used: a variable from a multivalued key matches nothing. The not_resource cases show the same in NotResource."
     },
     "variables_with_wildcards/star_in_a_default": {
       "analyzer": "refused",
@@ -249,6 +269,11 @@
       "analyzer": "IMPLICIT_DENY",
       "verdict": "differs",
       "note": "function:*-prod matched the alias function:billing:canary-prod: the * crossed a colon in the resource part."
+    },
+    "wildcards_and_colons/mid_field_star_crossing_a_colon": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "us-*3 matched us-east-1:111122223333: a * in the middle of the region field crossed a colon. The control us-*-1 needs no crossing and matched on both sides."
     },
     "wildcards_and_colons/s3_key_colon_mid_segment_star": {
       "analyzer": "IMPLICIT_DENY",

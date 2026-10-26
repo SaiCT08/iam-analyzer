@@ -1,0 +1,97 @@
+{
+  "case": "set_operator_on_null/for_any_value_null_true_key_absent",
+  "source": "simulator_check/cases/set_operator_on_null.json",
+  "question": "Does AWS accept ForAllValues:Null, and what does it do? AWS doesn't say what a set operator does on Null. The analyzer refuses the policy.",
+  "description": "Second follow-up: ForAnyValue:Null aws:TagKeys true, for a request with no tags. Plain Null true holds on a missing key; ForAnyValue fails on one.",
+  "readings": {
+    "IMPLICIT_DENY": "the set operator applies: ForAnyValue fails on a missing key, as with other operators",
+    "ALLOW": "the set operator is ignored: Null true holds on a missing key"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-26T04:03:30Z",
+  "absent": [
+    "aws:TagKeys"
+  ],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:CreateTags\",\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"ForAnyValue:Null\": {\n          \"aws:TagKeys\": \"true\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:TagKeys"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "b6126954-8bf8-4b93-9612-1c6b2886a3ce",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Mon, 26 Oct 2026 04:03:30 GMT",
+            "x-amzn-requestid": "b6126954-8bf8-4b93-9612-1c6b2886a3ce",
+            "content-type": "text/xml",
+            "content-length": "399"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "b6126954-8bf8-4b93-9612-1c6b2886a3ce",
+      "http_date": "Mon, 26 Oct 2026 04:03:30 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:TagKeys</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>b6126954-8bf8-4b93-9612-1c6b2886a3ce</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:CreateTags\",\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"ForAnyValue:Null\": {\n          \"aws:TagKeys\": \"true\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "ec2:CreateTags"
+      ],
+      "ResourceArns": [
+        "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "ec2:CreateTags",
+          "EvalResourceName": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890",
+          "EvalDecision": "implicitDeny",
+          "MatchedStatements": [],
+          "MissingContextValues": [
+            "aws:TagKeys"
+          ],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890",
+              "EvalResourceDecision": "implicitDeny",
+              "MissingContextValues": [
+                "aws:TagKeys"
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "01c93b9b-ac4e-4eef-aea9-57c621566d18",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Mon, 26 Oct 2026 04:03:30 GMT",
+          "x-amzn-requestid": "01c93b9b-ac4e-4eef-aea9-57c621566d18",
+          "content-type": "text/xml",
+          "content-length": "1182"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "01c93b9b-ac4e-4eef-aea9-57c621566d18",
+    "http_date": "Mon, 26 Oct 2026 04:03:30 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements/>\n        <MissingContextValues>\n          <member>aws:TagKeys</member>\n        </MissingContextValues>\n        <EvalResourceName>arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890</EvalResourceName>\n        <EvalActionName>ec2:CreateTags</EvalActionName>\n        <EvalDecision>implicitDeny</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <EvalResourceDecision>implicitDeny</EvalResourceDecision>\n            <MissingContextValues>\n              <member>aws:TagKeys</member>\n            </MissingContextValues>\n            <EvalResourceName>arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>01c93b9b-ac4e-4eef-aea9-57c621566d18</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}
