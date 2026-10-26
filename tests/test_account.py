@@ -432,6 +432,12 @@ def test_example_account_describes_its_buckets():
             PolicyParseError,
             f"{RECORDS} statement 0: a resource-based policy's statement needs a 'Principal'",
         ),
+        (
+            {RECORDS: {"Policy": {"Statement": [
+                {**READ_STATEMENT, "Principal": "*", "Resource": "arn:aws:s3"}]}}},
+            UnsupportedPolicyFeature,
+            f"{RECORDS} statement 0: 'Resource' entry 'arn:aws:s3' has fewer than six fields",
+        ),
     ],
 )
 def test_invalid_resources(described, error, message):

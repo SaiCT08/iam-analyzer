@@ -37,6 +37,11 @@ When matching a statement needs a condition key the request context says nothing
 there is no answer to give: evaluation raises one MissingContextError that names every such
 key and the statements that use it.
 
+s3:ListAllMyBuckets has no resource, so its request is on "*", and AWS hasn't settled whether a
+statement that names resource ARNs covers it (see `_resource_matches`). Such a statement may or may
+not apply. The analyzer works the answer out at both extremes, the most and the least permissive
+any mix of readings could give, and refuses only when the two differ.
+
 A request on a specific resource also needs that resource described (`models.Resource`, and
 `resources` for which requests need one), because the analyzer can't tell from an ARN whether the
 resource has a resource-based policy or which account it is in. Without a description, evaluation
@@ -76,6 +81,23 @@ from iam_analyzer.models import (
 PRINCIPAL_ACCOUNT = "aws:PrincipalAccount"
 # Requests that SAML and OIDC users make, rather than IAM users and role sessions.
 FEDERATED_ACTIONS = ("sts:assumerolewithsaml", "sts:assumerolewithwebidentity")
+# The one action with no resource that AWS's docs disagree about (see `_resource_matches`).
+LIST_ALL_MY_BUCKETS = "s3:ListAllMyBuckets"
+_LISTING_QUESTION = (
+    "s3:ListAllMyBuckets has no resource, so the request is on \"*\", and AWS hasn't settled "
+    "whether a statement that names resource ARNs covers it: its evaluation example says an Allow "
+    "on arn:aws:s3:::* lets a user list all buckets, but its IAM policy simulator matched the "
+    "request only against \"*\""
+)
+
+
+class _Unsettled(Exception):
+    """A statement that applies, except that AWS hasn't settled whether its Resource covers the
+    request (`_resource_matches`). `principal_match` is how its Principal names the caller."""
+
+    def __init__(self, principal_match: PrincipalMatch | None) -> None:
+        super().__init__(_LISTING_QUESTION)
+        self.principal_match = principal_match
 
 
 def statement_matches(statement: Statement, request: Request) -> bool:
@@ -83,22 +105,33 @@ def statement_matches(statement: Statement, request: Request) -> bool:
 
     Raises MissingContextError when the answer depends on a condition key the request context
     says nothing about. Keys are only needed once the action matches, and condition keys once
-    the resource, and in a resource-based policy the principal, match too.
+    the resource, and in a resource-based policy the principal, match too. Raises
+    UnsupportedPolicyFeature when AWS hasn't settled whether the statement's Resource covers the
+    request.
     """
-    applies, _ = _applies(statement, request)
+    try:
+        applies, _ = _applies(statement, request)
+    except _Unsettled as exc:
+        raise UnsupportedPolicyFeature(str(exc)) from None
     return applies
 
 
 def _applies(statement: Statement, request: Request) -> tuple[bool, PrincipalMatch | None]:
-    """Whether `statement` applies to `request`, and how its Principal names the caller."""
+    """Whether `statement` applies to `request`, and how its Principal names the caller.
+
+    Raises _Unsettled when it would apply, except that AWS hasn't settled whether its Resource
+    covers the request.
+    """
     # `!=` with the flag acts as "flip the result when negated".
     action_ok = any(match_action(p, request.action) for p in statement.actions)
     if action_ok == statement.not_action:
         return False, None
+    settled = True
     if statement.resources:  # a trust policy names none: it covers the role it belongs to
         patterns = _resource_patterns(statement, request.context)
-        resource_ok = any(match_resource(p, request.resource) for p in patterns)
-        if resource_ok == statement.not_resource:
+        resource_ok = _resource_matches(patterns, request)
+        settled = resource_ok is not None
+        if settled and resource_ok == statement.not_resource:
             return False, None
     found = refused = None
     if statement.principals is not None:
@@ -117,7 +150,33 @@ def _applies(statement: Statement, request: Request) -> tuple[bool, PrincipalMat
         return False, None
     if refused is not None:
         raise refused
+    if not settled:
+        raise _Unsettled(found)
     return True, found
+
+
+def _resource_matches(patterns: Sequence[Pattern], request: Request) -> bool | None:
+    """Whether one of `patterns` matches the request's resource, or None when AWS hasn't settled
+    it.
+
+    Only s3:ListAllMyBuckets is open. It has no resource, so its request is on "*", which only a
+    pattern such as "*" matches. AWS's evaluation example says that an Allow on arn:aws:s3:::*
+    "allows Carlos to view a list of all of the buckets in the account", but the IAM policy
+    simulator matched the request only against "*"
+    (list_all_my_buckets/allowed_on_every_bucket_arn). So any other pattern may or may not cover
+    it.
+
+    Other requests on "*" are settled: for an action with no resource type, the Service
+    Authorization Reference says "you must specify all resources ("*") in your policy", and "If
+    you specify a resource that is not valid for the action, any request to use that action fails,
+    and the statement's Effect does not apply."
+    """
+    if any(match_resource(p, request.resource) for p in patterns):
+        return True
+    listing = request.action.casefold() == LIST_ALL_MY_BUCKETS.casefold()
+    if listing and request.resource == "*" and patterns:
+        return None
+    return False
 
 
 def _conditions_hold(statement: Statement, context: RequestContext) -> bool:
@@ -172,12 +231,22 @@ def evaluate(
         resource_layer = Layer(resources.policy_kind(governing), resource=governing)
         layers.append((resource_layer, (resource.policy,)))
 
+    unsettled: list[tuple[MatchedStatement, str]] = []
     matched = [
-        (layer, _matching(request, layer, layer_policies, missing))
+        (layer, _matching(request, layer, layer_policies, missing, unsettled))
         for layer, layer_policies in layers
     ]
     if missing:
         raise _missing_context(missing)
+    if unsettled:
+        return _settle(matched, unsettled, resource_layer)
+    return _decide(matched, resource_layer)
+
+
+def _decide(
+    matched: list[tuple[Layer, list[MatchedStatement]]], resource_layer: Layer | None
+) -> EvaluationResult:
+    """The decision, from the statements that match in each layer."""
     every = [m for _, found in matched for m in found]
 
     denies = tuple(m for m in every if m.statement.effect is Effect.DENY)
@@ -193,6 +262,35 @@ def evaluate(
         return EvaluationResult(Decision.IMPLICIT_DENY, not_allowed_by=not_allowed_by)
 
     return EvaluationResult(Decision.ALLOW, tuple(every))
+
+
+def _settle(
+    matched: list[tuple[Layer, list[MatchedStatement]]],
+    unsettled: list[tuple[MatchedStatement, str]],
+    resource_layer: Layer | None,
+) -> EvaluationResult:
+    """The decision when the `unsettled` statements may or may not apply, as (statement, where).
+
+    Any mix of them could apply. An Allow can only help a request and a Deny can only stop it, so
+    adding every unsettled Allow and no unsettled Deny gives the most permissive answer any mix
+    could, and the other way round gives the least. When the two agree, so does every mix in
+    between, and the answer cites only what holds either way: the Allows without the unsettled
+    ones, or for a denial, what still denies with them. When the two differ, the analyzer refuses.
+    """
+
+    def adding(effect: Effect) -> list[tuple[Layer, list[MatchedStatement]]]:
+        extra = [m for m, _ in unsettled if m.statement.effect is effect]
+        return [(layer, found + [m for m in extra if m.layer == layer]) for layer, found in matched]
+
+    lenient = _decide(adding(Effect.ALLOW), resource_layer)
+    strict = _decide(adding(Effect.DENY), resource_layer)
+    if lenient.decision is strict.decision:
+        return strict if strict.allowed else lenient
+    statements = "\n".join(f"  {where}" for _, where in unsettled)
+    raise UnsupportedPolicyFeature(
+        f"{_LISTING_QUESTION}. The answer is {lenient.decision.value} or "
+        f"{strict.decision.value}, depending on which of these statements cover it:\n{statements}"
+    )
 
 
 def _not_allowed_by(
@@ -321,11 +419,13 @@ def _matching(
     layer: Layer,
     policies: Iterable[Policy],
     missing: list[tuple[str, str]],
+    unsettled: list[tuple[MatchedStatement, str]],
 ) -> list[MatchedStatement]:
     """Every statement in `policies` that matches `request`, tagged with `layer`.
 
     Condition keys that a statement needs but the request context lacks are added to
-    `missing` as (key, statement) pairs, so that one error can name them all.
+    `missing` as (key, statement) pairs, so that one error can name them all. A statement that
+    may or may not apply (`_Unsettled`) is added to `unsettled` instead, with where it is.
     """
     found = []
     for policy in policies:
@@ -336,6 +436,11 @@ def _matching(
                     found.append(MatchedStatement(
                         policy.name, statement, policy.via_group, layer, principal_match
                     ))
+            except _Unsettled as exc:
+                matched = MatchedStatement(
+                    policy.name, statement, policy.via_group, layer, exc.principal_match
+                )
+                unsettled.append((matched, _where(policy, index, statement)))
             except MissingContextError as exc:
                 missing += [(key, _where(policy, index, statement)) for key in exc.keys]
             except PolicyError as exc:

@@ -90,9 +90,9 @@
       "note": "The host bits are masked: 203.0.113.5/24 covers 203.0.113.77."
     },
     "list_all_my_buckets/allowed_on_every_bucket_arn": {
-      "analyzer": "IMPLICIT_DENY",
+      "analyzer": "refused",
       "verdict": "simulator limit",
-      "note": "Both sides deny, but AWS's own example says an Allow on arn:aws:s3:::* lets a user list all buckets. The simulator matches the request as * (EvalResourceName *), so its answer doesn't settle review open question 3.",
+      "note": "AWS's own example says an Allow on arn:aws:s3:::* lets a user list all buckets, but the simulator denies: it matches the request as * (EvalResourceName *), so its answer doesn't settle review open question 3. The analyzer refuses, since the answer is ALLOW if the ARN covers the listing and IMPLICIT_DENY if it doesn't.",
       "quote": "The AllowS3ListRead statement in this policy allows Carlos to view a list of all of the buckets in the account.",
       "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-basics.html#reference_policies_evaluation-logic_policies_evaluation_example"
     },
@@ -152,9 +152,9 @@
       "link": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html#scp-effects-on-permissions"
     },
     "scp_short_arn/short_arn_in_an_scp_deny": {
-      "analyzer": "EXPLICIT_DENY",
-      "verdict": "differs",
-      "note": "The simulator doesn't complete arn:aws:s3 in an SCP Deny. AWS documents completion only for identity-based policies, and the simulator skips it there too (the two incomplete_arn scenarios), so this is weak evidence."
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "The simulator doesn't complete arn:aws:s3 in an SCP Deny, so it allows the read. AWS documents completion only for identity-based policies, and the simulator skips it there too (the two incomplete_arn scenarios), so this is weak evidence. The analyzer refuses a short ARN in an SCP."
     },
     "set_operator_on_null/for_all_values_null_false": {
       "analyzer": "refused",

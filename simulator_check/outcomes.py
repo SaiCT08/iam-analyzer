@@ -24,7 +24,14 @@ from iam_analyzer.errors import (
 )
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import load_policy
-from iam_analyzer.models import EvaluationResult, OrgTarget, Request, ScpLevel, TargetType
+from iam_analyzer.models import (
+    EvaluationResult,
+    OrgTarget,
+    PolicyType,
+    Request,
+    ScpLevel,
+    TargetType,
+)
 from simulator_check import Caller
 
 DECISIONS = {"allowed": "ALLOW", "explicitDeny": "EXPLICIT_DENY", "implicitDeny": "IMPLICIT_DENY"}
@@ -273,7 +280,11 @@ def _scp_levels(request: dict[str, Any], caller: Caller) -> tuple[ScpLevel, ...]
         else:
             target = OrgTarget(TargetType.ORGANIZATIONAL_UNIT, f"OU {index - 1}")
         policies = tuple(
-            load_policy(text, name=f"OrderedOrganizationPolicyInputList.{index}.{number}")
+            load_policy(
+                text,
+                name=f"OrderedOrganizationPolicyInputList.{index}.{number}",
+                kind=PolicyType.SCP,
+            )
             for number, text in enumerate(level.get("ServiceControlPolicyInputList", []), 1)
         )
         found.append(ScpLevel(target, policies))

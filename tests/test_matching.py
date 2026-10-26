@@ -1,6 +1,6 @@
 import pytest
 
-from iam_analyzer.matching import match_action, match_resource, wildcard_match
+from iam_analyzer.matching import is_short_arn, match_action, match_resource, wildcard_match
 
 
 @pytest.mark.parametrize(
@@ -149,6 +149,20 @@ def test_literal_pieces_are_not_wildcards():
 def test_a_wildcard_before_a_literal_piece_matches_colons():
     pattern = (("arn:aws:s3:::b/*", False), ("-x", True))
     assert match_resource(pattern, "arn:aws:s3:::b/a:b-x")
+
+
+@pytest.mark.parametrize(
+    "text, short",
+    [
+        ("arn:aws:s3", True),
+        ("arn:aws:sqs:us-east-1", True),
+        ("arn:aws:s3:::district-student-records", False),
+        ("arn:aws:lambda:us-east-1:111122223333:function:billing:canary", False),
+        ("*", False),
+    ],
+)
+def test_is_short_arn(text, short):
+    assert is_short_arn(text) is short
 
 
 def test_a_short_arn_in_pieces_is_completed():

@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from iam_analyzer import _validation, conditions, principals, variables
+from iam_analyzer import _validation, conditions, matching, principals, variables
 from iam_analyzer.context import CONDITION_KEY
 from iam_analyzer.errors import PolicyError, PolicyParseError, UnsupportedPolicyFeature
 from iam_analyzer.models import Condition, Effect, Policy, PolicyType, Principal, Statement
@@ -61,6 +61,8 @@ def parse_policy(document: Any, name: str, *, kind: PolicyType = PolicyType.IDEN
     which may have an Id and whose statements need a Principal. PolicyType.TRUST is a role's trust
     policy, a resource-based policy with no Resource and no NotPrincipal. Identity policies,
     permissions boundaries and SCPs (every other kind) can have neither an Id nor a Principal.
+    SCPs and resource-based policies can't have a short ARN, such as arn:aws:s3, which AWS only
+    completes in identity-based policies.
     """
     resource_based = kind in (PolicyType.RESOURCE_BASED, PolicyType.TRUST)
     if not isinstance(document, dict):
@@ -137,6 +139,8 @@ def _parse_statement(raw: Any, where: str, version: str | None, kind: PolicyType
         resources, not_resource = (), False
     else:
         resources, not_resource = _patterns(raw, "Resource", "NotResource", where)
+        if kind in (PolicyType.SCP, PolicyType.RESOURCE_BASED):
+            _check_full_arns(resources, "NotResource" if not_resource else "Resource", where, kind)
     policy_variables = version == CURRENT_VERSION
     if policy_variables:
         _check_no_variables(actions, action_key, where)
@@ -202,6 +206,22 @@ def _check_actions(actions: tuple[str, ...], key: str, where: str) -> None:
         if not _ACTION.fullmatch(action):
             raise PolicyParseError(
                 f"{where}: '{key}' entry {action!r} needs a service prefix, such as 's3:GetObject'"
+            )
+
+
+def _check_full_arns(resources: tuple[str, ...], key: str, where: str, kind: PolicyType) -> None:
+    """Refuse a short ARN, such as arn:aws:s3, in an SCP or a resource-based policy.
+
+    AWS completes one with * fields "in an identity-based policy", and doesn't say what other kinds
+    of policy do with it.
+    """
+    policy = "an SCP" if kind is PolicyType.SCP else "a resource-based policy"
+    for resource in resources:
+        if matching.is_short_arn(resource):
+            raise UnsupportedPolicyFeature(
+                f"{where}: '{key}' entry {resource!r} has fewer than six fields. AWS completes "
+                f"such an ARN with * fields only in identity-based policies, and doesn't say what "
+                f"{policy} does with one"
             )
 
 

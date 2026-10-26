@@ -16,8 +16,9 @@ policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
 - `*` / `?` wildcards in actions and resources. In a resource ARN they match colons too, as AWS's
   IAM policy simulator does, so `function:*-prod` covers the Lambda alias
   `function:billing:canary-prod`. A short ARN such as `arn:aws:s3` is completed with wildcards
-  (`arn:aws:s3:*:*:*`), as AWS does. The ARN condition operators, such as `ArnLike`, compare an
-  ARN's six colon-separated fields one by one instead.
+  (`arn:aws:s3:*:*:*`) in identity policies and boundaries, as AWS documents. In an SCP or a bucket
+  policy, where AWS doesn't say what happens, a short ARN is refused. The ARN condition operators,
+  such as `ArnLike`, compare an ARN's six colon-separated fields one by one instead.
 - `NotAction` / `NotResource`, which mean "everything except these". For example, a Deny with
   `NotAction: ["s3:Get*"]` is a read-only guardrail.
 - Permissions boundaries. A boundary caps what a user or role can do: a request needs an Allow in
@@ -46,6 +47,8 @@ policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
 
 Not supported yet:
 - `NotPrincipal` is refused with a clear error.
+- `s3:ListAllMyBuckets` is refused when the answer depends on a statement that names resource ARNs
+  (see [Resources](#resources)).
 - Resource-based policies other than S3 bucket policies and role trust policies. Another service's
   resource can only be described as having none.
 - Cross-account requests, KMS keys, and requests by SAML or OIDC users are refused.
@@ -208,6 +211,18 @@ Some requests need no description:
   STS has none. Their ARNs name an account, so the analyzer needs the principal's account,
   `aws:PrincipalAccount`. With `--account`, the file's `AccountId` fills it in; with `--policy`,
   give it with `--context`.
+
+A request on `"*"` is covered by a statement whose `Resource` is `"*"`, and not by one that names
+resource ARNs. For an action with no resource type, the Service Authorization Reference says "you
+must specify all resources ("*") in your policy". `s3:ListAllMyBuckets` is the exception, because
+AWS doesn't settle it:
+- its evaluation example lets an Allow on `arn:aws:s3:::*` list all buckets;
+- its IAM policy simulator matched the request only against `"*"`.
+
+So for `s3:ListAllMyBuckets`, the analyzer works the answer out at both extremes: once as if every
+such Allow applies and no such Deny does, and once the other way round. If both give the same
+answer, it gives that answer. For example, an Allow on `"*"` with no Deny that could apply means
+`ALLOW`. If they differ, it refuses and names the statements.
 
 The analyzer refuses:
 - A request on a resource in another account. Cross-account requests also need the other
@@ -431,6 +446,8 @@ The rules follow AWS:
 - Every root, OU and account needs at least one SCP. AWS attaches `FullAWSAccess` by default.
 - SCPs never apply to the management account, or to service-linked roles (roles whose `Path`
   starts with `/aws-service-role/`) in any account.
+- A short ARN such as `arn:aws:s3` in an SCP is refused. AWS documents completing one with
+  wildcards only in identity-based policies.
 
 The Schools OU's `SchoolServicesOnly` SCP is an allow list that leaves out EC2. So `user/alee` can't
 call `ec2:DescribeInstances` in that account, even though their IAM policy allows it:

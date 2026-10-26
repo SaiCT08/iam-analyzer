@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from iam_analyzer.errors import OrganizationError, PolicyParseError
+from iam_analyzer.errors import OrganizationError, PolicyParseError, UnsupportedPolicyFeature
 from iam_analyzer.models import TargetType
 from iam_analyzer.organization import load_organization_file, parse_organization
 
@@ -154,6 +154,16 @@ def test_scps_are_parsed_like_any_policy():
     statement["Condition"] = {"StringNotEqual": {"aws:RequestedRegion": "us-east-1"}}
     message = "RegionLock statement 0: unknown condition operator 'StringNotEqual'"
     with pytest.raises(PolicyParseError, match=message):
+        parse_organization(doc, name="org.json")
+
+
+def test_scps_are_loaded_as_scps():
+    # So a short ARN is refused: AWS documents completing one only in identity-based policies.
+    doc = document(VALID_ROOT)
+    no_s3 = {"Statement": [{"Effect": "Deny", "Action": "s3:*", "Resource": "arn:aws:s3"}]}
+    doc["ServiceControlPolicies"]["NoS3"] = no_s3
+    message = "NoS3 statement 0: 'Resource' entry 'arn:aws:s3' has fewer than six fields"
+    with pytest.raises(UnsupportedPolicyFeature, match=message):
         parse_organization(doc, name="org.json")
 
 

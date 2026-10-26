@@ -20,6 +20,8 @@ hold more OUs. The rules follow AWS:
   - every root, OU and account has at least one SCP (AWS attaches FullAWSAccess by default);
   - a request must be allowed at every level from the root down to the account;
   - SCPs never apply to the management account, or to service-linked roles in any account.
+SCPs are loaded as SCPs, so a short ARN such as arn:aws:s3 is refused in them: AWS documents
+completing one only in identity-based policies.
 """
 
 from collections.abc import Iterator
@@ -31,7 +33,7 @@ from typing import Any
 from iam_analyzer import _validation
 from iam_analyzer.errors import OrganizationError
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import OrgTarget, Policy, ScpLevel, TargetType
+from iam_analyzer.models import OrgTarget, Policy, PolicyType, ScpLevel, TargetType
 
 SCPS = "ServiceControlPolicies"
 TOP_LEVEL_KEYS = {"ManagementAccountId", SCPS, "Root"}
@@ -90,7 +92,7 @@ def parse_organization(document: Any, name: str) -> Organization:
 
     management = _account_id(document["ManagementAccountId"], f"{name} 'ManagementAccountId'")
     policies = {
-        policy_name: parse_policy(doc, name=policy_name)
+        policy_name: parse_policy(doc, name=policy_name, kind=PolicyType.SCP)
         for policy_name, doc in _section(document, SCPS, name).items()
     }
 

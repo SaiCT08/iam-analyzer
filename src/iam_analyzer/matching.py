@@ -16,7 +16,8 @@ Resource ARNs follow two more rules:
     segment, and AWS's IAM policy simulator matched across colons with both wildcards, in every
     field (tests/simulator_fixtures/wildcards_and_colons).
   - An ARN with fewer than the standard six fields is completed with `*` fields:
-    "arn:aws:s3" means "arn:aws:s3:*:*:*".
+    "arn:aws:s3" means "arn:aws:s3:*:*:*". AWS documents this for identity-based policies, so the
+    loader refuses a short ARN in an SCP or a resource-based policy.
 The ARN condition operators, such as ArnLike, compare an ARN's six fields one by one instead
 (see `conditions`).
 
@@ -57,17 +58,21 @@ def match_resource(pattern: Pattern, resource: str) -> bool:
     return wildcard_match(_complete_arn(_pieces(pattern)), resource)
 
 
+def is_short_arn(text: str) -> bool:
+    """Whether `text` is an ARN with fewer than the standard six fields, such as "arn:aws:s3".
+
+    A full ARN has five colons.
+    """
+    return text.startswith("arn:") and text.count(":") < 5
+
+
 def _pieces(pattern: Pattern) -> Pieces:
     return ((pattern, False),) if isinstance(pattern, str) else pattern
 
 
 def _complete_arn(pieces: Pieces) -> Pieces:
-    """Give an ARN with fewer than six fields `*` fields: "arn:aws:s3" -> "arn:aws:s3:*:*:*".
-
-    A full ARN has five colons, so this adds nothing to one.
-    """
+    """Give an ARN with fewer than six fields `*` fields: "arn:aws:s3" -> "arn:aws:s3:*:*:*"."""
     text = "".join(text for text, _ in pieces)
-    missing = 5 - text.count(":")
-    if not text.startswith("arn:") or missing <= 0:
+    if not is_short_arn(text):
         return pieces
-    return (*pieces, (":*" * missing, False))
+    return (*pieces, (":*" * (5 - text.count(":")), False))

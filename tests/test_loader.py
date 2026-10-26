@@ -256,6 +256,32 @@ def test_id_is_only_for_resource_based_policies():
         parse_policy({"Id": "cd3ad3d9-2776-4ef1-a904-4c229d1642ee", "Statement": [READ]}, name="p")
 
 
+@pytest.mark.parametrize(
+    "kind, statement, policy",
+    [
+        (PolicyType.SCP, {}, "an SCP"),
+        (PolicyType.RESOURCE_BASED, {"Principal": "*"}, "a resource-based policy"),
+    ],
+)
+@pytest.mark.parametrize("key", ["Resource", "NotResource"])
+def test_a_short_arn_is_refused_outside_identity_based_policies(kind, statement, policy, key):
+    # AWS documents completing a short ARN with * fields only "in an identity-based policy".
+    statement = {"Effect": "Deny", "Action": "s3:*", key: "arn:aws:s3", **statement}
+    message = (
+        f"^p statement 0: '{key}' entry 'arn:aws:s3' has fewer than six fields. AWS completes such "
+        f"an ARN with \\* fields only in identity-based policies, and doesn't say what {policy} does"
+    )
+    with pytest.raises(UnsupportedPolicyFeature, match=message):
+        parse_policy({"Statement": [statement]}, name="p", kind=kind)
+
+
+def test_a_short_arn_loads_in_identity_based_policies():
+    # Identity policies and permissions boundaries, where AWS completes it.
+    statement = {"Effect": "Deny", "Action": "s3:*", "Resource": "arn:aws:s3"}
+    for kind in (PolicyType.IDENTITY, PolicyType.PERMISSIONS_BOUNDARY):
+        assert parse_policy({"Statement": [statement]}, name="p", kind=kind).statements
+
+
 @pytest.mark.parametrize("element", ["Principal", "NotPrincipal"])
 def test_principal_is_only_for_resource_based_policies(element):
     statement = {"Sid": "S1", **READ, element: "*"}

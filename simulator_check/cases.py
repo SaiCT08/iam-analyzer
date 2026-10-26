@@ -99,6 +99,8 @@ _FAMILY_TYPES = {
 CONTEXT_KEY_TYPES = frozenset({*_FAMILY_TYPES.values(), *(f"{t}List" for t in _FAMILY_TYPES.values())})
 
 _ROLE_ACTIONS = frozenset(action.casefold() for action in resources.ROLE_ACTIONS)
+# Stands in for each SCP when only the organization's tree is needed (`_scp_levels`).
+_STAND_IN_SCP = {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}
 
 
 @dataclass(frozen=True)
@@ -262,13 +264,17 @@ def _check_filled_in(context: dict[str, Any], caller: Caller) -> None:
 def _scp_levels(case: Case) -> list[list[Any]]:
     """The SCP documents at each level from the root down to the case's account."""
     d = case.definition
-    organization = parse_organization(d["organization"], name="organization")
+    raw = d["organization"]["ServiceControlPolicies"]
+    # Only the tree is needed here, so each SCP is swapped for one the analyzer always loads. The
+    # simulator still gets the real ones, including any the analyzer refuses, such as one with a
+    # short ARN.
+    tree = {**d["organization"], "ServiceControlPolicies": {name: _STAND_IN_SCP for name in raw}}
+    organization = parse_organization(tree, name="organization")
     if d["account_id"] == organization.management_account_id:
         raise NotExpressible(
             "SCPs never apply to the management account, and nothing tells the simulator which "
             "account that is"
         )
-    raw = d["organization"]["ServiceControlPolicies"]
     # The full path: the simulator gets the SCPs even for a service-linked role, to show whether
     # it applies AWS's exemption.
     path = organization.scp_levels_for(d["account_id"])

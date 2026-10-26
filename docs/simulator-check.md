@@ -12,16 +12,16 @@ rounds.
 - **Engine changes:** the differences below were decided on 2026-10-25, and a third round of
   probes on 2026-10-26 settled the questions still open (see
   [Differences and decisions](#differences-and-decisions)). Since 2026-10-26 the engine follows
-  difference 1. The others come next.
+  differences 1, 3 and 4. The refusals in section 5 come next.
 
 ## Summary
 
 | Verdict | Cases | Meaning |
 |---|---|---|
 | agrees | 70 | Both sides gave the same answer. |
-| differs | 1 | A real mismatch. |
+| differs | 0 | A real mismatch. |
 | simulator limit | 9 | AWS documents a behavior that the simulator doesn't follow. |
-| analyzer refuses | 41 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
+| analyzer refuses | 42 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
 | can't express | 4 | The simulator can't be given the case faithfully. |
 
 - **Calibration passed:**
@@ -316,13 +316,13 @@ The tables come from `python -m simulator_check.report`:
 
 | Case | Analyzer | Simulator | Verdict | Missing context values | Matched | Details |
 |---|---|---|---|---|---|---|
-| `list_all_my_buckets/allowed_on_every_bucket_arn` | IMPLICIT_DENY | IMPLICIT_DENY | simulator limit | - | - | - |
+| `list_all_my_buckets/allowed_on_every_bucket_arn` | refused | IMPLICIT_DENY | simulator limit | - | - | - |
 | `list_all_my_buckets/allowed_on_star_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `scp_allow_statements/not_action_allow_ec2` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | AllowedByOrganizations: False |
 | `scp_allow_statements/not_action_allow_s3` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | AllowedByOrganizations: True |
 | `scp_allow_statements/resource_scoped_allow_inside` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | AllowedByOrganizations: True |
 | `scp_allow_statements/resource_scoped_allow_outside` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | AllowedByOrganizations: False |
-| `scp_short_arn/short_arn_in_an_scp_deny` | EXPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | AllowedByOrganizations: True |
+| `scp_short_arn/short_arn_in_an_scp_deny` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | AllowedByOrganizations: True |
 
 ### Judgment call
 
@@ -461,7 +461,7 @@ The decisions follow the project's rule for AWS's docs:
   reading stands: naming the account delegates to the identity policies, which the boundary
   limits. No engine change.
 
-### 3. A short ARN in an SCP (1 case, differs)
+### 3. A short ARN in an SCP (1 case, which the analyzer now refuses)
 - **What the simulator did:** in `scp_short_arn/short_arn_in_an_scp_deny`, an SCP denies `s3:*` on
   `arn:aws:s3`. The simulator allowed the read; the analyzer completes the ARN and denies.
 - **Why this is weak evidence:** the simulator doesn't complete short ARNs in identity-based
@@ -472,9 +472,9 @@ The decisions follow the project's rule for AWS's docs:
   - Refuse a short ARN in an SCP or a resource-based policy.
   - Keep completing short ARNs in identity-based policies, as AWS documents. A boundary is an
     identity-based policy.
-- **Code:** `matching._complete_arn` is shared by every layer, so the loader or the evaluator will
-  need to know the policy's kind. The organization loader would load SCPs with
-  `kind=PolicyType.SCP`.
+- **Done (2026-10-26):** the loader refuses a short ARN in `Resource` or `NotResource` when it
+  loads an SCP or a resource-based policy (`loader._check_full_arns`), and organization files load
+  their SCPs with `kind=PolicyType.SCP`. The case is now `analyzer refuses`.
 
 ### 4. Simulator limits (9 cases)
 In each case, AWS documents a behavior that the simulator doesn't follow. `verdicts.json` keeps the
@@ -494,8 +494,16 @@ quote and the link.
   the evidence.
 - `ListAllMyBuckets` (review open question 3) is the exception. Both sides deny, but the
   analyzer's answer contradicts AWS's example too. So the analyzer will refuse a request on `*`
-  whose answer depends on a statement with a resource ARN. Code: `evaluator.statement_matches`
-  and `_applies`.
+  whose answer depends on a statement with a resource ARN.
+  - Narrowed on 2026-10-26: only for `s3:ListAllMyBuckets`. For any other action with no resource
+    type, the Service Authorization Reference settles it: "you must specify all resources ("\*")
+    in your policy", and "If you specify a resource that is not valid for the action, any request
+    to use that action fails, and the statement's `Effect` does not apply"
+    ([actions table](https://docs.aws.amazon.com/service-authorization/latest/reference/reference_policies_actions-resources-contextkeys.html#actions_table)).
+  - **Done (2026-10-26):** `evaluator._resource_matches` marks a statement that names resource
+    ARNs as unsettled for `s3:ListAllMyBuckets` on `*`. Evaluation then works the answer out with
+    every unsettled Allow and no unsettled Deny, and the other way round. It answers when the two
+    agree, and refuses otherwise. This case now gives `refused`.
 
 ### 5. Refusals that AWS answered (41 cases)
 Each row is a case the analyzer refuses because AWS's docs don't settle it, with what the
