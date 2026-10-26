@@ -1,0 +1,117 @@
+{
+  "case": "not_principal/names_the_account_and_another_user",
+  "source": "simulator_check/cases/not_principal.json",
+  "question": "Which principals does a NotPrincipal Deny exclude? AWS says it \"might validate the account first\", depending on the service. The analyzer refuses NotPrincipal. The simulator's caller can only be an IAM user here, not a role session.",
+  "description": "NotPrincipal names the account and user kwong, and alee is the caller.",
+  "readings": {
+    "ALLOW": "naming the account excludes everyone in it",
+    "EXPLICIT_DENY": "only the users it names are excluded"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:21Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Deny\",\n      \"NotPrincipal\": {\n        \"AWS\": [\n          \"arn:aws:iam::111122223333:root\",\n          \"arn:aws:iam::111122223333:user/kwong\"\n        ]\n      },\n      \"Action\": \"s3:*\",\n      \"Resource\": \"arn:aws:s3:::district-kwong-files/*\"\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [],
+        "ResponseMetadata": {
+          "RequestId": "abc1b6e4-9322-4adf-b44e-411575ad9b1a",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:21 GMT",
+            "x-amzn-requestid": "abc1b6e4-9322-4adf-b44e-411575ad9b1a",
+            "content-type": "text/xml",
+            "content-length": "342"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "abc1b6e4-9322-4adf-b44e-411575ad9b1a",
+      "http_date": "Sun, 25 Oct 2026 23:00:21 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames/>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>abc1b6e4-9322-4adf-b44e-411575ad9b1a</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+      ],
+      "ResourcePolicy": "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Deny\",\n      \"NotPrincipal\": {\n        \"AWS\": [\n          \"arn:aws:iam::111122223333:root\",\n          \"arn:aws:iam::111122223333:user/kwong\"\n        ]\n      },\n      \"Action\": \"s3:*\",\n      \"Resource\": \"arn:aws:s3:::district-kwong-files/*\"\n    }\n  ]\n}",
+      "CallerArn": "arn:aws:iam::111122223333:user/alee",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-kwong-files/notes.txt"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:GetObject",
+          "EvalResourceName": "arn:aws:s3:::district-kwong-files/notes.txt",
+          "EvalDecision": "explicitDeny",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "ResourcePolicy",
+              "SourcePolicyType": "Resource Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 14,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-kwong-files/notes.txt",
+              "EvalResourceDecision": "explicitDeny",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "ResourcePolicy",
+                  "SourcePolicyType": "Resource Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 14,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "565e269c-ecc9-4b4d-93ec-ef9c5e952cbc",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:21 GMT",
+          "x-amzn-requestid": "565e269c-ecc9-4b4d-93ec-ef9c5e952cbc",
+          "content-type": "text/xml",
+          "content-length": "1897"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "565e269c-ecc9-4b4d-93ec-ef9c5e952cbc",
+    "http_date": "Sun, 25 Oct 2026 23:00:21 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>14</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>ResourcePolicy</SourcePolicyId>\n            <SourcePolicyType>Resource Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-kwong-files/notes.txt</EvalResourceName>\n        <EvalActionName>s3:GetObject</EvalActionName>\n        <EvalDecision>explicitDeny</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>14</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>ResourcePolicy</SourcePolicyId>\n                <SourcePolicyType>Resource Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>explicitDeny</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-kwong-files/notes.txt</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>565e269c-ecc9-4b4d-93ec-ef9c5e952cbc</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

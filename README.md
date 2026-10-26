@@ -590,3 +590,9 @@ Data-driven scenarios live in `tests/scenarios/*.json`. Each one holds policies,
 expected decision, plus an optional request `context` (`null` marks a key as absent). A request on a
 specific resource also needs `"resource_policy": null`, which describes the resource as having no
 resource-based policy, as `--no-resource-policy` does. To add a case, drop in a new file.
+
+`tests/simulator_fixtures/` holds answers recorded from AWS's IAM policy simulator, and
+`tests/test_simulator_fixtures.py` replays them against the analyzer without AWS.
+[docs/simulator-check.md](docs/simulator-check.md) has the results and the differences found.
+Recording new answers calls AWS and needs boto3 (`pip install -e ".[dev,simulator]"`). The
+analyzer itself doesn't need boto3. See `simulator_check/__init__.py`.

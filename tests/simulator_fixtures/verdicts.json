@@ -1,4 +1,230 @@
 {
-  "findings": {},
-  "cases": {}
+  "findings": {
+    "missing_keys": "act as absent",
+    "role_caller_resource_policies": "evaluated"
+  },
+  "cases": {
+    "bool_with_a_variable/mfa_false": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "IMPLICIT_DENY, as with mfa_true: the simulator doesn't fill in the variable."
+    },
+    "bool_with_a_variable/mfa_true": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "The simulator doesn't fill in a policy variable in a Bool value: with both keys true, the condition still fails. AWS accepts the policy."
+    },
+    "dates_without_a_time_zone/date_only_just_after_midnight_utc": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "2026-08-15 acts as midnight UTC at the start of that day."
+    },
+    "dates_without_a_time_zone/date_only_just_before_midnight_utc": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "2026-08-15 acts as midnight UTC at the start of that day."
+    },
+    "dates_without_a_time_zone/four_digits": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "2026 acts as epoch seconds (1970-01-01T00:33:46Z), not as the year 2026."
+    },
+    "dates_without_a_time_zone/time_without_a_zone_just_after": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "A time with no zone acts as UTC."
+    },
+    "dates_without_a_time_zone/time_without_a_zone_just_before": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "A time with no zone acts as UTC."
+    },
+    "empty_values/for_any_value": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "Under ForAnyValue, an empty string counts as a value: \"\" isn't campus, so ForAnyValue:StringNotEquals holds."
+    },
+    "empty_values/null_true": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "Under Null, an empty value counts as present: Null true fails."
+    },
+    "for_any_value_if_exists/key_absent": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "ForAnyValue wins over IfExists: the condition fails on a missing key, and AWS lists aws:TagKeys in MissingContextValues."
+    },
+    "ip_ranges/bare_ipv6_address": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "A bare IPv6 address doesn't get AWS's default /32: 2001:db8::1 doesn't cover 2001:db8::2, consistent with /128."
+    },
+    "ip_ranges/range_with_host_bits": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "The host bits are masked: 203.0.113.5/24 covers 203.0.113.77."
+    },
+    "list_all_my_buckets/allowed_on_every_bucket_arn": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "simulator limit",
+      "note": "Both sides deny, but AWS's own example says an Allow on arn:aws:s3:::* lets a user list all buckets. The simulator matches the request as * (EvalResourceName *), so its answer doesn't settle review open question 3.",
+      "quote": "The AllowS3ListRead statement in this policy allows Carlos to view a list of all of the buckets in the account.",
+      "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-basics.html#reference_policies_evaluation-logic_policies_evaluation_example"
+    },
+    "not_principal/names_another_user_control": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "EXPLICIT_DENY, as every reading expects."
+    },
+    "not_principal/names_the_account_and_another_user": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "EXPLICIT_DENY: naming the account didn't exclude everyone in it. Weak evidence, since the simulator also denies the user the policy names (names_the_account_and_the_caller)."
+    },
+    "not_principal/names_the_account_and_the_caller": {
+      "analyzer": "refused",
+      "verdict": "simulator limit",
+      "note": "NotPrincipal names both the account and kwong, as AWS recommends, yet the simulator still denies kwong. Every NotPrincipal case came back EXPLICIT_DENY, so its NotPrincipal answers are weak evidence.",
+      "quote": "The NotPrincipal element uses \"Effect\":\"Deny\" to deny access to all principals except the principal specified in the NotPrincipal element.",
+      "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_notprincipal.html"
+    },
+    "not_principal/names_the_caller": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "EXPLICIT_DENY: consistent with AWS checking the account first. Weak evidence, since the simulator also denies kwong when the account is named too (names_the_account_and_the_caller)."
+    },
+    "role_principal_case/role_name_in_lowercase": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "Case matters in the simulator: role/district/campusapp doesn't name the CampusApp role. AWS documents that a saved trust policy turns a role ARN into the role's unique ID, which the simulator can't do for an example role."
+    },
+    "scenarios/bucket_policy_role_grant_is_limited_by_the_boundary": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "simulator limit",
+      "note": "The simulator allows a bucket policy grant to the caller's role although the role's boundary doesn't allow the read (AllowedByPermissionsBoundary false).",
+      "quote": "Resource-based policies that grant permissions to an IAM role ARN are limited by an implicit deny in a permissions boundary or session policy.",
+      "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-denyallow.html"
+    },
+    "scenarios/incomplete_arn_allow_is_completed_with_wildcards": {
+      "analyzer": "ALLOW",
+      "verdict": "simulator limit",
+      "note": "The simulator doesn't complete arn:aws:sqs, so the Allow covers no queue: the exact case AWS gives as an example.",
+      "quote": "When you specify an incomplete ARN (one with fewer than the standard six fields) in an identity-based policy, AWS automatically completes the ARN by adding wildcard characters (*) to all missing fields. For example, specifying arn:aws:sqs is equivalent to arn:aws:sqs:*:*:*",
+      "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html#arns-paths-wildcards"
+    },
+    "scenarios/incomplete_arn_is_completed_with_wildcards": {
+      "analyzer": "EXPLICIT_DENY",
+      "verdict": "simulator limit",
+      "note": "The simulator doesn't complete arn:aws:s3, so the Deny misses.",
+      "quote": "When you specify an incomplete ARN (one with fewer than the standard six fields) in an identity-based policy, AWS automatically completes the ARN by adding wildcard characters (*) to all missing fields. For example, specifying arn:aws:sqs is equivalent to arn:aws:sqs:*:*:*",
+      "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html#arns-paths-wildcards"
+    },
+    "scenarios/scp_skips_service_linked_role": {
+      "analyzer": "ALLOW",
+      "verdict": "simulator limit",
+      "note": "The simulator applies the SCPs to a service-linked role caller (AllowedByOrganizations false).",
+      "quote": "SCPs do not affect any service-linked role. Service-linked roles enable other AWS services to integrate with AWS Organizations and can't be restricted by SCPs.",
+      "link": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html#scp-effects-on-permissions"
+    },
+    "scp_short_arn/short_arn_in_an_scp_deny": {
+      "analyzer": "EXPLICIT_DENY",
+      "verdict": "differs",
+      "note": "The simulator doesn't complete arn:aws:s3 in an SCP Deny. AWS documents completion only for identity-based policies, and the simulator skips it there too (the two incomplete_arn scenarios), so this is weak evidence."
+    },
+    "set_operator_on_null/for_all_values_null_false": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "AWS accepts ForAllValues:Null. With the key present, Null false holds."
+    },
+    "several_values_without_a_set_operator/string_equals": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "IMPLICIT_DENY: consistent with ForAllValues, or with never matching several values."
+    },
+    "several_values_without_a_set_operator/string_not_equals": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "IMPLICIT_DENY: consistent with ForAllValues (campus matches), or with never matching several values."
+    },
+    "short_arns_in_arn_operators/four_fields_ending_in_star": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "AWS rejects the simulation (InvalidInput). GetContextKeysForCustomPolicy accepted the policy."
+    },
+    "short_arns_in_arn_operators/three_fields": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "AWS rejects the simulation (InvalidInput). GetContextKeysForCustomPolicy accepted the policy."
+    },
+    "star_grant_and_boundary/account_principal": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "The simulator allows the read although the boundary doesn't (AllowedByPermissionsBoundary false), when the bucket policy names the account and an identity policy allows it. The analyzer treats naming the account as delegating to the identity policies, which the boundary limits."
+    },
+    "variables_with_several_values/first_value": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "Neither value is used: a variable from a multivalued key matches nothing."
+    },
+    "variables_with_several_values/second_value": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "Neither value is used: a variable from a multivalued key matches nothing."
+    },
+    "variables_with_wildcards/star_in_a_default": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "The * from the default acts as a literal *. AWS lists the tag in MissingContextValues."
+    },
+    "variables_with_wildcards/star_in_a_value": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "The * from the value acts as a literal *."
+    },
+    "variables_without_a_value/allow_control": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "IMPLICIT_DENY, as both readings expect. AWS lists the tag in MissingContextValues."
+    },
+    "variables_without_a_value/deny_not_resource": {
+      "analyzer": "refused",
+      "verdict": "analyzer refuses",
+      "note": "EXPLICIT_DENY: the variable's resource matches nothing, so NotResource covers the request and the Deny applies. That is the \"will not match any resource\" reading."
+    },
+    "wildcards_and_colons/arn_like_mid_segment_star": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "In ArnLike, function:*-prod matched function:billing:canary-prod: the * crossed a colon in the resource part."
+    },
+    "wildcards_and_colons/arn_like_question_mark": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "In ArnLike, campus?01 matched campus:01: the ? matched a colon."
+    },
+    "wildcards_and_colons/arn_like_s3_key_colon_star": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "In ArnLike, district-logs/*.json matched a key with colons in it."
+    },
+    "wildcards_and_colons/lambda_alias_mid_segment_star": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "function:*-prod matched the alias function:billing:canary-prod: the * crossed a colon in the resource part."
+    },
+    "wildcards_and_colons/s3_key_colon_mid_segment_star": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "district-logs/*.json matched the key 2026-10-25T10:00:00.json across its colons."
+    },
+    "wildcards_and_colons/s3_key_colon_mid_segment_star_deny": {
+      "analyzer": "ALLOW",
+      "verdict": "differs",
+      "note": "The same * in a Deny applies in the simulator, so the analyzer's ALLOW misses a Deny. That over-reports access: wrong, but on the safe side."
+    },
+    "wildcards_and_colons/s3_key_colon_question_mark": {
+      "analyzer": "IMPLICIT_DENY",
+      "verdict": "differs",
+      "note": "campus?01 matched campus:01: the ? matched a colon."
+    }
+  }
 }

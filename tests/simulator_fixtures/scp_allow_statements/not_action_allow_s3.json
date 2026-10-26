@@ -1,0 +1,132 @@
+{
+  "case": "scp_allow_statements/not_action_allow_s3",
+  "source": "simulator_check/cases/scp_allow_statements.json",
+  "question": "Do SCP Allow statements honor a Resource ARN and NotAction? AWS's SCP syntax page says SCP Allows may only use \"Resource\": \"*\", while its September 2025 announcement says SCPs support the full IAM policy language, which the analyzer follows (review open question 2). The simulator's User Guide page says it evaluates \"resource scoping in deny statements\", so a difference here may be a simulator limit.",
+  "description": "The account's SCP allows everything but EC2, with NotAction. The request is an S3 read.",
+  "readings": {
+    "ALLOW": "NotAction in an SCP Allow covers S3",
+    "IMPLICIT_DENY": "the SCP's Allow covers nothing"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:23Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"s3:*\",\n        \"ec2:*\"\n      ],\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"NotAction\": \"ec2:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [],
+        "ResponseMetadata": {
+          "RequestId": "8bd6fa8f-61fa-49aa-ae84-9ff9df2e9607",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:23 GMT",
+            "x-amzn-requestid": "8bd6fa8f-61fa-49aa-ae84-9ff9df2e9607",
+            "content-type": "text/xml",
+            "content-length": "342"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "8bd6fa8f-61fa-49aa-ae84-9ff9df2e9607",
+      "http_date": "Sun, 25 Oct 2026 23:00:23 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames/>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>8bd6fa8f-61fa-49aa-ae84-9ff9df2e9607</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"s3:*\",\n        \"ec2:*\"\n      ],\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+      ],
+      "OrderedOrganizationPolicyInputList": [
+        {
+          "ServiceControlPolicyInputList": [
+            "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+          ]
+        },
+        {
+          "ServiceControlPolicyInputList": [
+            "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"NotAction\": \"ec2:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+          ]
+        }
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-student-records/2026/roster.csv"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:GetObject",
+          "EvalResourceName": "arn:aws:s3:::district-student-records/2026/roster.csv",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.1",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 11,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "OrganizationsDecisionDetail": {
+            "AllowedByOrganizations": true
+          },
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-student-records/2026/roster.csv",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.1",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 11,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "51a0d2e4-9a53-45f1-bc61-3c3c250f556f",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:23 GMT",
+          "x-amzn-requestid": "51a0d2e4-9a53-45f1-bc61-3c3c250f556f",
+          "content-type": "text/xml",
+          "content-length": "2044"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "51a0d2e4-9a53-45f1-bc61-3c3c250f556f",
+    "http_date": "Sun, 25 Oct 2026 23:00:23 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <OrganizationsDecisionDetail>\n          <AllowedByOrganizations>true</AllowedByOrganizations>\n        </OrganizationsDecisionDetail>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>11</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-student-records/2026/roster.csv</EvalResourceName>\n        <EvalActionName>s3:GetObject</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>11</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-student-records/2026/roster.csv</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>51a0d2e4-9a53-45f1-bc61-3c3c250f556f</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

@@ -1,0 +1,114 @@
+{
+  "case": "scenarios/substitute_guardrail_blocks_write",
+  "source": "tests/scenarios/substitute_guardrail_blocks_write.json",
+  "question": null,
+  "description": "The NotAction guardrail denies any non-read action on student records, even though a broad Allow exists.",
+  "readings": null,
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:30Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Statement\": [\n    {\n      \"Sid\": \"BroadS3\",\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"SubstitutesReadOnlyStudentRecords\",\n      \"Effect\": \"Deny\",\n      \"NotAction\": [\n        \"s3:Get*\",\n        \"s3:List*\"\n      ],\n      \"Resource\": [\n        \"arn:aws:s3:::district-student-records\",\n        \"arn:aws:s3:::district-student-records/*\"\n      ]\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [],
+        "ResponseMetadata": {
+          "RequestId": "49e13045-4072-4308-a15e-ac810c3ee8ec",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:30 GMT",
+            "x-amzn-requestid": "49e13045-4072-4308-a15e-ac810c3ee8ec",
+            "content-type": "text/xml",
+            "content-length": "342"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "49e13045-4072-4308-a15e-ac810c3ee8ec",
+      "http_date": "Sun, 25 Oct 2026 23:00:30 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames/>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>49e13045-4072-4308-a15e-ac810c3ee8ec</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Statement\": [\n    {\n      \"Sid\": \"BroadS3\",\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"SubstitutesReadOnlyStudentRecords\",\n      \"Effect\": \"Deny\",\n      \"NotAction\": [\n        \"s3:Get*\",\n        \"s3:List*\"\n      ],\n      \"Resource\": [\n        \"arn:aws:s3:::district-student-records\",\n        \"arn:aws:s3:::district-student-records/*\"\n      ]\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:PutObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-student-records/campus-01/roster.csv"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:PutObject",
+          "EvalResourceName": "arn:aws:s3:::district-student-records/campus-01/roster.csv",
+          "EvalDecision": "explicitDeny",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.2",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 15,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-student-records/campus-01/roster.csv",
+              "EvalResourceDecision": "explicitDeny",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.2",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 15,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "0c4272e2-5177-4042-9247-708b8522e5df",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:30 GMT",
+          "x-amzn-requestid": "0c4272e2-5177-4042-9247-708b8522e5df",
+          "content-type": "text/xml",
+          "content-length": "1923"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "0c4272e2-5177-4042-9247-708b8522e5df",
+    "http_date": "Sun, 25 Oct 2026 23:00:30 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>15</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.2</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-student-records/campus-01/roster.csv</EvalResourceName>\n        <EvalActionName>s3:PutObject</EvalActionName>\n        <EvalDecision>explicitDeny</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>15</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.2</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>explicitDeny</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-student-records/campus-01/roster.csv</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>0c4272e2-5177-4042-9247-708b8522e5df</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

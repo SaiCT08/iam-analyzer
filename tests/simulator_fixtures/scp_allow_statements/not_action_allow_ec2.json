@@ -1,0 +1,98 @@
+{
+  "case": "scp_allow_statements/not_action_allow_ec2",
+  "source": "simulator_check/cases/scp_allow_statements.json",
+  "question": "Do SCP Allow statements honor a Resource ARN and NotAction? AWS's SCP syntax page says SCP Allows may only use \"Resource\": \"*\", while its September 2025 announcement says SCPs support the full IAM policy language, which the analyzer follows (review open question 2). The simulator's User Guide page says it evaluates \"resource scoping in deny statements\", so a difference here may be a simulator limit.",
+  "description": "The same SCP. The request is an EC2 call, which its NotAction leaves out.",
+  "readings": {
+    "IMPLICIT_DENY": "NotAction in an SCP Allow works, as the analyzer assumes",
+    "ALLOW": "the SCP's NotAction is ignored"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:23Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"s3:*\",\n        \"ec2:*\"\n      ],\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"NotAction\": \"ec2:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [],
+        "ResponseMetadata": {
+          "RequestId": "bc809dc9-8bd2-446e-8971-993d77bca598",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:23 GMT",
+            "x-amzn-requestid": "bc809dc9-8bd2-446e-8971-993d77bca598",
+            "content-type": "text/xml",
+            "content-length": "342"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "bc809dc9-8bd2-446e-8971-993d77bca598",
+      "http_date": "Sun, 25 Oct 2026 23:00:23 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames/>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>bc809dc9-8bd2-446e-8971-993d77bca598</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\n        \"s3:*\",\n        \"ec2:*\"\n      ],\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+      ],
+      "OrderedOrganizationPolicyInputList": [
+        {
+          "ServiceControlPolicyInputList": [
+            "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+          ]
+        },
+        {
+          "ServiceControlPolicyInputList": [
+            "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"NotAction\": \"ec2:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+          ]
+        }
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "ec2:DescribeInstances"
+      ],
+      "ResourceArns": [
+        "*"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "ec2:DescribeInstances",
+          "EvalResourceName": "*",
+          "EvalDecision": "implicitDeny",
+          "MatchedStatements": [],
+          "MissingContextValues": [],
+          "OrganizationsDecisionDetail": {
+            "AllowedByOrganizations": false
+          }
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "603e3d81-1f93-42f6-a7a7-449a4b6fef0f",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:23 GMT",
+          "x-amzn-requestid": "603e3d81-1f93-42f6-a7a7-449a4b6fef0f",
+          "content-type": "text/xml",
+          "content-length": "763"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "603e3d81-1f93-42f6-a7a7-449a4b6fef0f",
+    "http_date": "Sun, 25 Oct 2026 23:00:23 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <OrganizationsDecisionDetail>\n          <AllowedByOrganizations>false</AllowedByOrganizations>\n        </OrganizationsDecisionDetail>\n        <MatchedStatements/>\n        <MissingContextValues/>\n        <EvalResourceName>*</EvalResourceName>\n        <EvalActionName>ec2:DescribeInstances</EvalActionName>\n        <EvalDecision>implicitDeny</EvalDecision>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>603e3d81-1f93-42f6-a7a7-449a4b6fef0f</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

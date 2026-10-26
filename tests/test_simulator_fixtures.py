@@ -60,14 +60,19 @@ def test_a_limit_read_from_aws_docs_quotes_them():
             assert entry.get("link", "").startswith("https://docs.aws.amazon.com/"), case
 
 
-def test_only_differences_and_forced_verdicts_are_listed():
+def test_every_listed_case_still_needs_its_entry():
+    # Inconclusive cases and simulator limits stay listed even when the two answers match. The
+    # other verdicts say the answers differ, so an entry whose answers now match is stale.
     recorded = {fixture["case"]: fixture for fixture in FIXTURES}
+    differing = (outcomes.DIFFERS, outcomes.ANALYZER_REFUSES, outcomes.POSSIBLE_SIMULATOR_LIMIT)
     for case, entry in LISTED.items():
         assert case in recorded, f"{case} has no fixture"
         assert entry["verdict"] in outcomes.VERDICTS, case
-        if case not in FORCED:
-            fixture = recorded[case]
+        fixture = recorded[case]
+        if entry["verdict"] in differing:
             assert ours(fixture) != outcomes.aws(fixture).label, f"{case} agrees: unlist it"
+        if entry["verdict"] == outcomes.ANALYZER_REFUSES:
+            assert entry["analyzer"] in ("refused", "rejected"), case
 
 
 @pytest.mark.parametrize("fixture", FIXTURES, ids=IDS)

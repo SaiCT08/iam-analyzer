@@ -1,0 +1,114 @@
+{
+  "case": "scenarios/substitute_guardrail_ignores_other_buckets",
+  "source": "tests/scenarios/substitute_guardrail_ignores_other_buckets.json",
+  "question": null,
+  "description": "The guardrail only covers the student records bucket; writes elsewhere stay allowed.",
+  "readings": null,
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:30Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Statement\": [\n    {\n      \"Sid\": \"BroadS3\",\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"SubstitutesReadOnlyStudentRecords\",\n      \"Effect\": \"Deny\",\n      \"NotAction\": [\n        \"s3:Get*\",\n        \"s3:List*\"\n      ],\n      \"Resource\": [\n        \"arn:aws:s3:::district-student-records\",\n        \"arn:aws:s3:::district-student-records/*\"\n      ]\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [],
+        "ResponseMetadata": {
+          "RequestId": "5d4fc1b7-2614-4cfd-896d-fa683d83065f",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:30 GMT",
+            "x-amzn-requestid": "5d4fc1b7-2614-4cfd-896d-fa683d83065f",
+            "content-type": "text/xml",
+            "content-length": "342"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "5d4fc1b7-2614-4cfd-896d-fa683d83065f",
+      "http_date": "Sun, 25 Oct 2026 23:00:30 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames/>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>5d4fc1b7-2614-4cfd-896d-fa683d83065f</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Statement\": [\n    {\n      \"Sid\": \"BroadS3\",\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"SubstitutesReadOnlyStudentRecords\",\n      \"Effect\": \"Deny\",\n      \"NotAction\": [\n        \"s3:Get*\",\n        \"s3:List*\"\n      ],\n      \"Resource\": [\n        \"arn:aws:s3:::district-student-records\",\n        \"arn:aws:s3:::district-student-records/*\"\n      ]\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:PutObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-lesson-plans/week1.pdf"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:PutObject",
+          "EvalResourceName": "arn:aws:s3:::district-lesson-plans/week1.pdf",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.1",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 2,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 8,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-lesson-plans/week1.pdf",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.1",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 2,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 8,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "c0663ab1-7e5b-460f-a740-5b8229b16bdf",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:30 GMT",
+          "x-amzn-requestid": "c0663ab1-7e5b-460f-a740-5b8229b16bdf",
+          "content-type": "text/xml",
+          "content-length": "1883"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "c0663ab1-7e5b-460f-a740-5b8229b16bdf",
+    "http_date": "Sun, 25 Oct 2026 23:00:30 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>8</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>2</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-lesson-plans/week1.pdf</EvalResourceName>\n        <EvalActionName>s3:PutObject</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>8</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>2</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-lesson-plans/week1.pdf</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>c0663ab1-7e5b-460f-a740-5b8229b16bdf</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

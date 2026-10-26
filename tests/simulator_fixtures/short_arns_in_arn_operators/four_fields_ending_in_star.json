@@ -1,0 +1,74 @@
+{
+  "case": "short_arns_in_arn_operators/four_fields_ending_in_star",
+  "source": "simulator_check/cases/short_arns_in_arn_operators.json",
+  "question": "AWS checks each of an ARN's six fields separately in the ARN operators, and doesn't say how a value with fewer fields matches. The analyzer refuses.",
+  "description": "ArnLike arn:aws:sns:*, against a full SNS topic ARN.",
+  "readings": {
+    "ALLOW": "it is completed, or its last * runs on to the end",
+    "IMPLICIT_DENY": "neither"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:24Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"sqs:SendMessage\",\n      \"Resource\": \"arn:aws:sqs:us-east-1:111122223333:district-alerts\",\n      \"Condition\": {\n        \"ArnLike\": {\n          \"aws:SourceArn\": \"arn:aws:sns:*\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:SourceArn"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "a72521a1-01ca-480b-8509-8e141bc79bb6",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:24 GMT",
+            "x-amzn-requestid": "a72521a1-01ca-480b-8509-8e141bc79bb6",
+            "content-type": "text/xml",
+            "content-length": "401"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "a72521a1-01ca-480b-8509-8e141bc79bb6",
+      "http_date": "Sun, 25 Oct 2026 23:00:24 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:SourceArn</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>a72521a1-01ca-480b-8509-8e141bc79bb6</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"sqs:SendMessage\",\n      \"Resource\": \"arn:aws:sqs:us-east-1:111122223333:district-alerts\",\n      \"Condition\": {\n        \"ArnLike\": {\n          \"aws:SourceArn\": \"arn:aws:sns:*\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "sqs:SendMessage"
+      ],
+      "ResourceArns": [
+        "arn:aws:sqs:us-east-1:111122223333:district-alerts"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:SourceArn",
+          "ContextKeyValues": [
+            "arn:aws:sns:us-east-1:111122223333:district-alerts"
+          ],
+          "ContextKeyType": "string"
+        }
+      ]
+    },
+    "response": null,
+    "error": {
+      "Type": "Sender",
+      "Code": "InvalidInput",
+      "Message": "The simulation request contains invalid input."
+    },
+    "request_id": "3f199c10-6efb-438e-880a-3e75ea5b4d3d",
+    "http_date": "Sun, 25 Oct 2026 23:00:24 GMT",
+    "raw_body": "<ErrorResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <Error>\n    <Type>Sender</Type>\n    <Code>InvalidInput</Code>\n    <Message>The simulation request contains invalid input.</Message>\n  </Error>\n  <RequestId>3f199c10-6efb-438e-880a-3e75ea5b4d3d</RequestId>\n</ErrorResponse>\n"
+  }
+}

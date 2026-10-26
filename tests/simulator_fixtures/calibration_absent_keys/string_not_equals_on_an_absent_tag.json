@@ -1,0 +1,120 @@
+{
+  "case": "calibration_absent_keys/string_not_equals_on_an_absent_tag",
+  "source": "simulator_check/cases/calibration_absent_keys.json",
+  "question": "Does a key left out of the simulator call act like a key absent from a real request? AWS says: \"If you do not provide a value for a context key, the simulation still runs and returns an implicit deny.\" Each case's documented answer is something else.",
+  "description": "A negated operator holds when its key is missing.",
+  "readings": null,
+  "documented": {
+    "decision": "ALLOW",
+    "source": "If the policy condition requires that the key is not matched, such as StringNotLike or ArnNotLike, and the right key is not present, the condition is true.",
+    "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html"
+  },
+  "recorded_at": "2026-10-25T23:00:19Z",
+  "absent": [
+    "aws:PrincipalTag/team"
+  ],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-student-records/*\",\n      \"Condition\": {\n        \"StringNotEquals\": {\n          \"aws:PrincipalTag/team\": \"blue\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:PrincipalTag/team"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "4e37acff-e1e6-46e1-b655-2d758c766784",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:19 GMT",
+            "x-amzn-requestid": "4e37acff-e1e6-46e1-b655-2d758c766784",
+            "content-type": "text/xml",
+            "content-length": "409"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "4e37acff-e1e6-46e1-b655-2d758c766784",
+      "http_date": "Sun, 25 Oct 2026 23:00:19 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:PrincipalTag/team</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>4e37acff-e1e6-46e1-b655-2d758c766784</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-student-records/*\",\n      \"Condition\": {\n        \"StringNotEquals\": {\n          \"aws:PrincipalTag/team\": \"blue\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-student-records/2026/roster.csv"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:GetObject",
+          "EvalResourceName": "arn:aws:s3:::district-student-records/2026/roster.csv",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.1",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 13,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-student-records/2026/roster.csv",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.1",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 13,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "63b35eec-cc0a-4a81-9275-036b545d823e",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:19 GMT",
+          "x-amzn-requestid": "63b35eec-cc0a-4a81-9275-036b545d823e",
+          "content-type": "text/xml",
+          "content-length": "1903"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "63b35eec-cc0a-4a81-9275-036b545d823e",
+    "http_date": "Sun, 25 Oct 2026 23:00:19 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>13</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-student-records/2026/roster.csv</EvalResourceName>\n        <EvalActionName>s3:GetObject</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>13</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-student-records/2026/roster.csv</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>63b35eec-cc0a-4a81-9275-036b545d823e</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

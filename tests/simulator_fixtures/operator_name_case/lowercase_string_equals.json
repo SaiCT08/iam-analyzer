@@ -1,0 +1,80 @@
+{
+  "case": "operator_name_case/lowercase_string_equals",
+  "source": "simulator_check/cases/operator_name_case.json",
+  "question": "Does AWS accept a condition operator spelled in lowercase? AWS doesn't say whether operator names ignore case. The analyzer rejects the policy.",
+  "description": "stringequals aws:PrincipalTag/campus campus-01, for a caller tagged campus-01.",
+  "readings": {
+    "ALLOW": "operator names ignore case",
+    "rejected": "AWS refuses the policy, as the analyzer does",
+    "IMPLICIT_DENY": "AWS accepts the policy, but the condition never holds"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:22Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-student-records/*\",\n      \"Condition\": {\n        \"stringequals\": {\n          \"aws:PrincipalTag/campus\": \"campus-01\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": null,
+      "error": {
+        "Type": "Sender",
+        "Code": "InvalidInput",
+        "Message": "Policy input list item 1 has invalid content"
+      },
+      "request_id": "aa848c1d-6075-47a3-83dd-d887141d2762",
+      "http_date": "Sun, 25 Oct 2026 23:00:22 GMT",
+      "raw_body": "<ErrorResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <Error>\n    <Type>Sender</Type>\n    <Code>InvalidInput</Code>\n    <Message>Policy input list item 1 has invalid content</Message>\n  </Error>\n  <RequestId>aa848c1d-6075-47a3-83dd-d887141d2762</RequestId>\n</ErrorResponse>\n"
+    },
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-student-records/*\",\n      \"Condition\": {\n        \"stringequals\": {\n          \"aws:PrincipalTag/campus\": \"campus-01\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": null,
+      "error": {
+        "Type": "Sender",
+        "Code": "InvalidInput",
+        "Message": "Policy input list item 1 has invalid content"
+      },
+      "request_id": "e63e5ac7-0fb0-4f5e-a62e-c4f7c4956bc3",
+      "http_date": "Sun, 25 Oct 2026 23:00:22 GMT",
+      "raw_body": "<ErrorResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <Error>\n    <Type>Sender</Type>\n    <Code>InvalidInput</Code>\n    <Message>Policy input list item 1 has invalid content</Message>\n  </Error>\n  <RequestId>e63e5ac7-0fb0-4f5e-a62e-c4f7c4956bc3</RequestId>\n</ErrorResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-student-records/*\",\n      \"Condition\": {\n        \"stringequals\": {\n          \"aws:PrincipalTag/campus\": \"campus-01\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-student-records/2026/roster.csv"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:PrincipalTag/campus",
+          "ContextKeyValues": [
+            "campus-01"
+          ],
+          "ContextKeyType": "string"
+        }
+      ]
+    },
+    "response": null,
+    "error": {
+      "Type": "Sender",
+      "Code": "InvalidInput",
+      "Message": "Policy input list item 1 has invalid content"
+    },
+    "request_id": "45cd2744-8380-4abf-bf50-a30d20369424",
+    "http_date": "Sun, 25 Oct 2026 23:00:22 GMT",
+    "raw_body": "<ErrorResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <Error>\n    <Type>Sender</Type>\n    <Code>InvalidInput</Code>\n    <Message>Policy input list item 1 has invalid content</Message>\n  </Error>\n  <RequestId>45cd2744-8380-4abf-bf50-a30d20369424</RequestId>\n</ErrorResponse>\n"
+  }
+}

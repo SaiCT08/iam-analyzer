@@ -1,0 +1,138 @@
+{
+  "case": "star_grant_and_boundary/star_principal_with_principal_arn_condition",
+  "source": "simulator_check/cases/star_grant_and_boundary.json",
+  "question": "Does a permissions boundary that doesn't allow the request limit a bucket policy that grants it to everyone (*)? The analyzer treats * as a direct grant, which a boundary doesn't limit: a judgment call.",
+  "description": "\"*\" with an ArnEquals condition on aws:PrincipalArn. AWS: \"Permissions boundaries and session policies do not limit permissions granted using the aws:PrincipalArn condition key with a wildcard(*) in the Principal element, unless the identity-based policies contain an explicit deny.\"",
+  "readings": {
+    "ALLOW": "the boundary doesn't limit a grant to everyone, as the analyzer assumes",
+    "IMPLICIT_DENY": "the boundary limits it"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:24Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:DescribeInstances\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"KwongReads\",\n      \"Effect\": \"Allow\",\n      \"Principal\": \"*\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-kwong-files/*\",\n      \"Condition\": {\n        \"ArnEquals\": {\n          \"aws:PrincipalArn\": \"arn:aws:iam::111122223333:user/kwong\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:PrincipalArn"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "ff4d3fff-00f0-4a35-a454-4aff73961176",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:24 GMT",
+            "x-amzn-requestid": "ff4d3fff-00f0-4a35-a454-4aff73961176",
+            "content-type": "text/xml",
+            "content-length": "404"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "ff4d3fff-00f0-4a35-a454-4aff73961176",
+      "http_date": "Sun, 25 Oct 2026 23:00:24 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:PrincipalArn</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>ff4d3fff-00f0-4a35-a454-4aff73961176</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:DescribeInstances\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+      ],
+      "PermissionsBoundaryPolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+      ],
+      "ResourcePolicy": "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"KwongReads\",\n      \"Effect\": \"Allow\",\n      \"Principal\": \"*\",\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-kwong-files/*\",\n      \"Condition\": {\n        \"ArnEquals\": {\n          \"aws:PrincipalArn\": \"arn:aws:iam::111122223333:user/kwong\"\n        }\n      }\n    }\n  ]\n}",
+      "CallerArn": "arn:aws:iam::111122223333:user/kwong",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-kwong-files/notes.txt"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:PrincipalArn",
+          "ContextKeyValues": [
+            "arn:aws:iam::111122223333:user/kwong"
+          ],
+          "ContextKeyType": "string"
+        }
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:GetObject",
+          "EvalResourceName": "arn:aws:s3:::district-kwong-files/notes.txt",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "ResourcePolicy",
+              "SourcePolicyType": "Resource Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 15,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "PermissionsBoundaryDecisionDetail": {
+            "AllowedByPermissionsBoundary": false
+          },
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-kwong-files/notes.txt",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "ResourcePolicy",
+                  "SourcePolicyType": "Resource Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 15,
+                    "Column": 6
+                  }
+                }
+              ],
+              "PermissionsBoundaryDecisionDetail": {
+                "AllowedByPermissionsBoundary": false
+              }
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "1fe8770b-4043-4a73-b49d-0e41269d7171",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:24 GMT",
+          "x-amzn-requestid": "1fe8770b-4043-4a73-b49d-0e41269d7171",
+          "content-type": "text/xml",
+          "content-length": "2231"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "1fe8770b-4043-4a73-b49d-0e41269d7171",
+    "http_date": "Sun, 25 Oct 2026 23:00:24 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <PermissionsBoundaryDecisionDetail>\n          <AllowedByPermissionsBoundary>false</AllowedByPermissionsBoundary>\n        </PermissionsBoundaryDecisionDetail>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>15</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>ResourcePolicy</SourcePolicyId>\n            <SourcePolicyType>Resource Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-kwong-files/notes.txt</EvalResourceName>\n        <EvalActionName>s3:GetObject</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <PermissionsBoundaryDecisionDetail>\n              <AllowedByPermissionsBoundary>false</AllowedByPermissionsBoundary>\n            </PermissionsBoundaryDecisionDetail>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>15</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>ResourcePolicy</SourcePolicyId>\n                <SourcePolicyType>Resource Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-kwong-files/notes.txt</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>1fe8770b-4043-4a73-b49d-0e41269d7171</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

@@ -13,7 +13,7 @@ from simulator_check.cases import NotExpressible, load_cases, requests_for
 
 # The doc's parts, each with the groups of cases in it, in order.
 PARTS = [
-    ("Calibration", [
+    ("Calibration cases", [
         "calibration_aws_example", "calibration_absent_keys", "calibration_role_callers",
     ]),
     ("Part 1. Wildcards and colons", ["wildcards_and_colons"]),
@@ -44,7 +44,7 @@ def main() -> int:
     print(f"Findings: {json.dumps(verdicts['findings'])}\n")
     for title, groups in PARTS:
         rows = [fixture for group in groups for fixture in by_group.get(group, [])]
-        if title == "Calibration":
+        if title == "Calibration cases":
             rows += [f for f in by_group.get("scenarios", []) if f.get("documented")]
         if rows:
             print(f"### {title}\n")

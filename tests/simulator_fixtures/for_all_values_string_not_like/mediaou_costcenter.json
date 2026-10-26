@@ -1,0 +1,128 @@
+{
+  "case": "for_all_values_string_not_like/mediaou_costcenter",
+  "source": "simulator_check/cases/for_all_values_string_not_like.json",
+  "question": "Does ForAllValues:StringNotLike follow its definitions, as the analyzer does, or the evaluation table under AWS's aws:ResourceOrgPaths example, which says the opposite in all three rows? The example's Deny is copied word for word, beside an Allow for all of S3.",
+  "description": "The table's second row: the table says No match.",
+  "readings": {
+    "EXPLICIT_DENY": "the definitions: the path matches neither pattern, so the condition holds",
+    "ALLOW": "the table: No match"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:20Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"DenyS3AccessOutsideMyBoundary\",\n      \"Effect\": \"Deny\",\n      \"Action\": [\n        \"s3:*\"\n      ],\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"ForAllValues:StringNotLike\": {\n          \"aws:ResourceOrgPaths\": [\n            \"o-acorg/r-acroot/ou-acroot-mediaou/\",\n            \"o-acorg/r-acroot/ou-acroot-sportsou/*\"\n          ]\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:ResourceOrgPaths"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "e9592d1f-8f07-42b9-9a11-dc13dc41fd14",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:20 GMT",
+            "x-amzn-requestid": "e9592d1f-8f07-42b9-9a11-dc13dc41fd14",
+            "content-type": "text/xml",
+            "content-length": "408"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "e9592d1f-8f07-42b9-9a11-dc13dc41fd14",
+      "http_date": "Sun, 25 Oct 2026 23:00:20 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:ResourceOrgPaths</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>e9592d1f-8f07-42b9-9a11-dc13dc41fd14</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"DenyS3AccessOutsideMyBoundary\",\n      \"Effect\": \"Deny\",\n      \"Action\": [\n        \"s3:*\"\n      ],\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"ForAllValues:StringNotLike\": {\n          \"aws:ResourceOrgPaths\": [\n            \"o-acorg/r-acroot/ou-acroot-mediaou/\",\n            \"o-acorg/r-acroot/ou-acroot-sportsou/*\"\n          ]\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-student-records/2026/roster.csv"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:ResourceOrgPaths",
+          "ContextKeyValues": [
+            "o-acorg/r-acroot/ou-acroot-mediaou/costcenter/"
+          ],
+          "ContextKeyType": "stringList"
+        }
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:GetObject",
+          "EvalResourceName": "arn:aws:s3:::district-student-records/2026/roster.csv",
+          "EvalDecision": "explicitDeny",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.2",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 19,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-student-records/2026/roster.csv",
+              "EvalResourceDecision": "explicitDeny",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.2",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 19,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "ad61ff84-ab9d-4e19-aae4-2f2a39ddc782",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:20 GMT",
+          "x-amzn-requestid": "ad61ff84-ab9d-4e19-aae4-2f2a39ddc782",
+          "content-type": "text/xml",
+          "content-length": "1913"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "ad61ff84-ab9d-4e19-aae4-2f2a39ddc782",
+    "http_date": "Sun, 25 Oct 2026 23:00:20 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>19</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.2</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-student-records/2026/roster.csv</EvalResourceName>\n        <EvalActionName>s3:GetObject</EvalActionName>\n        <EvalDecision>explicitDeny</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>19</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.2</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>explicitDeny</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-student-records/2026/roster.csv</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>ad61ff84-ab9d-4e19-aae4-2f2a39ddc782</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

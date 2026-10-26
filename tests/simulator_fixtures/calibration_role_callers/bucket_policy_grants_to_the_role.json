@@ -1,0 +1,118 @@
+{
+  "case": "calibration_role_callers/bucket_policy_grants_to_the_role",
+  "source": "simulator_check/cases/calibration_role_callers.json",
+  "question": "Does the simulator use a resource-based policy when the caller is a role? AWS says \"Simulation of resource-based policies isn't supported for IAM roles\", which could mean roles' own trust policies, or any resource-based policy when a role is the caller. In each case the bucket policy should decide the answer, so it should show up in MatchedStatements.",
+  "description": "The bucket policy grants the role read access. The role has no identity policy that allows it, and no boundary.",
+  "readings": null,
+  "documented": {
+    "decision": "ALLOW",
+    "source": "For most resources, you only need an explicit Allow for the principal in either an identity-based policy or a resource-based policy to grant access.",
+    "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-denyallow.html"
+  },
+  "recorded_at": "2026-10-25T23:00:19Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"NothingTheCaseAsksAbout\",\n      \"Effect\": \"Allow\",\n      \"Action\": \"iam:GetAccountSummary\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"CampusAppReads\",\n      \"Effect\": \"Allow\",\n      \"Principal\": {\n        \"AWS\": \"arn:aws:iam::111122223333:role/district/CampusApp\"\n      },\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-kwong-files/*\"\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [],
+        "ResponseMetadata": {
+          "RequestId": "66be5ce8-fad9-4d11-889a-2250eac13c42",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:19 GMT",
+            "x-amzn-requestid": "66be5ce8-fad9-4d11-889a-2250eac13c42",
+            "content-type": "text/xml",
+            "content-length": "342"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "66be5ce8-fad9-4d11-889a-2250eac13c42",
+      "http_date": "Sun, 25 Oct 2026 23:00:19 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames/>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>66be5ce8-fad9-4d11-889a-2250eac13c42</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"NothingTheCaseAsksAbout\",\n      \"Effect\": \"Allow\",\n      \"Action\": \"iam:GetAccountSummary\",\n      \"Resource\": \"*\"\n    }\n  ]\n}"
+      ],
+      "ResourcePolicy": "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Sid\": \"CampusAppReads\",\n      \"Effect\": \"Allow\",\n      \"Principal\": {\n        \"AWS\": \"arn:aws:iam::111122223333:role/district/CampusApp\"\n      },\n      \"Action\": \"s3:GetObject\",\n      \"Resource\": \"arn:aws:s3:::district-kwong-files/*\"\n    }\n  ]\n}",
+      "CallerArn": "arn:aws:iam::111122223333:role/district/CampusApp",
+      "ActionNames": [
+        "s3:GetObject"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-kwong-files/notes.txt"
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:GetObject",
+          "EvalResourceName": "arn:aws:s3:::district-kwong-files/notes.txt",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "ResourcePolicy",
+              "SourcePolicyType": "Resource Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 12,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-kwong-files/notes.txt",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "ResourcePolicy",
+                  "SourcePolicyType": "Resource Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 12,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "0651588f-2d89-48e8-a9c8-39ff56c3a1b9",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:19 GMT",
+          "x-amzn-requestid": "0651588f-2d89-48e8-a9c8-39ff56c3a1b9",
+          "content-type": "text/xml",
+          "content-length": "1887"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "0651588f-2d89-48e8-a9c8-39ff56c3a1b9",
+    "http_date": "Sun, 25 Oct 2026 23:00:19 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>12</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>ResourcePolicy</SourcePolicyId>\n            <SourcePolicyType>Resource Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-kwong-files/notes.txt</EvalResourceName>\n        <EvalActionName>s3:GetObject</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>12</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>ResourcePolicy</SourcePolicyId>\n                <SourcePolicyType>Resource Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-kwong-files/notes.txt</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>0651588f-2d89-48e8-a9c8-39ff56c3a1b9</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

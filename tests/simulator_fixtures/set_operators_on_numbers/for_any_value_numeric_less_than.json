@@ -1,0 +1,127 @@
+{
+  "case": "set_operators_on_numbers/for_any_value_numeric_less_than",
+  "source": "simulator_check/cases/set_operators_on_numbers.json",
+  "question": "Do ForAllValues and ForAnyValue work with Numeric operators? AWS's tables only show String, Bool and ARN examples. The analyzer assumes they do: a judgment call.",
+  "description": "ForAnyValue:NumericLessThan s3:max-keys 10, with the values 5 and 20.",
+  "readings": {
+    "ALLOW": "set operators work with Numeric operators, as the analyzer assumes",
+    "IMPLICIT_DENY": "they don't"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:23Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:ListBucket\",\n      \"Resource\": \"arn:aws:s3:::district-student-records\",\n      \"Condition\": {\n        \"ForAnyValue:NumericLessThan\": {\n          \"s3:max-keys\": \"10\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "s3:max-keys"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "9cf2c516-a7cd-4846-8234-a0fd0dfe40d4",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:23 GMT",
+            "x-amzn-requestid": "9cf2c516-a7cd-4846-8234-a0fd0dfe40d4",
+            "content-type": "text/xml",
+            "content-length": "399"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "9cf2c516-a7cd-4846-8234-a0fd0dfe40d4",
+      "http_date": "Sun, 25 Oct 2026 23:00:23 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>s3:max-keys</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>9cf2c516-a7cd-4846-8234-a0fd0dfe40d4</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:ListBucket\",\n      \"Resource\": \"arn:aws:s3:::district-student-records\",\n      \"Condition\": {\n        \"ForAnyValue:NumericLessThan\": {\n          \"s3:max-keys\": \"10\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:ListBucket"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-student-records"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "s3:max-keys",
+          "ContextKeyValues": [
+            "5",
+            "20"
+          ],
+          "ContextKeyType": "numericList"
+        }
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:ListBucket",
+          "EvalResourceName": "arn:aws:s3:::district-student-records",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.1",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 13,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-student-records",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.1",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 13,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "c210f120-c07c-4dff-a33d-902d0fbc5a2a",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:23 GMT",
+          "x-amzn-requestid": "c210f120-c07c-4dff-a33d-902d0fbc5a2a",
+          "content-type": "text/xml",
+          "content-length": "1872"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "c210f120-c07c-4dff-a33d-902d0fbc5a2a",
+    "http_date": "Sun, 25 Oct 2026 23:00:23 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>13</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-student-records</EvalResourceName>\n        <EvalActionName>s3:ListBucket</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>13</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-student-records</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>c210f120-c07c-4dff-a33d-902d0fbc5a2a</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "case": "empty_values/for_any_value",
+  "source": "simulator_check/cases/empty_values.json",
+  "question": "Does a key whose only value is \"\" count as missing? AWS calls it a \"null dataset\" only for ForAllValues. The analyzer refuses it under ForAnyValue and Null.",
+  "description": "ForAnyValue:StringNotEquals aws:TagKeys campus, with aws:TagKeys [\"\"].",
+  "readings": {
+    "ALLOW": "the empty string is a value, and it isn't campus",
+    "IMPLICIT_DENY": "it counts as no values"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-25T23:00:20Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:CreateTags\",\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"ForAnyValue:StringNotEquals\": {\n          \"aws:TagKeys\": \"campus\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:TagKeys"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "6ef5fd9d-ffd2-48d6-b80f-aa239867741c",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Sun, 25 Oct 2026 23:00:20 GMT",
+            "x-amzn-requestid": "6ef5fd9d-ffd2-48d6-b80f-aa239867741c",
+            "content-type": "text/xml",
+            "content-length": "399"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "6ef5fd9d-ffd2-48d6-b80f-aa239867741c",
+      "http_date": "Sun, 25 Oct 2026 23:00:20 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:TagKeys</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>6ef5fd9d-ffd2-48d6-b80f-aa239867741c</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:CreateTags\",\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"ForAnyValue:StringNotEquals\": {\n          \"aws:TagKeys\": \"campus\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "ec2:CreateTags"
+      ],
+      "ResourceArns": [
+        "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:TagKeys",
+          "ContextKeyValues": [
+            ""
+          ],
+          "ContextKeyType": "stringList"
+        }
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "ec2:CreateTags",
+          "EvalResourceName": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890",
+          "EvalDecision": "allowed",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.1",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 13,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890",
+              "EvalResourceDecision": "allowed",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.1",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 13,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "60cf90da-f4bc-4c83-836e-a536cabb0f79",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Sun, 25 Oct 2026 23:00:20 GMT",
+          "x-amzn-requestid": "60cf90da-f4bc-4c83-836e-a536cabb0f79",
+          "content-type": "text/xml",
+          "content-length": "1925"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "60cf90da-f4bc-4c83-836e-a536cabb0f79",
+    "http_date": "Sun, 25 Oct 2026 23:00:20 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>13</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890</EvalResourceName>\n        <EvalActionName>ec2:CreateTags</EvalActionName>\n        <EvalDecision>allowed</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>13</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.1</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>allowed</EvalResourceDecision>\n            <EvalResourceName>arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>60cf90da-f4bc-4c83-836e-a536cabb0f79</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}
