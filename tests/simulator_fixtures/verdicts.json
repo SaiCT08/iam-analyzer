@@ -4,81 +4,6 @@
     "role_caller_resource_policies": "evaluated"
   },
   "cases": {
-    "dates_without_a_time_zone/date_only_just_after_midnight_utc": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026-08-15 acts as midnight UTC at the start of that day."
-    },
-    "dates_without_a_time_zone/date_only_just_before_midnight_utc": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026-08-15 acts as midnight UTC at the start of that day."
-    },
-    "dates_without_a_time_zone/four_digits": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026 acts as epoch seconds (1970-01-01T00:33:46Z), not as the year 2026."
-    },
-    "dates_without_a_time_zone/month_only_just_after_midnight_utc": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026-08 acts as midnight UTC at the start of the month."
-    },
-    "dates_without_a_time_zone/month_only_just_before_midnight_utc": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026-08 acts as midnight UTC at the start of the month."
-    },
-    "dates_without_a_time_zone/time_without_seconds_just_after": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026-08-15T07:30, with no seconds and no zone, acts as 07:30:00 UTC."
-    },
-    "dates_without_a_time_zone/time_without_seconds_just_before": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "2026-08-15T07:30, with no seconds and no zone, acts as 07:30:00 UTC."
-    },
-    "dates_without_a_time_zone/time_without_a_zone_just_after": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "A time with no zone acts as UTC."
-    },
-    "dates_without_a_time_zone/time_without_a_zone_just_before": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "A time with no zone acts as UTC."
-    },
-    "empty_values/for_any_value": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "Under ForAnyValue, an empty string counts as a value: \"\" isn't campus, so ForAnyValue:StringNotEquals holds."
-    },
-    "empty_values/null_true": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "Under Null, an empty value counts as present: Null true fails."
-    },
-    "for_any_value_if_exists/key_absent": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "ForAnyValue wins over IfExists: the condition fails on a missing key, and AWS lists aws:TagKeys in MissingContextValues."
-    },
-    "ip_ranges/bare_ipv6_address": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "A bare IPv6 address doesn't get AWS's default /32: 2001:db8::1 doesn't cover 2001:db8::2. With bare_ipv6_address_itself, that's /128."
-    },
-    "ip_ranges/bare_ipv6_address_itself": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "A bare IPv6 address covers itself. With bare_ipv6_address, that's /128."
-    },
-    "ip_ranges/range_with_host_bits": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "The host bits are masked: 203.0.113.5/24 covers 203.0.113.77."
-    },
     "list_all_my_buckets/allowed_on_every_bucket_arn": {
       "analyzer": "refused",
       "verdict": "simulator limit",
@@ -145,36 +70,6 @@
       "analyzer": "refused",
       "verdict": "analyzer refuses",
       "note": "The simulator doesn't complete arn:aws:s3 in an SCP Deny, so it allows the read. AWS documents completion only for identity-based policies, and the simulator skips it there too (the two incomplete_arn scenarios), so this is weak evidence. The analyzer refuses a short ARN in an SCP."
-    },
-    "set_operator_on_null/for_all_values_null_false": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "AWS accepts ForAllValues:Null. With the key present, Null false holds."
-    },
-    "set_operator_on_null/for_all_values_null_false_key_absent": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "ALLOW: on a missing key, ForAllValues:Null false holds, as ForAllValues does with other operators. Plain Null false would fail."
-    },
-    "set_operator_on_null/for_any_value_null_true_key_absent": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "IMPLICIT_DENY: on a missing key, ForAnyValue:Null true fails, as ForAnyValue does with other operators. Plain Null true would hold. AWS lists aws:TagKeys in MissingContextValues."
-    },
-    "several_values_without_a_set_operator/string_equals": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "IMPLICIT_DENY. With string_not_equals_neither_matches: several values with no set operator never match."
-    },
-    "several_values_without_a_set_operator/string_not_equals": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "IMPLICIT_DENY. With string_not_equals_neither_matches: several values with no set operator never match."
-    },
-    "several_values_without_a_set_operator/string_not_equals_neither_matches": {
-      "analyzer": "refused",
-      "verdict": "analyzer refuses",
-      "note": "IMPLICIT_DENY although no value is campus, so it doesn't act like ForAllValues: several values with no set operator never match."
     },
     "short_arns_in_arn_operators/four_fields_ending_in_star": {
       "analyzer": "refused",

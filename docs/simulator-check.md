@@ -12,17 +12,16 @@ rounds.
 - **Engine changes:** the differences below were decided on 2026-10-25, and a third round of
   probes on 2026-10-26 settled the questions still open (see
   [Differences and decisions](#differences-and-decisions)). Since 2026-10-26 the engine follows
-  differences 1, 3 and 4, and the policy-variable rows of section 5. The rest of section 5
-  comes next.
+  every decision below.
 
 ## Summary
 
 | Verdict | Cases | Meaning |
 |---|---|---|
-| agrees | 84 | Both sides gave the same answer. |
+| agrees | 105 | Both sides gave the same answer. |
 | differs | 0 | A real mismatch. |
 | simulator limit | 9 | AWS documents a behavior that the simulator doesn't follow. |
-| analyzer refuses | 28 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
+| analyzer refuses | 7 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
 | can't express | 4 | The simulator can't be given the case faithfully. |
 
 - **Calibration passed:**
@@ -282,29 +281,29 @@ The tables come from `python -m simulator_check.report`:
 | `variables_with_wildcards/star_in_a_value` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
 | `bool_with_a_variable/mfa_false` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
 | `bool_with_a_variable/mfa_true` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
-| `dates_without_a_time_zone/date_only_just_after_midnight_utc` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `dates_without_a_time_zone/date_only_just_before_midnight_utc` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `dates_without_a_time_zone/four_digits` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `dates_without_a_time_zone/month_only_just_after_midnight_utc` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `dates_without_a_time_zone/month_only_just_before_midnight_utc` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `dates_without_a_time_zone/time_without_a_zone_just_after` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `dates_without_a_time_zone/time_without_a_zone_just_before` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `dates_without_a_time_zone/time_without_seconds_just_after` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `dates_without_a_time_zone/time_without_seconds_just_before` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `ip_ranges/bare_ipv6_address` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `ip_ranges/bare_ipv6_address_itself` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `ip_ranges/range_with_host_bits` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/date_only_just_after_midnight_utc` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/date_only_just_before_midnight_utc` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `dates_without_a_time_zone/four_digits` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/month_only_just_after_midnight_utc` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/month_only_just_before_midnight_utc` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `dates_without_a_time_zone/time_without_a_zone_just_after` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/time_without_a_zone_just_before` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `dates_without_a_time_zone/time_without_seconds_just_after` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/time_without_seconds_just_before` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `ip_ranges/bare_ipv6_address` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `ip_ranges/bare_ipv6_address_itself` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `ip_ranges/range_with_host_bits` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `short_arns_in_arn_operators/four_fields_ending_in_star` | refused | rejected | analyzer refuses | - | - | - |
 | `short_arns_in_arn_operators/three_fields` | refused | rejected | analyzer refuses | - | - | - |
-| `several_values_without_a_set_operator/string_equals` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `several_values_without_a_set_operator/string_not_equals` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `several_values_without_a_set_operator/string_not_equals_neither_matches` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `empty_values/for_any_value` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `empty_values/null_true` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `for_any_value_if_exists/key_absent` | refused | IMPLICIT_DENY | analyzer refuses | aws:TagKeys | - | - |
-| `set_operator_on_null/for_all_values_null_false` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `set_operator_on_null/for_all_values_null_false_key_absent` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
-| `set_operator_on_null/for_any_value_null_true_key_absent` | refused | IMPLICIT_DENY | analyzer refuses | aws:TagKeys | - | - |
+| `several_values_without_a_set_operator/string_equals` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `several_values_without_a_set_operator/string_not_equals` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `several_values_without_a_set_operator/string_not_equals_neither_matches` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `empty_values/for_any_value` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `empty_values/null_true` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `for_any_value_if_exists/key_absent` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | aws:TagKeys | - | - |
+| `set_operator_on_null/for_all_values_null_false` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `set_operator_on_null/for_all_values_null_false_key_absent` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `set_operator_on_null/for_any_value_null_true_key_absent` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | aws:TagKeys | - | - |
 | `operator_name_case/lowercase_string_equals` | rejected | rejected | agrees | - | - | - |
 | `role_principal_case/role_name_in_lowercase` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `role_principal_case/user_name_in_uppercase_control` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
@@ -506,7 +505,7 @@ quote and the link.
     every unsettled Allow and no unsettled Deny, and the other way round. It answers when the two
     agree, and refuses otherwise. This case now gives `refused`.
 
-### 5. Refusals that AWS answered (41 cases)
+### 5. Refusals that AWS answered (41 cases, of which 34 now agree)
 Each row is a case the analyzer refuses because AWS's docs don't settle it, with what the
 simulator answered and the decision. "Adopt" means the engine gives the simulator's answer
 instead of refusing, once the row says "Done". Each adopted row names its fixtures.
@@ -517,14 +516,14 @@ instead of refusing, once the row says "Done". Each adopted row names its fixtur
 | A variable from a multivalued key | `variables_with_several_values/*` (6) | In `Resource`, neither value was used. In `NotResource`, the Deny covered every bucket, including the one named after a value. In a condition value (third follow-up), `StringEquals` failed for a value of the key, and a `StringNotEquals` Deny applied to one | Adopt, settled by the second and third follow-ups: it matches nothing, as a variable with no value does, in `Resource`, `NotResource` and condition values. Done (2026-10-26). Such a variable with a default is still refused, since nothing probed it | `variables._value` |
 | A `*` in a variable's value or default | `variables_with_wildcards/*` (4) | A literal `*`, in `Resource` and, in the third follow-up, in a `StringLike` value | Adopt: a filled-in value is plain text, in `Resource` and in condition values. Done (2026-10-26) | `variables._value`, `variables.parse` |
 | A policy variable in a `Bool` value | `bool_with_a_variable/*` (2) | Not filled in, so the condition fails. AWS accepts the policy | Adopt: the text stays as written, as the policy variables page says. Done (2026-10-26) | `conditions.check`, `conditions._bool_value` |
-| A date with no time or no zone | `dates_without_a_time_zone/*` (9) | `2026-08-15` is midnight UTC; `2026-08` is midnight UTC on the 1st; a time with no zone is UTC, with seconds (`07:30:00`) or without (`07:30`); `2026` is epoch seconds | Adopt exactly these forms. `2026-08` and the time without seconds were settled by the follow-up probes. Keep refusing any other form, such as fractional seconds with no zone | `conditions._date` |
-| A range with host bits set | `ip_ranges/range_with_host_bits` | The host bits are masked | Adopt | `conditions._network` |
-| A bare IPv6 address | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | It covers itself but not `2001:db8::2`: /128 | Adopt /128. AWS's "default prefix value of /32" only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses: a doc mismatch (section 6) | `conditions._network` |
+| A date with no time or no zone | `dates_without_a_time_zone/*` (9) | `2026-08-15` is midnight UTC; `2026-08` is midnight UTC on the 1st; a time with no zone is UTC, with seconds (`07:30:00`) or without (`07:30`); `2026` is epoch seconds | Adopt exactly these forms. `2026-08` and the time without seconds were settled by the follow-up probes. Keep refusing any other form, such as fractional seconds with no zone. Done (2026-10-26) | `conditions._date` |
+| A range with host bits set | `ip_ranges/range_with_host_bits` | The host bits are masked | Adopt. Done (2026-10-26) | `conditions._network` |
+| A bare IPv6 address | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | It covers itself but not `2001:db8::2`: /128 | Adopt /128. AWS's "default prefix value of /32" only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses: a doc mismatch (section 6). Done (2026-10-26) | `conditions._network` |
 | An ARN operator value with fewer than six fields | `short_arns_in_arn_operators/*` (2) | AWS rejects the simulation (`InvalidInput`), though `GetContextKeysForCustomPolicy` accepts the policy | Keep refusing | |
-| Several request values with no set operator | `several_values_without_a_set_operator/*` (3) | Never a match: IMPLICIT_DENY for `StringEquals` and `StringNotEquals`, even when no value is `campus` | Adopt for those two operators, settled by the follow-up probe: the condition doesn't hold. Keep refusing other operators | `conditions.holds` |
-| A request whose only value is `""` | `empty_values/*` (2) | It counts as a value under `ForAnyValue`, and as present under `Null` | Adopt. Only `ForAllValues` treats `""` as a null dataset, as AWS documents | `conditions.holds` |
-| `ForAnyValue…IfExists` on a missing key | `for_any_value_if_exists/key_absent` | ForAnyValue wins: the condition fails | Adopt | `conditions._missing` |
-| A set operator on `Null` | `set_operator_on_null/*` (3) | Accepted. With the key present, `ForAllValues:Null` false held. With the key missing, `ForAllValues:Null` false held and `ForAnyValue:Null` true failed | Adopt, settled by the second follow-up: the set operator applies as it does to other operators. On a missing key, `ForAllValues` holds and `ForAnyValue` fails; with the key present, `Null`'s own answer stands | `conditions.parse_operator`, `conditions.holds` |
+| Several request values with no set operator | `several_values_without_a_set_operator/*` (3) | Never a match: IMPLICIT_DENY for `StringEquals` and `StringNotEquals`, even when no value is `campus` | Adopt for those two operators, settled by the follow-up probe: the condition doesn't hold. Keep refusing other operators. Done (2026-10-26) | `conditions.holds` |
+| A request whose only value is `""` | `empty_values/*` (2) | It counts as a value under `ForAnyValue`, and as present under `Null` | Adopt. Only `ForAllValues` treats `""` as a null dataset, as AWS documents. Done (2026-10-26) | `conditions.holds`, `conditions._null` |
+| `ForAnyValue…IfExists` on a missing key | `for_any_value_if_exists/key_absent` | ForAnyValue wins: the condition fails | Adopt. Done (2026-10-26) | `conditions.holds` |
+| A set operator on `Null` | `set_operator_on_null/*` (3) | Accepted. With the key present, `ForAllValues:Null` false held. With the key missing, `ForAllValues:Null` false held and `ForAnyValue:Null` true failed | Adopt, settled by the second follow-up: the set operator applies as it does to other operators. On a missing key, `ForAllValues` holds and `ForAnyValue` fails; with the key present, `Null`'s own answer stands. Done (2026-10-26), refusing only `ForAllValues:Null` true when the request's only value is `""`, where the null-dataset rule and Null's own answer disagree | `conditions.parse_operator`, `conditions.holds`, `conditions._null` |
 | A role ARN that matches the caller only if case is ignored | `role_principal_case/role_name_in_lowercase` | Case matters | Keep refusing: a saved policy turns a role ARN into the role's unique ID, which the simulator can't do for an example role | |
 | `NotPrincipal` | `not_principal/*` (3) | Always EXPLICIT_DENY | Keep refusing: the simulator's `NotPrincipal` answers contradict AWS's docs (section 4) | |
 
@@ -539,7 +538,7 @@ other way round: there the docs are right, and the simulator is the one that's o
 
 | AWS's docs say | What the simulator does | Evidence | The analyzer |
 |---|---|---|---|
-| "If you specify an IP address without the associated routing prefix, IAM uses the default prefix value of /32." ([condition operators](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_IPAddress)) | Treats a bare IPv6 address as /128 | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | Will follow the simulator (decided 2026-10-25). /32 only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses |
+| "If you specify an IP address without the associated routing prefix, IAM uses the default prefix value of /32." ([condition operators](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html#Conditions_IPAddress)) | Treats a bare IPv6 address as /128 | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | Follows the simulator since 2026-10-26. /32 only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses |
 | The evaluation table under the `ForAllValues:StringNotLike` example for `aws:ResourceOrgPaths` says the opposite of the operator definitions in all three rows | Follows the definitions | `for_all_values_string_not_like/*` | Follows the definitions (phase 4b) |
 | "In statements where the Effect element has a value of Allow, you can specify only "\*" in the Resource element of an SCP. You can't specify individual resource Amazon Resource Names (ARNs)." ([SCP syntax](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps_syntax.html#scp-syntax-resource)) | Honors a resource ARN, and `NotAction`, in an SCP Allow, as AWS's September 2025 announcement says | `scp_allow_statements/*` | Follows the announcement (since phase 3b) |
 | "Every SCP must include a Version element with the value "2012-10-17"." (same page, whose own examples leave it out) | Accepts SCPs without a `Version` | the `scenarios/scp_*` fixtures, whose `FullAWSAccess` has none | Doesn't require one (since review fix F7) |

@@ -273,6 +273,91 @@ def test_a_bare_ipv4_address_is_a_32():
     assert not applies(condition, {"aws:SourceIp": "203.0.113.6"})
 
 
+# --- Cases AWS's docs leave open, which the IAM policy simulator answered ---------------
+# Each names its fixtures in tests/simulator_fixtures.
+
+
+@pytest.mark.parametrize(
+    "value, just_before, just_after",
+    [
+        # With no time zone, the simulator read each form as UTC (dates_without_a_time_zone/*).
+        ("2026-08-15", "2026-08-14T23:59:59Z", "2026-08-15T00:00:01Z"),
+        ("2026-08", "2026-07-31T23:59:59Z", "2026-08-01T00:00:01Z"),
+        ("2026-08-15T07:30:00", "2026-08-15T07:29:59Z", "2026-08-15T07:30:01Z"),
+        ("2026-08-15T07:30", "2026-08-15T07:29:59Z", "2026-08-15T07:30:01Z"),
+        # Four digits are epoch seconds, not a year: 2026 is 1970-01-01T00:33:46Z.
+        ("2026", "1970-01-01T00:33:45Z", "1970-01-01T00:33:47Z"),
+    ],
+)
+def test_dates_without_a_time_zone_are_utc(value, just_before, just_after):
+    condition = {"DateGreaterThan": {"aws:CurrentTime": value}}
+    assert not applies(condition, {"aws:CurrentTime": just_before})
+    assert applies(condition, {"aws:CurrentTime": just_after})
+
+
+def test_request_dates_are_read_the_same_way():
+    condition = {"DateLessThan": {"aws:CurrentTime": "2026-08-15T00:00:00Z"}}
+    assert applies(condition, {"aws:CurrentTime": "2026-08-14T23:59"})
+    assert not applies(condition, {"aws:CurrentTime": "2026-08-15"})
+
+
+def test_a_bare_ipv6_address_is_a_128():
+    # AWS's default of /32 only fits IPv4 (ip_ranges/bare_ipv6_address*).
+    condition = {"IpAddress": {"aws:SourceIp": "2001:db8::1"}}
+    assert applies(condition, {"aws:SourceIp": "2001:db8::1"})
+    assert not applies(condition, {"aws:SourceIp": "2001:db8::2"})
+
+
+def test_host_bits_in_a_range_are_masked():
+    # 203.0.113.5/24 is 203.0.113.0/24 (ip_ranges/range_with_host_bits).
+    condition = {"IpAddress": {"aws:SourceIp": "203.0.113.5/24"}}
+    assert applies(condition, {"aws:SourceIp": "203.0.113.77"})
+    assert not applies(condition, {"aws:SourceIp": "203.0.114.1"})
+
+
+@pytest.mark.parametrize(
+    "operator",
+    ["StringEquals", "StringNotEquals", "StringEqualsIfExists", "StringNotEqualsIfExists"],
+)
+@pytest.mark.parametrize("tag_keys", [["campus", "grade"], ["grade", "other"]])
+def test_several_values_with_no_set_operator_never_satisfy_string_equals(operator, tag_keys):
+    # Not even StringNotEquals when no value is campus (several_values_without_a_set_operator/*).
+    # IfExists changes nothing, since the key is in the request.
+    assert not applies({operator: {"aws:TagKeys": "campus"}}, {"aws:TagKeys": tag_keys})
+
+
+def test_an_empty_value_counts_under_for_any_value_and_null():
+    # Only ForAllValues treats "" as a null dataset, as AWS documents (empty_values/*).
+    assert applies({"ForAnyValue:StringNotEquals": {"aws:TagKeys": "campus"}}, {"aws:TagKeys": ""})
+    assert not applies({"Null": {"aws:TagKeys": "true"}}, {"aws:TagKeys": ""})
+    assert applies({"Null": {"aws:TagKeys": "false"}}, {"aws:TagKeys": ""})
+
+
+def test_for_any_value_wins_over_if_exists_on_a_missing_key():
+    # for_any_value_if_exists/key_absent
+    assert not applies({"ForAnyValue:StringEqualsIfExists": {"aws:TagKeys": "campus"}},
+                       {"aws:TagKeys": None})
+    assert applies({"ForAllValues:StringEqualsIfExists": {"aws:TagKeys": "campus"}},
+                   {"aws:TagKeys": None})
+
+
+@pytest.mark.parametrize(
+    "condition, tag_keys, expected",
+    [
+        # On a missing key the set operator decides, as with other operators
+        # (set_operator_on_null/*_key_absent). Plain Null would give the opposite answers.
+        ({"ForAllValues:Null": {"aws:TagKeys": "false"}}, None, True),
+        ({"ForAnyValue:Null": {"aws:TagKeys": "true"}}, None, False),
+        # With the key present, Null's own answer stands
+        # (set_operator_on_null/for_all_values_null_false).
+        ({"ForAllValues:Null": {"aws:TagKeys": "false"}}, ["campus"], True),
+        ({"ForAnyValue:Null": {"aws:TagKeys": "true"}}, ["campus"], False),
+    ],
+)
+def test_set_operators_on_null(condition, tag_keys, expected):
+    assert applies(condition, {"aws:TagKeys": tag_keys}) is expected
+
+
 def test_arn_like_checks_the_six_fields_separately():
     lambda_arn = "arn:aws:lambda:us-east-1:111122223333:function:{}"
     # In the resource part, a * matches colons, as in Resource (wildcards_and_colons/arn_like_*).
@@ -359,9 +444,9 @@ def test_for_all_values_treats_an_empty_value_as_no_values():
 
 
 def test_a_refused_condition_does_not_matter_when_another_fails():
-    # aws:TagKeys has two values but no set operator, which AWS doesn't define. The Bool
-    # condition fails, though, so the statement can't apply either way, in either order.
-    several = {"StringEquals": {"aws:TagKeys": "a"}}
+    # aws:TagKeys has two values but no set operator, which nothing settles for StringLike. The
+    # Bool condition fails, though, so the statement can't apply either way, in either order.
+    several = {"StringLike": {"aws:TagKeys": "a*"}}
     https = {"Bool": {"aws:SecureTransport": "true"}}
     entries = {"aws:TagKeys": ["a", "b"], "aws:SecureTransport": "false"}
     assert not applies({**several, **https}, entries)
@@ -376,13 +461,12 @@ def test_a_refused_condition_does_not_matter_when_another_fails():
 @pytest.mark.parametrize(
     "condition, entries, message",
     [
-        ({"StringEquals": {"aws:TagKeys": "a"}}, {"aws:TagKeys": ["a", "b"]},
+        # The simulator only answered this for StringEquals and StringNotEquals.
+        ({"StringLike": {"aws:TagKeys": "a*"}}, {"aws:TagKeys": ["a", "b"]},
          "requires ForAllValues or ForAnyValue"),
-        ({"ForAnyValue:StringEqualsIfExists": {"aws:TagKeys": "a"}}, {"aws:TagKeys": None},
-         "doesn't say which wins"),
-        ({"ForAnyValue:StringEquals": {"aws:TagKeys": "a"}}, {"aws:TagKeys": ""},
-         "only value is empty"),
-        ({"Null": {"aws:TagKeys": "true"}}, {"aws:TagKeys": ""}, "only value is empty"),
+        # ForAllValues holds for a null dataset, but Null counts "" as present.
+        ({"ForAllValues:Null": {"aws:TagKeys": "true"}}, {"aws:TagKeys": ""},
+         "null dataset, but Null counts the key as present"),
     ],
 )
 def test_cases_aws_leaves_open_are_refused(condition, entries, message):
@@ -397,7 +481,8 @@ def test_cases_aws_leaves_open_are_refused(condition, entries, message):
         (HTTP, {"aws:SecureTransport": "True"}, "expected true or false, got 'True'"),
         (SNS_TOPIC, {"aws:SourceArn": "sns-topic"}, "expected an ARN with six fields"),
         (MAX_KEYS, {"s3:max-keys": "ten"}, "expected an integer or decimal"),
-        (FRESH_TOKEN, {"aws:TokenIssueTime": "2026-08-15"}, "without a time and a time zone"),
+        (FRESH_TOKEN, {"aws:TokenIssueTime": "yesterday"}, "expected a date and time"),
+        (FRESH_TOKEN, {"aws:TokenIssueTime": "2026-08-15T07:30:00.5"}, "fractions of a second"),
     ],
 )
 def test_request_values_that_do_not_fit_the_operator(condition, entries, message):
@@ -411,23 +496,18 @@ def test_request_values_that_do_not_fit_the_operator(condition, entries, message
         ({"stringequals": {"aws:x": "a"}}, PolicyParseError, "unknown condition operator"),
         ({"ForSomeValues:StringLike": {"aws:x": "a"}}, PolicyParseError, "unknown condition"),
         ({"NullIfExists": {"aws:x": "true"}}, PolicyParseError, "doesn't allow IfExists on Null"),
-        ({"ForAllValues:Null": {"aws:x": "true"}}, UnsupportedPolicyFeature, "set operator"),
         ({"NumericLessThan": {"s3:max-keys": "ten"}}, PolicyParseError, "integer or decimal"),
-        ({"DateLessThan": {"aws:CurrentTime": "tomorrow"}}, PolicyParseError, "time zone"),
+        ({"DateLessThan": {"aws:CurrentTime": "tomorrow"}}, PolicyParseError, "expected a date"),
+        ({"DateLessThan": {"aws:CurrentTime": "2026-13"}}, PolicyParseError, "expected a date"),
         ({"Bool": {"aws:SecureTransport": "yes"}}, PolicyParseError, "true or false"),
         ({"BinaryEquals": {"key:binary": "not base64!"}}, PolicyParseError, "base64"),
         ({"IpAddress": {"aws:SourceIp": "hello"}}, PolicyParseError, "expected an IP range"),
         ({"NumericLessThan": {"s3:max-keys": "${aws:x}"}}, PolicyParseError,
          "doesn't allow policy variables with Numeric"),
         ({"Null": {"aws:x": "${aws:y}"}}, PolicyParseError, "policy variables with Null"),
-        # AWS's docs leave these open.
-        ({"DateLessThan": {"aws:CurrentTime": "2026-08-15"}}, UnsupportedPolicyFeature,
-         "which moment"),
-        ({"DateLessThan": {"aws:CurrentTime": "2026-08-15T07:30:00"}}, UnsupportedPolicyFeature,
-         "which moment"),
-        ({"DateLessThan": {"aws:CurrentTime": "2026"}}, UnsupportedPolicyFeature, "which moment"),
-        ({"IpAddress": {"aws:SourceIp": "2001:db8::1"}}, UnsupportedPolicyFeature, "fits IPv4"),
-        ({"IpAddress": {"aws:SourceIp": "203.0.113.5/24"}}, UnsupportedPolicyFeature, "host bits"),
+        # Neither AWS's docs nor the simulator settle these.
+        ({"DateLessThan": {"aws:CurrentTime": "2026-08-15T07:30:00.5"}}, UnsupportedPolicyFeature,
+         "fractions of a second and no time zone"),
         ({"ArnLike": {"aws:SourceArn": "arn:aws:sns"}}, UnsupportedPolicyFeature, "six fields"),
     ],
 )

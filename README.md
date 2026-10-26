@@ -592,17 +592,29 @@ The rules follow AWS:
 - A key the request doesn't include: a negated operator holds and any other doesn't. An operator
   ending in `IfExists` holds, and `Null` tests exactly that.
 - `ForAllValues` needs every request value to pass, and also holds when the key is missing.
-  `ForAnyValue` needs at least one. A key with several values in the request needs one of these
-  two set operators.
+  `ForAnyValue` needs at least one, and fails when the key is missing, even with `IfExists` or on
+  `Null`.
 - Policy variables can be used in String and ARN values.
 
 Supported operators: `String(Not)Equals(IgnoreCase)`, `String(Not)Like`, the six `Numeric` and six
 `Date` comparisons, `Bool`, `BinaryEquals`, `(Not)IpAddress`, `Arn(Not)Equals`, `Arn(Not)Like` and
-`Null`. Dates are ISO 8601 date-times with a time zone (`2026-08-15T07:30:00Z`), or epoch seconds.
+`Null`, each with the `ForAllValues` and `ForAnyValue` set operators.
 
-AWS's documentation leaves some cases open, so the analyzer refuses them instead of guessing. For
-example: a date without a time zone, a bare IPv6 address without a prefix, and a request key with
-several values under an operator without `ForAllValues` or `ForAnyValue`.
+Where AWS's documentation leaves a case open, the analyzer does what AWS's IAM policy simulator did
+when it was asked, and refuses otherwise:
+- **Dates:** ISO 8601, such as `2026-08-15T07:30:00Z`, or epoch seconds. With no time zone, a
+  month, a day, or a day and a time to the minute or second is UTC: `2026-08` is midnight UTC on
+  August 1. A number is epoch seconds, four digits included, so `2026` isn't the year. A time with
+  fractions of a second and no time zone is refused.
+- **IP addresses:** a bare address is just that address, `/32` for IPv4 and `/128` for IPv6. A
+  range with host bits set, such as `203.0.113.5/24`, means `203.0.113.0/24`.
+- **Several values with no set operator:** `StringEquals` and `StringNotEquals` never hold. Any
+  other operator is refused.
+- **An empty value:** a request whose only value is `""` has a value, except under
+  `ForAllValues`, which AWS documents treats it as having none. Where those two rules disagree,
+  in `ForAllValues:Null` with `"true"`, the analyzer refuses.
+
+[docs/simulator-check.md](docs/simulator-check.md) has each case with AWS's answer.
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 

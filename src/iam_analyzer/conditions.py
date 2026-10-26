@@ -8,13 +8,15 @@ A statement applies only when every one of its conditions holds. Within one cond
   - A key the request doesn't include: a negated operator holds and any other doesn't, unless
     the operator ends in IfExists (then it holds) or is Null (which tests exactly that).
   - Several values in the request, as aws:TagKeys can have: ForAllValues needs every one to
-    pass, and also holds when the key is missing. ForAnyValue needs at least one.
+    pass, and also holds when the key is missing. ForAnyValue needs at least one, and fails when
+    the key is missing, even with IfExists or on Null. With neither set operator, StringEquals
+    and StringNotEquals never hold, and other operators are refused.
   - Policy variables can be used in the values of String and ARN operators. A value whose
     variable has no value matches nothing (see `variables`), so a negated operator holds. In a
     Bool value, a variable isn't filled in, and the value matches nothing.
 
 Where AWS's documentation leaves a case open, the analyzer refuses (UnsupportedPolicyFeature)
-instead of guessing.
+instead of guessing, unless AWS's IAM policy simulator answered it (tests/simulator_fixtures).
 """
 
 import base64
@@ -43,8 +45,11 @@ class _Undefined(ValueError):
 
 _NUMBER = re.compile(r"[+-]?\d+(\.\d+)?")
 _DATE_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})")
-# W3C's other ISO 8601 forms: a month or a day, with or without a time but with no time zone.
-_ZONELESS_DATE = re.compile(r"\d{4}-\d{2}(-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?)?)?")
+# With no time zone, the forms the IAM policy simulator read as UTC: a month, a day, or a day and
+# a time to the minute or the second.
+_UTC_DATE = re.compile(r"(\d{4})-(\d{2})(?:-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?)?")
+# W3C's one other ISO 8601 form with no time zone: a time with fractions of a second.
+_ZONELESS_FRACTION = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+")
 
 
 def _number(text: str) -> Decimal:
@@ -54,26 +59,33 @@ def _number(text: str) -> Decimal:
 
 
 def _date(text: str) -> datetime:
-    """An ISO 8601 date and time with a time zone, or epoch seconds.
+    """An ISO 8601 date and time, or epoch seconds.
 
-    AWS also accepts a date without a time, a time without a time zone, or just a year or a
-    month, but doesn't say which moment those stand for, so they are refused. So is a
-    four-digit number, which could be a year or epoch seconds.
+    AWS's IAM policy simulator read the W3C forms with no time zone as UTC: 2026-08 is midnight
+    UTC on August 1, 2026-08-15 is midnight UTC that day, and 2026-08-15T07:30 is 07:30:00 UTC. A
+    number is epoch seconds, four digits included: 2026 is 1970-01-01T00:33:46Z, not the year
+    (dates_without_a_time_zone/*). A time with fractions of a second and no time zone wasn't
+    probed, so it is refused.
     """
-    if re.fullmatch(r"\d{4}", text) or _ZONELESS_DATE.fullmatch(text):
+    if _ZONELESS_FRACTION.fullmatch(text):
         raise _Undefined(
-            "AWS doesn't say which moment a date without a time and a time zone stands for; "
-            "give one such as 2026-08-15T00:00:00Z"
+            "AWS doesn't say which moment a time with fractions of a second and no time zone "
+            "stands for; give one such as 2026-08-15T07:30:00.5Z"
         )
     try:
         if text.isdigit():
             return datetime.fromtimestamp(int(text), tz=timezone.utc)
         if _DATE_TIME.fullmatch(text):
             return datetime.fromisoformat(text)
+        utc = _UTC_DATE.fullmatch(text)
+        if utc:
+            year, month, day, hour, minute, second = (int(part or 0) for part in utc.groups())
+            return datetime(year, month, day or 1, hour, minute, second, tzinfo=timezone.utc)
     except (OverflowError, OSError, ValueError):
         pass
     raise ValueError(
-        "expected a date and time with a time zone, such as 2026-08-15T07:30:00Z, or epoch seconds"
+        "expected a date and time such as 2026-08-15T07:30:00Z, a date such as 2026-08-15, or "
+        "epoch seconds"
     )
 
 
@@ -91,32 +103,24 @@ def _binary(text: str) -> bytes:
 
 
 def _network(text: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
-    """A policy's IP range in CIDR form. AWS treats a bare address as a /32."""
-    if "/" not in text:
-        if _address(text, "an IP range such as 203.0.113.0/24").version == 6:
-            raise _Undefined(
-                "AWS's default prefix for a bare address is /32, which only fits IPv4; give this "
-                "IPv6 address its prefix, such as /128"
-            )
-        return ipaddress.ip_network(f"{text}/32")
+    """A policy's IP range in CIDR form.
+
+    A bare address stands for just that address. AWS documents a default prefix of /32, which only
+    fits IPv4, and the IAM policy simulator treated a bare IPv6 address as /128
+    (ip_ranges/bare_ipv6_address*). Host bits are masked, as the simulator did
+    (ip_ranges/range_with_host_bits): 203.0.113.5/24 is 203.0.113.0/24.
+    """
     try:
-        return ipaddress.ip_network(text)
-    except ValueError:
-        pass
-    try:
-        ipaddress.ip_network(text, strict=False)
+        return ipaddress.ip_network(text, strict=False)
     except ValueError:
         raise ValueError("expected an IP range such as 203.0.113.0/24") from None
-    raise _Undefined("the range has host bits set, and AWS doesn't say how it treats that")
 
 
-def _address(
-    text: str, expected: str = "an IP address such as 203.0.113.5"
-) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+def _address(text: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
     try:
         return ipaddress.ip_address(text)
     except ValueError:
-        raise ValueError(f"expected {expected}") from None
+        raise ValueError("expected an IP address such as 203.0.113.5") from None
 
 
 def _arn_fields(template: Template) -> list[Template]:
@@ -320,10 +324,6 @@ def parse_operator(name: str) -> tuple[SetOperator | None, str, bool]:
         raise PolicyParseError(f"unknown condition operator {name!r}")
     if base == "Null" and if_exists:
         raise PolicyParseError(f"{name!r}: AWS doesn't allow IfExists on Null")
-    if base == "Null" and set_operator is not None:
-        raise UnsupportedPolicyFeature(
-            f"{name!r}: AWS doesn't say what a set operator does on Null"
-        )
     return set_operator, base, if_exists
 
 
@@ -377,21 +377,25 @@ def holds(condition: Condition, context: RequestContext, policy_variables: bool)
     op = OPERATORS[condition.operator]
     found = context.get(condition.key)
     where = f"condition {condition.name!r} on {condition.key!r}"
-    any_value = condition.set_operator is SetOperator.FOR_ANY_VALUE
-    if found == ("",) and (op.family is NULL or any_value):
-        raise UnsupportedPolicyFeature(
-            f"{where}: the request's only value is empty, and AWS doesn't say whether "
-            f"{condition.name} treats that as missing"
-        )
+    if found is None and condition.set_operator is not None:
+        # Whatever the operator, ForAllValues holds on a missing key and ForAnyValue doesn't. The
+        # IAM policy simulator showed it for Null (set_operator_on_null/*), and that ForAnyValue
+        # wins over IfExists (for_any_value_if_exists/key_absent).
+        return condition.set_operator is SetOperator.FOR_ALL_VALUES
     if op.family is NULL:
-        return any((found is None) == _bool(value) for value in condition.values)
+        return _null(condition, found, where)
     if found is None:
-        return _missing(condition, op, where)
+        return condition.if_exists or op.negated
     if found == ("",) and condition.set_operator is SetOperator.FOR_ALL_VALUES:
         # AWS: ForAllValues is true when the value "resolves to a null dataset, such as an
-        # empty string".
+        # empty string". Under ForAnyValue, "" is an ordinary value (empty_values/for_any_value).
         return True
     if condition.set_operator is None and len(found) > 1:
+        if condition.operator in ("StringEquals", "StringNotEquals"):
+            # The IAM policy simulator: with several values and no set operator, neither one ever
+            # holds (several_values_without_a_set_operator/*). IfExists changes nothing, since the
+            # key is in the request.
+            return False
         raise UnsupportedPolicyFeature(
             f"{where}: the request gives {condition.key!r} several values, and AWS requires "
             "ForAllValues or ForAnyValue for that"
@@ -413,15 +417,18 @@ def holds(condition: Condition, context: RequestContext, policy_variables: bool)
     return any(passes(text) for text in found)  # ForAnyValue, or the one value
 
 
-def _missing(condition: Condition, op: Operator, where: str) -> bool:
-    """AWS's rules for a condition whose key the request doesn't include."""
-    if condition.if_exists:
-        if condition.set_operator is SetOperator.FOR_ANY_VALUE:
-            raise UnsupportedPolicyFeature(
-                f"{where}: the key is missing, so IfExists says the condition holds and "
-                "ForAnyValue says it doesn't, and AWS doesn't say which wins"
-            )
-        return True
-    if condition.set_operator is not None:
-        return condition.set_operator is SetOperator.FOR_ALL_VALUES
-    return op.negated
+def _null(condition: Condition, found: tuple[str, ...] | None, where: str) -> bool:
+    """Null: true holds when the request doesn't include the key, and false when it does.
+
+    An empty value counts as present (empty_values/null_true). With a set operator, a missing key
+    is decided before this, and when the key is present, Null's own answer stands
+    (set_operator_on_null/for_all_values_null_false).
+    """
+    present = found is not None
+    result = any(present != _bool(value) for value in condition.values)
+    if not result and found == ("",) and condition.set_operator is SetOperator.FOR_ALL_VALUES:
+        raise UnsupportedPolicyFeature(
+            f"{where}: the request's only value is empty. ForAllValues holds for that null "
+            "dataset, but Null counts the key as present, and AWS doesn't say which wins"
+        )
+    return result
