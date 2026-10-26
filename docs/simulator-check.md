@@ -12,16 +12,17 @@ rounds.
 - **Engine changes:** the differences below were decided on 2026-10-25, and a third round of
   probes on 2026-10-26 settled the questions still open (see
   [Differences and decisions](#differences-and-decisions)). Since 2026-10-26 the engine follows
-  differences 1, 3 and 4. The refusals in section 5 come next.
+  differences 1, 3 and 4, and the policy-variable rows of section 5. The rest of section 5
+  comes next.
 
 ## Summary
 
 | Verdict | Cases | Meaning |
 |---|---|---|
-| agrees | 70 | Both sides gave the same answer. |
+| agrees | 84 | Both sides gave the same answer. |
 | differs | 0 | A real mismatch. |
 | simulator limit | 9 | AWS documents a behavior that the simulator doesn't follow. |
-| analyzer refuses | 42 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
+| analyzer refuses | 28 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
 | can't express | 4 | The simulator can't be given the case faithfully. |
 
 - **Calibration passed:**
@@ -267,20 +268,20 @@ The tables come from `python -m simulator_check.report`:
 
 | Case | Analyzer | Simulator | Verdict | Missing context values | Matched | Details |
 |---|---|---|---|---|---|---|
-| `variables_without_a_value/allow_control` | refused | IMPLICIT_DENY | analyzer refuses | aws:PrincipalTag/team | - | - |
-| `variables_without_a_value/deny_not_resource` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
-| `variables_with_several_values/condition_string_equals` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `variables_with_several_values/condition_string_not_equals_deny` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
-| `variables_with_several_values/first_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `variables_with_several_values/not_resource_on_a_value` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
-| `variables_with_several_values/not_resource_on_another_bucket` | refused | EXPLICIT_DENY | analyzer refuses | - | PolicyInputList.2 | - |
-| `variables_with_several_values/second_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `variables_with_wildcards/condition_star_in_a_default` | refused | IMPLICIT_DENY | analyzer refuses | aws:PrincipalTag/team | - | - |
-| `variables_with_wildcards/condition_star_in_a_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `variables_with_wildcards/star_in_a_default` | refused | IMPLICIT_DENY | analyzer refuses | aws:PrincipalTag/team | - | - |
-| `variables_with_wildcards/star_in_a_value` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `bool_with_a_variable/mfa_false` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
-| `bool_with_a_variable/mfa_true` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
+| `variables_without_a_value/allow_control` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | aws:PrincipalTag/team | - | - |
+| `variables_without_a_value/deny_not_resource` | EXPLICIT_DENY | EXPLICIT_DENY | agrees | - | PolicyInputList.2 | - |
+| `variables_with_several_values/condition_string_equals` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `variables_with_several_values/condition_string_not_equals_deny` | EXPLICIT_DENY | EXPLICIT_DENY | agrees | - | PolicyInputList.2 | - |
+| `variables_with_several_values/first_value` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `variables_with_several_values/not_resource_on_a_value` | EXPLICIT_DENY | EXPLICIT_DENY | agrees | - | PolicyInputList.2 | - |
+| `variables_with_several_values/not_resource_on_another_bucket` | EXPLICIT_DENY | EXPLICIT_DENY | agrees | - | PolicyInputList.2 | - |
+| `variables_with_several_values/second_value` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `variables_with_wildcards/condition_star_in_a_default` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | aws:PrincipalTag/team | - | - |
+| `variables_with_wildcards/condition_star_in_a_value` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `variables_with_wildcards/star_in_a_default` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | aws:PrincipalTag/team | - | - |
+| `variables_with_wildcards/star_in_a_value` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `bool_with_a_variable/mfa_false` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
+| `bool_with_a_variable/mfa_true` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
 | `dates_without_a_time_zone/date_only_just_after_midnight_utc` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
 | `dates_without_a_time_zone/date_only_just_before_midnight_utc` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `dates_without_a_time_zone/four_digits` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
@@ -507,15 +508,15 @@ quote and the link.
 
 ### 5. Refusals that AWS answered (41 cases)
 Each row is a case the analyzer refuses because AWS's docs don't settle it, with what the
-simulator answered and the decision. "Adopt" means the engine will give the simulator's answer
-instead of refusing. Each adopted row names its fixtures.
+simulator answered and the decision. "Adopt" means the engine gives the simulator's answer
+instead of refusing, once the row says "Done". Each adopted row names its fixtures.
 
 | Refusal | Cases | The simulator | Decision | Code |
 |---|---|---|---|---|
-| A policy variable with no value | `variables_without_a_value/*` (2) | It matches nothing: a Deny with `NotResource` applied, and an Allow didn't. The "Policy variables with no value" section says the same | Adopt | `variables._value` |
-| A variable from a multivalued key | `variables_with_several_values/*` (6) | In `Resource`, neither value was used. In `NotResource`, the Deny covered every bucket, including the one named after a value. In a condition value (third follow-up), `StringEquals` failed for a value of the key, and a `StringNotEquals` Deny applied to one | Adopt, settled by the second and third follow-ups: it matches nothing, as a variable with no value does, in `Resource`, `NotResource` and condition values | `variables._value` |
-| A `*` in a variable's value or default | `variables_with_wildcards/*` (4) | A literal `*`, in `Resource` and, in the third follow-up, in a `StringLike` value | Adopt: a filled-in value is plain text, in `Resource` and in condition values | `variables._value`, `variables.parse` |
-| A policy variable in a `Bool` value | `bool_with_a_variable/*` (2) | Not filled in, so the condition fails. AWS accepts the policy | Adopt: the text stays as written, as the policy variables page says | `conditions.check` |
+| A policy variable with no value | `variables_without_a_value/*` (2) | It matches nothing: a Deny with `NotResource` applied, and an Allow didn't. The "Policy variables with no value" section says the same | Adopt. Done (2026-10-26) | `variables.resolve`, `evaluator._resource_patterns`, `conditions.holds` |
+| A variable from a multivalued key | `variables_with_several_values/*` (6) | In `Resource`, neither value was used. In `NotResource`, the Deny covered every bucket, including the one named after a value. In a condition value (third follow-up), `StringEquals` failed for a value of the key, and a `StringNotEquals` Deny applied to one | Adopt, settled by the second and third follow-ups: it matches nothing, as a variable with no value does, in `Resource`, `NotResource` and condition values. Done (2026-10-26). Such a variable with a default is still refused, since nothing probed it | `variables._value` |
+| A `*` in a variable's value or default | `variables_with_wildcards/*` (4) | A literal `*`, in `Resource` and, in the third follow-up, in a `StringLike` value | Adopt: a filled-in value is plain text, in `Resource` and in condition values. Done (2026-10-26) | `variables._value`, `variables.parse` |
+| A policy variable in a `Bool` value | `bool_with_a_variable/*` (2) | Not filled in, so the condition fails. AWS accepts the policy | Adopt: the text stays as written, as the policy variables page says. Done (2026-10-26) | `conditions.check`, `conditions._bool_value` |
 | A date with no time or no zone | `dates_without_a_time_zone/*` (9) | `2026-08-15` is midnight UTC; `2026-08` is midnight UTC on the 1st; a time with no zone is UTC, with seconds (`07:30:00`) or without (`07:30`); `2026` is epoch seconds | Adopt exactly these forms. `2026-08` and the time without seconds were settled by the follow-up probes. Keep refusing any other form, such as fractional seconds with no zone | `conditions._date` |
 | A range with host bits set | `ip_ranges/range_with_host_bits` | The host bits are masked | Adopt | `conditions._network` |
 | A bare IPv6 address | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | It covers itself but not `2001:db8::2`: /128 | Adopt /128. AWS's "default prefix value of /32" only makes sense for IPv4, since a /32 in IPv6 covers 2^96 addresses: a doc mismatch (section 6) | `conditions._network` |

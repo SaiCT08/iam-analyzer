@@ -88,13 +88,14 @@ def test_context_types_come_from_the_operators_that_read_the_keys():
 
 
 def test_a_key_the_analyzer_cant_type_needs_context_types():
-    # The analyzer refuses a Bool value with a policy variable, so it can't read the key's type.
-    bool_variable = {"Bool": {"aws:SecureTransport": "${aws:MultiFactorAuthPresent}"}}
-    context = {"aws:SecureTransport": "true", "aws:MultiFactorAuthPresent": "true"}
+    # The analyzer refuses an ARN operator value with fewer than six fields, so it can't read the
+    # key's type.
+    short_arn = {"ArnLike": {"aws:SourceArn": "arn:aws:sns"}}
+    context = {"aws:SourceArn": "arn:aws:sns:us-east-1:111122223333:district-alerts"}
     with pytest.raises(ValueError, match="give its type in context_types"):
-        requests_for(with_condition(bool_variable, context=context))
-    types = {"aws:SecureTransport": "boolean", "aws:MultiFactorAuthPresent": "boolean"}
-    assert requests_for(with_condition(bool_variable, context=context, context_types=types))
+        requests_for(with_condition(short_arn, context=context))
+    types = {"aws:SourceArn": "string"}
+    assert requests_for(with_condition(short_arn, context=context, context_types=types))
 
 
 def test_absent_keys_are_left_out_of_the_call():

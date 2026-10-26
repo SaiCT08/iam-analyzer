@@ -9,7 +9,9 @@ A statement applies only when every one of its conditions holds. Within one cond
     the operator ends in IfExists (then it holds) or is Null (which tests exactly that).
   - Several values in the request, as aws:TagKeys can have: ForAllValues needs every one to
     pass, and also holds when the key is missing. ForAnyValue needs at least one.
-  - Policy variables can be used in the values of String and ARN operators.
+  - Policy variables can be used in the values of String and ARN operators. A value whose
+    variable has no value matches nothing (see `variables`), so a negated operator holds. In a
+    Bool value, a variable isn't filled in, and the value matches nothing.
 
 Where AWS's documentation leaves a case open, the analyzer refuses (UnsupportedPolicyFeature)
 instead of guessing.
@@ -164,8 +166,9 @@ class _Family:
     name: str
     # Checks a policy value when the policy is loaded. Raises ValueError or _Undefined.
     check: Callable[[str, bool], object]
-    # Turns a policy value into what the operator compares. String and ARN values can hold
-    # policy variables, so they are only ready once the request context is known.
+    # Turns a policy value into what the operator compares, or None when it matches nothing.
+    # String and ARN values can hold policy variables, so they are only ready once the request
+    # context is known.
     policy_value: Callable[[str, RequestContext, bool], Any]
     # Turns a request value into what the operator compares. Raises ValueError.
     request_value: Callable[[str], Any]
@@ -185,22 +188,38 @@ def _plain(name: str, read: Callable[[str], Any]) -> _Family:
     )
 
 
-def _string_pattern(value: str, context: RequestContext, policy_variables: bool) -> Pattern:
+def _string_pattern(value: str, context: RequestContext, policy_variables: bool) -> Pattern | None:
     if not policy_variables:
         return value
     return variables.resolve(variables.parse(value), context)
 
 
-def _arn_pattern(value: str, context: RequestContext, policy_variables: bool) -> list[Pattern]:
+def _arn_pattern(
+    value: str, context: RequestContext, policy_variables: bool
+) -> list[Pattern] | None:
     fields = _arn_fields(_template(value, policy_variables))
-    return [variables.resolve(field, context) for field in fields]
+    patterns = [variables.resolve(field, context) for field in fields]
+    return None if any(pattern is None for pattern in patterns) else patterns
+
+
+def _bool_value(value: str, context: RequestContext, policy_variables: bool) -> bool | None:
+    """A Bool policy value. AWS doesn't fill in a policy variable there: the text stays as
+    written, so it is neither true nor false and matches nothing (bool_with_a_variable/*)."""
+    if policy_variables and "${" in value:
+        return None
+    return _bool(value)
 
 
 STRING = _Family("String", check=_template, policy_value=_string_pattern, request_value=str)
 ARN = _Family("ARN", check=_check_arn, policy_value=_arn_pattern, request_value=_arn)
 NUMERIC = _plain("Numeric", _number)
 DATE = _plain("Date", _date)
-BOOL = _plain("Bool", _bool)
+BOOL = _Family(
+    "Bool",
+    check=lambda value, policy_variables: _bool(value),
+    policy_value=_bool_value,
+    request_value=_bool,
+)
 BINARY = _plain("Binary", _binary)
 NULL = _plain("Null", _bool)
 IP_ADDRESS = _Family(
@@ -319,10 +338,9 @@ def check(condition: Condition, policy_variables: bool) -> None:
     for value in condition.values:
         if policy_variables and "${" in value and not family.takes_variables:
             if family is BOOL:
-                raise UnsupportedPolicyFeature(
-                    f"{where}: AWS's condition operators page says Bool takes policy variables, "
-                    "but its policy variables page says it doesn't"
-                )
+                # AWS accepts this, but doesn't fill the variable in: the IAM policy simulator
+                # treated the text as written (bool_with_a_variable/*). It matches nothing.
+                continue
             raise PolicyParseError(
                 f"{where}: AWS doesn't allow policy variables with {family.name} operators"
             )
@@ -379,7 +397,9 @@ def holds(condition: Condition, context: RequestContext, policy_variables: bool)
             "ForAllValues or ForAnyValue for that"
         )
 
-    policy = [op.family.policy_value(v, context, policy_variables) for v in condition.values]
+    filled = [op.family.policy_value(v, context, policy_variables) for v in condition.values]
+    # A value that matches nothing drops out. If none is left, a negated operator holds.
+    policy = [value for value in filled if value is not None]
 
     def passes(text: str) -> bool:
         try:

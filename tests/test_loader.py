@@ -196,7 +196,13 @@ def test_both_policy_language_versions_are_accepted():
 
 @pytest.mark.parametrize("key", ["Resource", "NotResource"])
 @pytest.mark.parametrize(
-    "variable", ["${aws:username}", "${*}", "${aws:PrincipalTag/team, 'staff'}"]
+    "variable",
+    [
+        "${aws:username}",
+        "${*}",
+        "${aws:PrincipalTag/team, 'staff'}",
+        "${aws:PrincipalTag/team, 'team-*'}",  # the * is literal when the default is used
+    ],
 )
 def test_policy_variables_are_read_with_version_2012_10_17(key, variable):
     resource = f"arn:aws:s3:::home/{variable}/*"
@@ -239,11 +245,6 @@ def test_policy_variables_are_plain_text_without_version_2012_10_17(version):
             "'NotResource' entry 'arn:aws:s3:\\$\\{\\*\\}::b': policy variables can only be used",
         ),
         ({**READ, "Action": "s3:${aws:username}"}, PolicyParseError, "can't be used in actions"),
-        (
-            {**READ, "Resource": "arn:aws:s3:::b/${aws:PrincipalTag/team, 'team-*'}"},
-            UnsupportedPolicyFeature,
-            "contains \\* or \\?",
-        ),
     ],
 )
 def test_invalid_policy_variables_are_refused(statement, error, message):

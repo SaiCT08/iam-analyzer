@@ -39,9 +39,10 @@ def test_malformed_variables_are_refused(text):
         parse(text)
 
 
-def test_a_wildcard_in_a_default_is_refused():
-    with pytest.raises(UnsupportedPolicyFeature, match="contains \\* or \\?"):
-        parse("${aws:PrincipalTag/team, 'team-*'}")
+def test_a_wildcard_in_a_default_is_literal():
+    # As AWS's IAM policy simulator showed (variables_with_wildcards/star_in_a_default).
+    template = parse("${aws:PrincipalTag/team, 'team-*'}")
+    assert resolve(template, JSMITH) == (("team-*", True),)
 
 
 def test_resolve_fills_in_values_and_defaults():
@@ -73,13 +74,30 @@ def test_an_unknown_key_is_missing_context():
 
 
 @pytest.mark.parametrize(
-    "context, message",
+    "context",
     [
-        (RequestContext.of(absent=["aws:username"]), "has no value in this request"),
-        (RequestContext.of([("aws:username", "a"), ("aws:username", "b")]), "several values"),
-        (RequestContext.of([("aws:username", "j*")]), "contains \\* or \\?"),
+        RequestContext.of(absent=["aws:username"]),  # no value, and no default
+        RequestContext.of([("aws:username", "a"), ("aws:username", "b")]),  # several values
     ],
 )
-def test_values_aws_does_not_define_are_refused(context, message):
+def test_a_variable_without_one_value_matches_nothing(context):
+    # The fixtures: variables_without_a_value and variables_with_several_values.
+    assert resolve(parse(f"{HOME}${{aws:username}}/*"), context) is None
+
+
+def test_a_wildcard_in_a_value_is_literal():
+    # As AWS's IAM policy simulator showed (variables_with_wildcards/star_in_a_value).
+    context = RequestContext.of([("aws:username", "j*")])
+    assert resolve(parse(f"{HOME}${{aws:username}}/*"), context) == (
+        (HOME, False),
+        ("j*", True),
+        ("/*", False),
+    )
+
+
+def test_several_values_with_a_default_are_refused():
+    # AWS may treat several values as no value, which would use the default.
+    context = RequestContext.of([("aws:TagKeys", "a"), ("aws:TagKeys", "b")])
+    message = "\\$\\{aws:TagKeys, 'none'\\}: the request gives 'aws:TagKeys' several values"
     with pytest.raises(UnsupportedPolicyFeature, match=message):
-        resolve(parse(f"{HOME}${{aws:username}}/*"), context)
+        resolve(parse("${aws:TagKeys, 'none'}"), context)

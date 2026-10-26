@@ -319,16 +319,17 @@ def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
 
 
 def test_a_role_has_no_user_name(capsys, tmp_path):
-    # AWS's docs disagree on a variable with no value, so the analyzer refuses.
+    # So ${aws:username} has no value, and the resource with it matches nothing.
     path = account_file(tmp_path, {"AccountId": "111122223333",
                                    "Policies": {"ChangeOwnPassword": OWN_PASSWORD},
                                    "Roles": {"Helper": {"Policies": ["ChangeOwnPassword"]}}})
-    code, out, err = run(capsys, "--account", path, "--principal", "role/Helper",
-                         "--action", "iam:ChangePassword",
-                         "--resource", "arn:aws:iam::111122223333:user/jsmith")
-    assert code == EXIT_INPUT_ERROR
-    assert out == ""
-    assert "ChangeOwnPassword statement 0: policy variable '${aws:username}' has no value" in err
+    code, out, _ = run(capsys, "--account", path, "--principal", "role/Helper",
+                       "--action", "iam:ChangePassword",
+                       "--resource", "arn:aws:iam::111122223333:user/jsmith")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "IMPLICIT_DENY", "  No identity policy allows this; access is denied by default."
+    ]
 
 
 def test_wildcard_action_is_refused(capsys):
@@ -417,11 +418,11 @@ def test_context_gives_a_key_its_value(capsys):
     assert code == EXIT_DENIED
 
 
-def test_absent_key_with_no_default_is_refused(capsys):
-    code, _, err = run(capsys, "--policy", HOME_FOLDER, NO_RESOURCE_POLICY,
+def test_an_absent_key_with_no_default_matches_nothing(capsys):
+    code, out, _ = run(capsys, "--policy", HOME_FOLDER, NO_RESOURCE_POLICY,
                        "--action", "s3:PutObject", "--resource", LESSON, "--absent", "aws:username")
-    assert code == EXIT_INPUT_ERROR
-    assert "policy variable '${aws:username}' has no value in this request" in err
+    assert code == EXIT_DENIED
+    assert out.splitlines()[0] == "IMPLICIT_DENY"
 
 
 @pytest.mark.parametrize("value", ["aws:username", "=jsmith"])

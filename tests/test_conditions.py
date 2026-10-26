@@ -302,6 +302,50 @@ def test_a_literal_star_in_string_like():
     assert not applies(condition, {"s3:prefix": "reports/2026"})
 
 
+def test_a_variable_with_no_value_matches_nothing():
+    # AWS's "Policy variables with no value": "StringEquals or StringLike do not match", and
+    # "Inverted condition operators like StringNotEquals or StringNotLike do match against a null
+    # value".
+    no_team = {"aws:PrincipalTag/Team": None, "s3:ExistingObjectTag/Team": "red"}
+    assert applies(SAME_TEAM, no_team)  # AWS's example Deny: "Access is explicitly denied"
+    same = {"StringEquals": {"s3:ExistingObjectTag/Team": "${aws:PrincipalTag/Team}"}}
+    assert not applies(same, no_team)
+    # The other values still count.
+    assert applies(HOME_PREFIX, {"aws:username": None, "s3:prefix": "home/"})
+    assert not applies(HOME_PREFIX, {"aws:username": None, "s3:prefix": "home/jsmith/"})
+    # In ARN operators too.
+    other_teams = {"ArnNotLike": {"aws:SourceArn": "arn:aws:s3:::teams-${aws:PrincipalTag/Team}/*"}}
+    source = "arn:aws:s3:::teams-red/x"
+    assert applies(other_teams, {"aws:PrincipalTag/Team": None, "aws:SourceArn": source})
+
+
+def test_a_variable_from_a_key_with_several_values_matches_nothing():
+    # As AWS's IAM policy simulator showed (variables_with_several_values/condition_*).
+    tags = {"aws:TagKeys": ["blue", "red"]}
+    tagged = "${aws:TagKeys}"
+    assert not applies({"StringEquals": {"s3:prefix": tagged}}, {**tags, "s3:prefix": "blue"})
+    assert applies({"StringNotEquals": {"s3:prefix": tagged}}, {**tags, "s3:prefix": "red"})
+
+
+def test_a_star_filled_in_from_a_variable_is_literal():
+    # As AWS's IAM policy simulator showed (variables_with_wildcards/condition_*).
+    from_value = {"StringLike": {"s3:prefix": "${aws:PrincipalTag/team}/"}}
+    assert not applies(from_value, {"aws:PrincipalTag/team": "b*", "s3:prefix": "blue/"})
+    assert applies(from_value, {"aws:PrincipalTag/team": "b*", "s3:prefix": "b*/"})
+    from_default = {"StringLike": {"s3:prefix": "${aws:PrincipalTag/team, 'class-of-*'}/"}}
+    assert not applies(from_default, {"aws:PrincipalTag/team": None, "s3:prefix": "class-of-2026/"})
+
+
+def test_a_variable_in_a_bool_value_stays_as_written():
+    # AWS accepts it but doesn't fill it in, so the value is neither true nor false and never
+    # matches (bool_with_a_variable/*).
+    condition = {"Bool": {"aws:SecureTransport": "${aws:MultiFactorAuthPresent}"}}
+    assert not applies(condition, {"aws:SecureTransport": "true"})
+    assert not applies(condition, {"aws:SecureTransport": "false"})
+    # A missing key still passes BoolIfExists.
+    assert applies({"BoolIfExists": condition["Bool"]}, {"aws:SecureTransport": None})
+
+
 def test_without_version_2012_10_17_variables_are_plain_text():
     condition = {"StringEquals": {"aws:PrincipalTag/team": "${aws:username}"}}
     assert applies(condition, {"aws:PrincipalTag/team": "${aws:username}"}, version=None)
@@ -339,10 +383,6 @@ def test_a_refused_condition_does_not_matter_when_another_fails():
         ({"ForAnyValue:StringEquals": {"aws:TagKeys": "a"}}, {"aws:TagKeys": ""},
          "only value is empty"),
         ({"Null": {"aws:TagKeys": "true"}}, {"aws:TagKeys": ""}, "only value is empty"),
-        # AWS's docs disagree on a variable with no value.
-        (SAME_TEAM, {"aws:PrincipalTag/Team": None, "s3:ExistingObjectTag/Team": "red"},
-         "has no value in this request"),
-        (HOME_PREFIX, {"aws:username": None, "s3:prefix": "home/"}, "has no value in this request"),
     ],
 )
 def test_cases_aws_leaves_open_are_refused(condition, entries, message):
@@ -381,8 +421,6 @@ def test_request_values_that_do_not_fit_the_operator(condition, entries, message
          "doesn't allow policy variables with Numeric"),
         ({"Null": {"aws:x": "${aws:y}"}}, PolicyParseError, "policy variables with Null"),
         # AWS's docs leave these open.
-        ({"Bool": {"aws:SecureTransport": "${aws:x}"}}, UnsupportedPolicyFeature,
-         "Bool takes policy variables, but its policy variables page"),
         ({"DateLessThan": {"aws:CurrentTime": "2026-08-15"}}, UnsupportedPolicyFeature,
          "which moment"),
         ({"DateLessThan": {"aws:CurrentTime": "2026-08-15T07:30:00"}}, UnsupportedPolicyFeature,
@@ -391,8 +429,6 @@ def test_request_values_that_do_not_fit_the_operator(condition, entries, message
         ({"IpAddress": {"aws:SourceIp": "2001:db8::1"}}, UnsupportedPolicyFeature, "fits IPv4"),
         ({"IpAddress": {"aws:SourceIp": "203.0.113.5/24"}}, UnsupportedPolicyFeature, "host bits"),
         ({"ArnLike": {"aws:SourceArn": "arn:aws:sns"}}, UnsupportedPolicyFeature, "six fields"),
-        ({"StringLike": {"s3:prefix": "${aws:username, 'x*'}"}}, UnsupportedPolicyFeature,
-         "contains \\* or \\?"),
     ],
 )
 def test_values_refused_when_the_policy_loads(condition, error, message):

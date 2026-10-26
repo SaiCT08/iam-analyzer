@@ -449,12 +449,17 @@ def _matching(
 
 
 def _resource_patterns(statement: Statement, context: RequestContext) -> Sequence[Pattern]:
-    """The statement's resource patterns, with any policy variables filled in."""
+    """The statement's resource patterns, with any policy variables filled in.
+
+    A pattern with a variable that has no value matches nothing (see `variables`), so it is left
+    out: a Resource with only such patterns covers nothing, and a NotResource excludes nothing.
+    """
     if not statement.policy_variables:
         return statement.resources
     templates = [variables.parse(resource) for resource in statement.resources]
     _require([key for template in templates for key in variables.keys(template)], context)
-    return [variables.resolve(template, context) for template in templates]
+    patterns = [variables.resolve(template, context) for template in templates]
+    return [pattern for pattern in patterns if pattern is not None]
 
 
 def _require(keys: Iterable[str], context: RequestContext) -> None:

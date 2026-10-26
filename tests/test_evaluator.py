@@ -467,11 +467,32 @@ def test_keys_are_only_needed_when_the_action_matches():
     assert check(home_request("jsmith"), [p]).decision is Decision.ALLOW
 
 
-def test_a_variable_with_no_value_is_refused_naming_the_statement():
-    p = versioned("home", allow("s3:GetObject", OWN_HOME, sid="Own"))
-    message = r"^home statement 0 \(Sid=Own\): policy variable '\$\{aws:username\}' has no value"
-    with pytest.raises(UnsupportedPolicyFeature, match=message):
-        check(home_request("jsmith", absent=["aws:username"]), [p])
+def test_a_variable_with_no_value_matches_nothing():
+    # AWS: "the resource that includes a policy variable with no value will not match any
+    # resource" (variables_without_a_value/*).
+    no_user = home_request("jsmith", absent=["aws:username"])
+    own = versioned("home", allow("s3:GetObject", OWN_HOME, sid="Own"))
+    assert check(no_user, [own]).decision is Decision.IMPLICIT_DENY
+    # So a NotResource with it excludes nothing, and the Deny applies.
+    others = versioned("others", statement("Deny", Action="s3:GetObject", NotResource=OWN_HOME))
+    result = check(no_user, [BROAD_S3, others])
+    assert result.decision is Decision.EXPLICIT_DENY
+
+
+def test_a_variable_from_a_key_with_several_values_matches_nothing():
+    # As AWS's IAM policy simulator showed (variables_with_several_values/*).
+    two_users = home_request("jsmith", [("aws:username", "jsmith"), ("aws:username", "mgarcia")])
+    own = versioned("home", allow("s3:GetObject", OWN_HOME))
+    assert check(two_users, [own]).decision is Decision.IMPLICIT_DENY
+
+
+def test_a_star_in_a_variables_value_is_literal():
+    # As AWS's IAM policy simulator showed (variables_with_wildcards/star_in_a_value).
+    own = versioned("home", allow("s3:GetObject", OWN_HOME))
+    assert check(home_request("jsmith", [("aws:username", "j*")]), [own]).decision is (
+        Decision.IMPLICIT_DENY
+    )
+    assert check(home_request("j*", [("aws:username", "j*")]), [own]).decision is Decision.ALLOW
 
 
 def test_without_variables_the_context_is_never_read():

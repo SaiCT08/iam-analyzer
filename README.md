@@ -529,10 +529,21 @@ is. A session tag can't remove one of the role's tags, so `--absent` is refused 
 trust policy can rule session tags out, and then no flag is needed (see
 [Trust policies](#trust-policies)).
 
-AWS's documentation doesn't settle a few cases, so the analyzer refuses them:
-- A variable with no value and no default, such as `${aws:username}` for a role. A default, as in
-  `${aws:PrincipalTag/team, 'company-wide'}`, is used when the key is absent.
-- A key with several values, or a value that contains `*` or `?`.
+A default, as in `${aws:PrincipalTag/team, 'company-wide'}`, is used when the key is absent.
+Without one, the variable has no value, as `${aws:username}` has for a role. AWS says such a
+variable matches nothing, and the analyzer agrees:
+- In `Resource`, the ARN with it covers no resource. In `NotResource`, it excludes nothing, so a
+  Deny with it applies.
+- In a condition, `StringEquals` and `StringLike` don't match it, while `StringNotEquals` and
+  `StringNotLike` do.
+
+Where AWS's docs leave a case open, AWS's IAM policy simulator answered it, and the analyzer does
+the same:
+- A variable whose key has several values, such as `aws:TagKeys`, matches nothing too. If it has a
+  default, the analyzer refuses, since nothing settles whether the default is used.
+- A `*` or `?` filled in from a value or a default is a literal character, not a wildcard.
+- In a `Bool` value, a variable isn't filled in. The value stays as written, so it matches
+  nothing.
 
 As AWS requires, a variable can only appear in the resource part of an ARN, after the fifth colon.
 Without `"Version": "2012-10-17"`, AWS treats `${...}` as plain text, and so does the analyzer.
@@ -590,9 +601,8 @@ Supported operators: `String(Not)Equals(IgnoreCase)`, `String(Not)Like`, the six
 `Null`. Dates are ISO 8601 date-times with a time zone (`2026-08-15T07:30:00Z`), or epoch seconds.
 
 AWS's documentation leaves some cases open, so the analyzer refuses them instead of guessing. For
-example: a date without a time zone, a bare IPv6 address without a prefix, a policy variable in a
-`Bool` value (two AWS pages disagree), and a request key with several values under an operator
-without `ForAllValues` or `ForAnyValue`.
+example: a date without a time zone, a bare IPv6 address without a prefix, and a request key with
+several values under an operator without `ForAllValues` or `ForAnyValue`.
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 
