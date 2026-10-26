@@ -32,6 +32,22 @@
         }
       },
       "context": {"aws:SourceIp": "203.0.113.77"}
+    },
+    {
+      "name": "bare_ipv6_address_itself",
+      "description": "Follow-up: IpAddress 2001:db8::1, for a request from 2001:db8::1 itself.",
+      "readings": {
+        "ALLOW": "a bare IPv6 address covers itself: with bare_ipv6_address, that fits /128",
+        "IMPLICIT_DENY": "a bare IPv6 address matches nothing"
+      },
+      "policies": {
+        "from_one_address.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"IpAddress": {"aws:SourceIp": "2001:db8::1"}}}]
+        }
+      },
+      "context": {"aws:SourceIp": "2001:db8::1"}
     }
   ]
 }

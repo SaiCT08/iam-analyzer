@@ -1,23 +1,24 @@
 # Checking the analyzer against AWS's IAM policy simulator
 
-Recorded on 2026-10-25. For 98 cases, the analyzer and AWS's IAM policy simulator
+Recorded on 2026-10-25. For 107 cases, the analyzer and AWS's IAM policy simulator
 (`iam:SimulateCustomPolicy`) were given the same policies and the same request, and their answers
-were compared.
+were compared. The cases are 98 from the first run and 9 follow-up probes recorded the same day.
 - **Fixtures:** each request and AWS's raw response is a fixture in
   [`tests/simulator_fixtures`](../tests/simulator_fixtures), with AWS's request IDs and the date.
 - **Offline replay:** [`tests/test_simulator_fixtures.py`](../tests/test_simulator_fixtures.py)
   replays the fixtures without AWS, so the comparison keeps running after the AWS account is
   closed.
-- **No engine changes:** the differences below are still open.
+- **No engine changes:** the differences below were decided on 2026-10-25 (see
+  [Differences and decisions](#differences-and-decisions)). The engine changes come later.
 
 ## Summary
 
 | Verdict | Cases | Meaning |
 |---|---|---|
-| agrees | 56 | Both sides gave the same answer. |
-| differs | 9 | A real mismatch. |
-| simulator limit | 6 | AWS documents a behavior that the simulator doesn't follow. |
-| analyzer refuses | 27 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
+| agrees | 57 | Both sides gave the same answer. |
+| differs | 8 | A real mismatch. |
+| simulator limit | 9 | AWS documents a behavior that the simulator doesn't follow. |
+| analyzer refuses | 33 | AWS answered a case the analyzer refuses because AWS's docs don't settle it. |
 | can't express | 4 | The simulator can't be given the case faithfully. |
 
 - **Calibration passed:**
@@ -45,6 +46,7 @@ were compared.
   - doesn't complete short ARNs;
   - doesn't exempt service-linked roles from SCPs;
   - doesn't limit a grant to a role ARN by that role's boundary;
+  - treats naming the account as a grant to everyone in it;
   - denies a principal that `NotPrincipal` names.
 
 ## How the check works
@@ -184,8 +186,8 @@ So reading (a) holds. Trust policies are out either way.
     when a policy is saved.
   - Neither side models S3 Block Public Access or ACLs.
 
-The six simulator limits below are differences found in this check. Each quotes the AWS
-documentation that the simulator doesn't follow.
+The nine simulator limits under [Differences and decisions](#differences-and-decisions) were found
+in this check. Each quotes the AWS documentation that the simulator doesn't follow.
 
 ## Results
 
@@ -224,6 +226,8 @@ The tables come from `python -m simulator_check.report`:
 | `wildcards_and_colons/s3_key_colon_mid_segment_star_deny` | ALLOW | EXPLICIT_DENY | differs | - | PolicyInputList.2 | - |
 | `wildcards_and_colons/s3_key_colon_question_mark` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/s3_key_question_mark_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/short_pattern_star_across_fields` | IMPLICIT_DENY | ALLOW | simulator limit | - | PolicyInputList.1 | - |
+| `wildcards_and_colons/star_ending_the_region_field` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `wildcards_and_colons/string_like_crosses_colons` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 
 ### Part 2. ForAllValues:StringNotLike
@@ -238,7 +242,8 @@ The tables come from `python -m simulator_check.report`:
 
 | Case | Analyzer | Simulator | Verdict | Missing context values | Matched | Details |
 |---|---|---|---|---|---|---|
-| `star_grant_and_boundary/account_principal` | IMPLICIT_DENY | ALLOW | differs | - | PolicyInputList.1, ResourcePolicy | AllowedByPermissionsBoundary: False |
+| `star_grant_and_boundary/account_principal` | IMPLICIT_DENY | ALLOW | simulator limit | - | PolicyInputList.1, ResourcePolicy | AllowedByPermissionsBoundary: False |
+| `star_grant_and_boundary/account_principal_without_identity_allow` | IMPLICIT_DENY | ALLOW | simulator limit | - | ResourcePolicy | AllowedByPermissionsBoundary: False |
 | `star_grant_and_boundary/aws_star_principal` | ALLOW | ALLOW | agrees | - | ResourcePolicy | AllowedByPermissionsBoundary: False |
 | `star_grant_and_boundary/star_principal` | ALLOW | ALLOW | agrees | - | ResourcePolicy | AllowedByPermissionsBoundary: False |
 | `star_grant_and_boundary/star_principal_no_boundary_control` | ALLOW | ALLOW | agrees | - | ResourcePolicy | - |
@@ -260,14 +265,20 @@ The tables come from `python -m simulator_check.report`:
 | `dates_without_a_time_zone/date_only_just_after_midnight_utc` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
 | `dates_without_a_time_zone/date_only_just_before_midnight_utc` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `dates_without_a_time_zone/four_digits` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/month_only_just_after_midnight_utc` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/month_only_just_before_midnight_utc` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `dates_without_a_time_zone/time_without_a_zone_just_after` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
 | `dates_without_a_time_zone/time_without_a_zone_just_before` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
+| `dates_without_a_time_zone/time_without_seconds_just_after` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
+| `dates_without_a_time_zone/time_without_seconds_just_before` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `ip_ranges/bare_ipv6_address` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
+| `ip_ranges/bare_ipv6_address_itself` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
 | `ip_ranges/range_with_host_bits` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
 | `short_arns_in_arn_operators/four_fields_ending_in_star` | refused | rejected | analyzer refuses | - | - | - |
 | `short_arns_in_arn_operators/three_fields` | refused | rejected | analyzer refuses | - | - | - |
 | `several_values_without_a_set_operator/string_equals` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `several_values_without_a_set_operator/string_not_equals` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
+| `several_values_without_a_set_operator/string_not_equals_neither_matches` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `empty_values/for_any_value` | refused | ALLOW | analyzer refuses | - | PolicyInputList.1 | - |
 | `empty_values/null_true` | refused | IMPLICIT_DENY | analyzer refuses | - | - | - |
 | `for_any_value_if_exists/key_absent` | refused | IMPLICIT_DENY | analyzer refuses | aws:TagKeys | - | - |
@@ -335,11 +346,15 @@ The tables come from `python -m simulator_check.report`:
 | `scenarios/teacher_can_read_roster` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `scenarios/teacher_cannot_write_roster` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | - |
 
-## Open differences
+## Differences and decisions
 
-This section covers every case marked `differs`, `simulator limit` or `analyzer refuses`. For
-each there is the evidence, the options, a recommendation, and the code a change would touch.
-The engine hasn't changed.
+This section covers every case marked `differs`, `simulator limit` or `analyzer refuses`, and the
+decision for each, made on 2026-10-25. The engine hasn't changed yet.
+
+The decisions follow the project's rule for AWS's docs:
+- where AWS's docs clearly settle a question, the analyzer follows them, even when the simulator
+  disagrees;
+- where they contradict each other or don't say, a recorded simulator answer can settle it.
 
 ### 1. Wildcards match colons in the resource part of an ARN (7 cases, differs)
 - **What the simulator did:**
@@ -369,16 +384,22 @@ The engine hasn't changed.
     let them. That's the unsafe direction.
   - In one it misses a `Deny`, such as `arn:aws:s3:::district-logs/*.json` on keys with colons,
     so it reports access AWS would deny. That's wrong too, but it errs on the safe side.
-- **Options:**
-  - **(a)** Follow the simulator. Split an ARN at its first five colons only, and let `*` and `?`
-    match any character in the resource part, colons included.
-  - **(b)** Keep today's rule.
-  - **(c)** Refuse a request whose answer depends on a wildcard matching a colon in the resource
-    part.
-- **Recommendation: (a).** Two AWS pages are consistent with it, the simulator shows it seven
-  times, and today's rule misses Allows, the unsafe direction.
-  - **Not probed:** whether a wildcard in one of the first five fields can run on into the next.
-    That's a follow-up probe below.
+- **Decision:** follow the simulator. Split an ARN at its first five colons, and let `*` and `?`
+  match colons in the resource part, in `Resource` and `ArnLike`.
+- **What the follow-up probes add, for planning the change:**
+  - **The documented rule must be kept.** In `star_ending_the_region_field`, the pattern
+    `arn:aws:lambda:*:function:billing:canary` matched an alias in us-east-1, because the `*` that
+    ends the region field ran on through the account field.
+    - AWS documents this: "If the `*` wildcard is the last character of a resource ARN segment, it
+      can expand to match beyond the colon boundaries". The analyzer does it today.
+    - Splitting at the first five colons alone would stop it. The project's rule says to follow the
+      docs here, so the engine change has to keep this rule.
+  - **A short pattern doesn't settle fields 1–5.** In `short_pattern_star_across_fields`, the
+    simulator let the `*` in `arn:aws:sqs:us-*-alerts` run across fields. That's only because it
+    doesn't complete short ARNs, which is a simulator limit (section 4).
+    - So it's still unprobed whether a `*` in the middle of one of the first five fields can cross
+      a colon in a full ARN. A pattern such as `arn:aws:lambda:us-*3:function:billing:canary`
+      would tell.
 - **Code:**
   - `matching.py`: the segmented mode of `_compile`, and the module docstring;
   - `conditions._arn_like`, which already splits six fields but then segments each one;
@@ -387,106 +408,95 @@ The engine hasn't changed.
     (`test_arn_wildcards_follow_the_resource_segment_rule`);
   - the README's Status section.
 
-### 2. A bucket policy naming the account, with a boundary that doesn't allow (1 case, differs)
-- **What the simulator did:** `star_grant_and_boundary/account_principal` is a read by kwong.
-  - The identity policy allows it.
-  - The boundary allows only `ec2:*`.
-  - The bucket policy names account 111122223333.
-
-  The simulator: allowed, with the identity policy and the bucket policy both matched, and
-  `AllowedByPermissionsBoundary` false. The analyzer: IMPLICIT_DENY.
-- **What AWS says:** [Principal element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html#principal-accounts):
-  "This delegates authority to the account." Nothing says whether the boundary then limits the
-  request.
-- **Options:**
-  - **(a)** Keep the judgment call: naming the account delegates to the identity policies, which
-    the boundary limits.
-  - **(b)** Follow the simulator: a grant to the account isn't limited by the boundary.
-  - **(c)** Refuse, since the docs don't say.
-- **Recommendation:** first run the follow-up probe below: the same bucket policy with no identity
-  policy that allows the read.
-  - If the simulator still allows it, it treats naming the account as a grant to everyone in the
-    account. That contradicts "delegates authority to the account", so this case would be a
-    simulator limit, and (a) stands.
-  - Until then, keep (a).
-- **Code:** `evaluator._needed` and `models.PrincipalMatch.direct`.
+### 2. A bucket policy naming the account (2 cases, simulator limit)
+- **What the simulator did:**
+  - `star_grant_and_boundary/account_principal`: the identity policy allows kwong's read, the
+    boundary allows only `ec2:*`, and the bucket policy names account 111122223333. Answer: ALLOW,
+    with `AllowedByPermissionsBoundary` false.
+  - `star_grant_and_boundary/account_principal_without_identity_allow`, the follow-up probe: the
+    same, but no identity policy allows the read. Answer: still ALLOW.
+- **So:** the simulator treats naming the account as a grant to everyone in it. AWS says it
+  "delegates authority to the account"
+  ([Principal element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html#principal-accounts)).
+- **Decision:** a simulator limit, since the follow-up came back ALLOW. The analyzer's
+  reading stands: naming the account delegates to the identity policies, which the boundary
+  limits. No engine change.
 
 ### 3. A short ARN in an SCP (1 case, differs)
-- **What the simulator did:** `scp_short_arn/short_arn_in_an_scp_deny` has an SCP that denies
-  `s3:*` on `arn:aws:s3`. The simulator allowed the read; the analyzer completes the ARN and
-  denies.
+- **What the simulator did:** in `scp_short_arn/short_arn_in_an_scp_deny`, an SCP denies `s3:*` on
+  `arn:aws:s3`. The simulator allowed the read; the analyzer completes the ARN and denies.
 - **Why this is weak evidence:** the simulator doesn't complete short ARNs in identity-based
-  policies either, where AWS documents that it should (simulator limits, below).
+  policies either, where AWS documents that it should (section 4).
 - **What AWS says:** completion is documented only "in an identity-based policy"
   ([ARNs](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html#arns-paths-wildcards)).
-- **Options:**
-  - **(a)** Keep completing short ARNs in every layer, as today.
-  - **(b)** Refuse a short ARN in an SCP or a resource-based policy, as the project's rule says to do when
-    the docs don't settle a case. A boundary is an identity-based policy, so it keeps
-    completion.
-- **Recommendation: (b).** The simulator can't settle the question.
-- **Code:** `matching._complete_arn` is shared by every layer, so the loader or the evaluator
-  would need to know the policy's kind. The organization loader would load SCPs with
+- **Decision:**
+  - Refuse a short ARN in an SCP or a resource-based policy.
+  - Keep completing short ARNs in identity-based policies, as AWS documents. A boundary is an
+    identity-based policy.
+- **Code:** `matching._complete_arn` is shared by every layer, so the loader or the evaluator will
+  need to know the policy's kind. The organization loader would load SCPs with
   `kind=PolicyType.SCP`.
 
-### 4. Simulator limits (6 cases)
-In each case, AWS documents a behavior that the simulator doesn't follow.
-`verdicts.json` keeps the quote and the link.
+### 4. Simulator limits (9 cases)
+In each case, AWS documents a behavior that the simulator doesn't follow. `verdicts.json` keeps the
+quote and the link.
 
 | Case | AWS documents | The simulator |
 |---|---|---|
-| `scenarios/incomplete_arn_allow_is_completed_with_wildcards`, `scenarios/incomplete_arn_is_completed_with_wildcards` | "When you specify an incomplete ARN (one with fewer than the standard six fields) in an identity-based policy, AWS automatically completes the ARN by adding wildcard characters (\*) to all missing fields. For example, specifying arn:aws:sqs is equivalent to arn:aws:sqs:\*:\*:\*" ([ARNs](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html#arns-paths-wildcards)) | doesn't complete them |
+| `scenarios/incomplete_arn_allow_is_completed_with_wildcards`, `scenarios/incomplete_arn_is_completed_with_wildcards`, `wildcards_and_colons/short_pattern_star_across_fields` | "When you specify an incomplete ARN (one with fewer than the standard six fields) in an identity-based policy, AWS automatically completes the ARN by adding wildcard characters (\*) to all missing fields. For example, specifying arn:aws:sqs is equivalent to arn:aws:sqs:\*:\*:\*" ([ARNs](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference-arns.html#arns-paths-wildcards)) | doesn't complete them, and then globs across fields |
 | `scenarios/bucket_policy_role_grant_is_limited_by_the_boundary` | "Resource-based policies that grant permissions to an IAM role ARN are limited by an implicit deny in a permissions boundary or session policy." ([evaluation logic](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-denyallow.html)) | allows the grant to the role although its boundary doesn't |
+| `star_grant_and_boundary/account_principal`, `star_grant_and_boundary/account_principal_without_identity_allow` | "This delegates authority to the account." ([Principal element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html#principal-accounts)) | treats naming the account as a grant to everyone in it |
 | `scenarios/scp_skips_service_linked_role` | "SCPs do not affect any service-linked role." ([SCPs](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scps.html#scp-effects-on-permissions)) | applies the SCPs to a service-linked role |
 | `not_principal/names_the_account_and_the_caller` | "The NotPrincipal element uses "Effect":"Deny" to deny access to all principals except the principal specified in the NotPrincipal element." ([NotPrincipal](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_notprincipal.html)) | denies kwong although the element names kwong and kwong's account, as AWS recommends |
 | `list_all_my_buckets/allowed_on_every_bucket_arn` | "The AllowS3ListRead statement in this policy allows Carlos to view a list of all of the buckets in the account." That statement allows `s3:ListAllMyBuckets` on `arn:aws:s3:::*`. ([evaluation example](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-basics.html#reference_policies_evaluation-logic_policies_evaluation_example)) | denies, because it matches the request as `*` |
 
-- **Recommendation for the first four rows:** no change. The analyzer already does what AWS
-  documents, and the fixtures keep the evidence.
-- **`ListAllMyBuckets` (review open question 3):** both sides deny, but that's not agreement. The
-  analyzer's answer also contradicts AWS's example. Options:
-  - **(a)** Keep it.
-  - **(b)** Match a request on `*`, for an action with no resource type, against patterns like
-    `arn:aws:s3:::*`. That needs the Service Authorization Reference's list of such actions.
-  - **(c)** Refuse a request on `*` whose answer depends on a statement with a resource ARN.
+**Decision:**
+- No engine change for these. The analyzer already does what AWS documents, and the fixtures keep
+  the evidence.
+- `ListAllMyBuckets` (review open question 3) is the exception. Both sides deny, but the
+  analyzer's answer contradicts AWS's example too. So the analyzer will refuse a request on `*`
+  whose answer depends on a statement with a resource ARN. Code: `evaluator.statement_matches`
+  and `_applies`.
 
-  **Recommendation: (c),** until there's a way to check how real requests match. Code:
-  `evaluator.statement_matches` and `_applies`.
+### 5. Refusals that AWS answered (33 cases)
+Each row is a case the analyzer refuses because AWS's docs don't settle it, with what the
+simulator answered and the decision. "Adopt" means the engine will give the simulator's answer
+instead of refusing. Each adopted row names its fixtures.
 
-### 5. Refusals that AWS answered (27 cases)
-Each row is a case the analyzer refuses because AWS's docs don't settle it, and what the
-simulator answered.
-
-| Refusal | Cases | The simulator | Recommendation | Code |
+| Refusal | Cases | The simulator | Decision | Code |
 |---|---|---|---|---|
-| A policy variable with no value | 2 | It matches nothing: a Deny with `NotResource` applied, and an Allow didn't | Adopt "matches nothing". The "Policy variables with no value" section says the same | `variables._value` |
-| A variable from a multivalued key | 2 | Neither value was used | Keep refusing: the probes only covered an Allow | `variables._value` |
-| A `*` in a variable's value or default | 2 | A literal `*` | Adopt: a filled-in value is plain text | `variables._value`, `variables.parse` |
-| A policy variable in a `Bool` value | 2 | Not filled in, so the condition fails. AWS accepts the policy | Adopt the policy variables page: the text stays as written | `conditions.check` |
-| A date with no time or no zone | 5 | `2026-08-15` is midnight UTC, a time with no zone is UTC, and `2026` is epoch seconds | Adopt for those forms. Keep refusing the unprobed forms, such as `2026-08` and `2026-08-15T07:30` | `conditions._date` |
-| A bare IPv6 address; a range with host bits set | 2 | Not /32, consistent with /128; the host bits are masked | Adopt masking. Probe a bare IPv6 address against itself before adopting /128 | `conditions._network` |
-| An ARN operator value with fewer than six fields | 2 | AWS rejects the simulation (`InvalidInput`), though `GetContextKeysForCustomPolicy` accepts the policy | Keep refusing: AWS can't evaluate it either | none |
-| Several request values with no set operator | 2 | IMPLICIT_DENY for both `StringEquals` and `StringNotEquals` | Keep refusing: this fits ForAllValues and also never matching. A follow-up probe tells them apart | `conditions.holds` |
-| A request whose only value is `""` | 2 | It counts as a value under `ForAnyValue`, and as present under `Null` | Adopt. Only `ForAllValues` treats `""` as a null dataset, as AWS documents | `conditions.holds` |
-| `ForAnyValue…IfExists` on a missing key | 1 | ForAnyValue wins: the condition fails | Adopt | `conditions._missing` |
-| A set operator on `Null` | 1 | Accepted. With the key present, `Null` false held | Keep refusing: one probe can't show what the set operator does | `conditions.parse_operator` |
-| A role ARN that matches the caller only if case is ignored | 1 | Case matters | Keep refusing: a saved policy turns a role ARN into the role's unique ID, which the simulator can't do for an example role | `principals._match` |
-| `NotPrincipal` | 3 | Always EXPLICIT_DENY | Keep refusing: the simulator's `NotPrincipal` answers contradict AWS's docs (simulator limits) | `loader._principals` |
+| A policy variable with no value | `variables_without_a_value/*` (2) | It matches nothing: a Deny with `NotResource` applied, and an Allow didn't. The "Policy variables with no value" section says the same | Adopt | `variables._value` |
+| A variable from a multivalued key | `variables_with_several_values/*` (2) | Neither value was used | Keep refusing | |
+| A `*` in a variable's value or default | `variables_with_wildcards/*` (2) | A literal `*` | Adopt: a filled-in value is plain text | `variables._value`, `variables.parse` |
+| A policy variable in a `Bool` value | `bool_with_a_variable/*` (2) | Not filled in, so the condition fails. AWS accepts the policy | Adopt: the text stays as written, as the policy variables page says | `conditions.check` |
+| A date with no time or no zone | `dates_without_a_time_zone/*` (9) | `2026-08-15` is midnight UTC; `2026-08` is midnight UTC on the 1st; a time with no zone is UTC, with seconds (`07:30:00`) or without (`07:30`); `2026` is epoch seconds | Adopt exactly these forms. `2026-08` and the time without seconds were settled by the follow-up probes. Keep refusing any other form, such as fractional seconds with no zone | `conditions._date` |
+| A range with host bits set | `ip_ranges/range_with_host_bits` | The host bits are masked | Adopt | `conditions._network` |
+| A bare IPv6 address | `ip_ranges/bare_ipv6_address`, `ip_ranges/bare_ipv6_address_itself` | It covers itself but not `2001:db8::2`: /128 | Adopt /128, settled by the follow-up probe. This conflicts with the literal text: "If you specify an IP address without the associated routing prefix, IAM uses the default prefix value of /32". The analyzer reads that as IPv4-only, which is why it refused | `conditions._network` |
+| An ARN operator value with fewer than six fields | `short_arns_in_arn_operators/*` (2) | AWS rejects the simulation (`InvalidInput`), though `GetContextKeysForCustomPolicy` accepts the policy | Keep refusing | |
+| Several request values with no set operator | `several_values_without_a_set_operator/*` (3) | Never a match: IMPLICIT_DENY for `StringEquals` and `StringNotEquals`, even when no value is `campus` | Adopt for those two operators, settled by the follow-up probe: the condition doesn't hold. Keep refusing other operators | `conditions.holds` |
+| A request whose only value is `""` | `empty_values/*` (2) | It counts as a value under `ForAnyValue`, and as present under `Null` | Adopt. Only `ForAllValues` treats `""` as a null dataset, as AWS documents | `conditions.holds` |
+| `ForAnyValue…IfExists` on a missing key | `for_any_value_if_exists/key_absent` | ForAnyValue wins: the condition fails | Adopt | `conditions._missing` |
+| A set operator on `Null` | `set_operator_on_null/for_all_values_null_false` | Accepted. With the key present, `Null` false held | Keep refusing: one probe can't show what the set operator does | |
+| A role ARN that matches the caller only if case is ignored | `role_principal_case/role_name_in_lowercase` | Case matters | Keep refusing: a saved policy turns a role ARN into the role's unique ID, which the simulator can't do for an example role | |
+| `NotPrincipal` | `not_principal/*` (3) | Always EXPLICIT_DENY | Keep refusing: the simulator's `NotPrincipal` answers contradict AWS's docs (section 4) | |
 
 AWS's NotPrincipal page also warns that "The `NotPrincipal` element with a `Deny` effect will always
 deny any IAM principal that has a permissions boundary policy attached, regardless of the values
 specified in the `NotPrincipal` element". That belongs in phase 6's list of findings.
 
-## Follow-up probes
-None of these has been run. Each one needs another call to AWS.
-- **The account as principal, with no identity policy that allows the read.** Decides difference 2.
-- **A `*` that would have to run from the region field into the account field**, such as
-  `arn:aws:sqs:us-*-alerts` against a full queue ARN. Shows whether wildcards cross colons only in
-  the resource part (difference 1).
-- **A bare IPv6 address against itself**, to settle /128.
-- **`StringNotEquals` on `aws:TagKeys` with [grade, other]**, which tells ForAllValues apart from
-  never matching.
-- **A month-only date (`2026-08`), and a time without seconds.**
+## Follow-up probes (recorded 2026-10-25)
+
+| Probe | Fixtures | The simulator | What it settled |
+|---|---|---|---|
+| The account as principal, with no identity policy that allows the read | `star_grant_and_boundary/account_principal_without_identity_allow` | ALLOW | Difference 2 is a simulator limit |
+| A `*` running across fields | `wildcards_and_colons/short_pattern_star_across_fields`, `wildcards_and_colons/star_ending_the_region_field` | ALLOW, ALLOW | A `*` that ends one of the first five fields runs on, as documented; a short pattern runs across fields only because the simulator doesn't complete it |
+| A bare IPv6 address against itself | `ip_ranges/bare_ipv6_address_itself` | ALLOW | /128 |
+| `StringNotEquals` on `aws:TagKeys` with [grade, other] | `several_values_without_a_set_operator/string_not_equals_neither_matches` | IMPLICIT_DENY | Several values with no set operator never match |
+| A month-only date, and a time without seconds | `dates_without_a_time_zone/month_only_*`, `dates_without_a_time_zone/time_without_seconds_*` | ALLOW just after, IMPLICIT_DENY just before | Midnight UTC at the start of the month; `07:30` is 07:30:00 UTC |
+
+**Still unprobed:** a `*` in the middle of one of the first five fields of a full ARN (difference
+1), a multivalued variable in `NotResource`, and what a set operator does on `Null`. Each needs
+another call to AWS.
 
 ## Recording again
 Recording calls AWS, through the `iam-simulator` profile.

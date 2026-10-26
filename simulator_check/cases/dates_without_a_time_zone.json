@@ -71,6 +71,58 @@
         }
       },
       "context": {"aws:CurrentTime": "2000-01-01T00:00:00Z"}
+    },
+    {
+      "name": "month_only_just_after_midnight_utc",
+      "description": "Follow-up: DateGreaterThan 2026-08, one second after midnight UTC on August 1.",
+      "readings": {"ALLOW": "consistent with midnight UTC at the start of the month", "IMPLICIT_DENY": "a later moment"},
+      "policies": {
+        "after_the_month.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-01T00:00:01Z"}
+    },
+    {
+      "name": "month_only_just_before_midnight_utc",
+      "description": "Follow-up: DateGreaterThan 2026-08, one second before midnight UTC on August 1.",
+      "readings": {"IMPLICIT_DENY": "consistent with midnight UTC at the start of the month", "ALLOW": "an earlier moment"},
+      "policies": {
+        "after_the_month.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-07-31T23:59:59Z"}
+    },
+    {
+      "name": "time_without_seconds_just_after",
+      "description": "Follow-up: DateGreaterThan 2026-08-15T07:30, with no seconds and no time zone, one second after 07:30 UTC.",
+      "readings": {"ALLOW": "consistent with 07:30:00 UTC", "IMPLICIT_DENY": "a later moment"},
+      "policies": {
+        "after_the_minute.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08-15T07:30"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-15T07:30:01Z"}
+    },
+    {
+      "name": "time_without_seconds_just_before",
+      "description": "Follow-up: DateGreaterThan 2026-08-15T07:30, with no seconds and no time zone, one second before 07:30 UTC.",
+      "readings": {"IMPLICIT_DENY": "consistent with 07:30:00 UTC", "ALLOW": "an earlier moment"},
+      "policies": {
+        "after_the_minute.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-student-records/*",
+                         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2026-08-15T07:30"}}}]
+        }
+      },
+      "context": {"aws:CurrentTime": "2026-08-15T07:29:59Z"}
     }
   ]
 }

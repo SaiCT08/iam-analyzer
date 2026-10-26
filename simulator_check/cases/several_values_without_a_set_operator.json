@@ -30,6 +30,22 @@
                          "Condition": {"StringNotEquals": {"aws:TagKeys": "campus"}}}]
         }
       }
+    },
+    {
+      "name": "string_not_equals_neither_matches",
+      "description": "Follow-up: StringNotEquals aws:TagKeys campus, for a request that adds the tags grade and other, neither of them campus.",
+      "readings": {
+        "ALLOW": "it acts like ForAllValues: no value is campus. string_equals and string_not_equals already ruled out ForAnyValue",
+        "IMPLICIT_DENY": "a key with several values never matches without a set operator"
+      },
+      "context": {"aws:TagKeys": ["grade", "other"]},
+      "policies": {
+        "tag_anything_but_campus.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "ec2:CreateTags", "Resource": "*",
+                         "Condition": {"StringNotEquals": {"aws:TagKeys": "campus"}}}]
+        }
+      }
     }
   ]
 }

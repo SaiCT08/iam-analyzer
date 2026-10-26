@@ -1,0 +1,100 @@
+{
+  "case": "several_values_without_a_set_operator/string_not_equals_neither_matches",
+  "source": "simulator_check/cases/several_values_without_a_set_operator.json",
+  "question": "How does an operator without ForAllValues or ForAnyValue treat a key with several values? AWS says such keys need a set operator, but not what happens without one. The analyzer refuses.",
+  "description": "Follow-up: StringNotEquals aws:TagKeys campus, for a request that adds the tags grade and other, neither of them campus.",
+  "readings": {
+    "ALLOW": "it acts like ForAllValues: no value is campus. string_equals and string_not_equals already ruled out ForAnyValue",
+    "IMPLICIT_DENY": "a key with several values never matches without a set operator"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-26T03:50:07Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:CreateTags\",\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"StringNotEquals\": {\n          \"aws:TagKeys\": \"campus\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "aws:TagKeys"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "67bf1e2d-1397-4559-8985-388e9f125fce",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Mon, 26 Oct 2026 03:50:07 GMT",
+            "x-amzn-requestid": "67bf1e2d-1397-4559-8985-388e9f125fce",
+            "content-type": "text/xml",
+            "content-length": "399"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "67bf1e2d-1397-4559-8985-388e9f125fce",
+      "http_date": "Mon, 26 Oct 2026 03:50:07 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>aws:TagKeys</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>67bf1e2d-1397-4559-8985-388e9f125fce</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"ec2:CreateTags\",\n      \"Resource\": \"*\",\n      \"Condition\": {\n        \"StringNotEquals\": {\n          \"aws:TagKeys\": \"campus\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "ec2:CreateTags"
+      ],
+      "ResourceArns": [
+        "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:TagKeys",
+          "ContextKeyValues": [
+            "grade",
+            "other"
+          ],
+          "ContextKeyType": "stringList"
+        }
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "ec2:CreateTags",
+          "EvalResourceName": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890",
+          "EvalDecision": "implicitDeny",
+          "MatchedStatements": [],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890",
+              "EvalResourceDecision": "implicitDeny"
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "74e9e058-221c-475b-bd00-abe411c15bb4",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Mon, 26 Oct 2026 03:50:07 GMT",
+          "x-amzn-requestid": "74e9e058-221c-475b-bd00-abe411c15bb4",
+          "content-type": "text/xml",
+          "content-length": "998"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "74e9e058-221c-475b-bd00-abe411c15bb4",
+    "http_date": "Mon, 26 Oct 2026 03:50:07 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements/>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890</EvalResourceName>\n        <EvalActionName>ec2:CreateTags</EvalActionName>\n        <EvalDecision>implicitDeny</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <EvalResourceDecision>implicitDeny</EvalResourceDecision>\n            <EvalResourceName>arn:aws:ec2:us-east-1:111122223333:instance/i-0abc1234def567890</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>74e9e058-221c-475b-bd00-abe411c15bb4</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

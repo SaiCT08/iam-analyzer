@@ -209,6 +209,36 @@
       },
       "context": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary-prod"},
       "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "short_pattern_star_across_fields",
+      "description": "Follow-up: arn:aws:sqs:us-*-alerts has four fields, so its * would have to run from the region field through the account field to match a full queue ARN.",
+      "readings": {
+        "ALLOW": "the * runs across fields, as a glob over the whole ARN would",
+        "IMPLICIT_DENY": "it stays in its field, or the short pattern is completed with * fields first, as AWS documents"
+      },
+      "policies": {
+        "alerts_queues.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-*-alerts"}]
+        }
+      },
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "star_ending_the_region_field",
+      "description": "Follow-up: a six-field pattern whose * ends the region field, against a Lambda alias. It matches only if that * runs on through the account field.",
+      "readings": {
+        "ALLOW": "a * that ends one of the first five fields runs on into the next, as AWS documents for a * that ends a segment",
+        "IMPLICIT_DENY": "it stays in its own field"
+      },
+      "policies": {
+        "invoke_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:*:function:billing:canary"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
     }
   ]
 }

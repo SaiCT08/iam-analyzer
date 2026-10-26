@@ -84,6 +84,18 @@
         "Version": "2012-10-17",
         "Statement": [{"Sid": "EveryoneReads", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
       }
+    },
+    {
+      "name": "account_principal_without_identity_allow",
+      "description": "Follow-up to account_principal: the account as the principal, but no identity policy allows the read. The boundary still allows only ec2:*.",
+      "readings": {
+        "ALLOW": "the simulator treats naming the account as a grant to everyone in it, which contradicts \"delegates authority to the account\": account_principal is then a simulator limit",
+        "IMPLICIT_DENY": "naming the account needs an identity policy that allows, as delegation means"
+      },
+      "resource_policy": {
+        "Version": "2012-10-17",
+        "Statement": [{"Sid": "AccountReads", "Effect": "Allow", "Principal": {"AWS": "111122223333"}, "Action": "s3:GetObject", "Resource": "arn:aws:s3:::district-kwong-files/*"}]
+      }
     }
   ]
 }
