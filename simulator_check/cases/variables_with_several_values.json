@@ -60,6 +60,44 @@
         }
       },
       "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-green/handbook.pdf"}
+    },
+    {
+      "name": "condition_string_equals",
+      "description": "Third follow-up: the same variable in a condition value. StringEquals s3:prefix ${aws:TagKeys}, listing the prefix blue, the first value.",
+      "readings": {
+        "ALLOW": "a value of the key is used, so blue matches",
+        "IMPLICIT_DENY": "the variable matches nothing, as in Resource, or only red is used; with condition_string_not_equals_deny, this tells them apart"
+      },
+      "policies": {
+        "list_tagged_prefix.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::district-teams",
+                         "Condition": {"StringEquals": {"s3:prefix": "${aws:TagKeys}"}}}]
+        }
+      },
+      "context": {"aws:TagKeys": ["blue", "red"], "s3:prefix": "blue"},
+      "request": {"action": "s3:ListBucket", "resource": "arn:aws:s3:::district-teams"}
+    },
+    {
+      "name": "condition_string_not_equals_deny",
+      "description": "Third follow-up: a Deny with StringNotEquals s3:prefix ${aws:TagKeys}, under an Allow for all of S3, listing the prefix red, the second value.",
+      "readings": {
+        "EXPLICIT_DENY": "the variable matches nothing, so StringNotEquals holds, as AWS documents for a variable with no value; or only blue is used",
+        "ALLOW": "a value of the key is used, so red matches; or the statement is dropped"
+      },
+      "policies": {
+        "broad_s3.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]
+        },
+        "only_tagged_prefixes.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Deny", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::district-teams",
+                         "Condition": {"StringNotEquals": {"s3:prefix": "${aws:TagKeys}"}}}]
+        }
+      },
+      "context": {"aws:TagKeys": ["blue", "red"], "s3:prefix": "red"},
+      "request": {"action": "s3:ListBucket", "resource": "arn:aws:s3:::district-teams"}
     }
   ]
 }

@@ -1,0 +1,137 @@
+{
+  "case": "variables_with_several_values/condition_string_not_equals_deny",
+  "source": "simulator_check/cases/variables_with_several_values.json",
+  "question": "What does AWS do with a policy variable whose key has several values? AWS says \"You can't use a multivalued condition key as a variable\", but not what happens if a policy does. The analyzer refuses.",
+  "description": "Third follow-up: a Deny with StringNotEquals s3:prefix ${aws:TagKeys}, under an Allow for all of S3, listing the prefix red, the second value.",
+  "readings": {
+    "EXPLICIT_DENY": "the variable matches nothing, so StringNotEquals holds, as AWS documents for a variable with no value; or only blue is used",
+    "ALLOW": "a value of the key is used, so red matches; or the statement is dropped"
+  },
+  "documented": null,
+  "recorded_at": "2026-10-26T20:27:19Z",
+  "absent": [],
+  "context_keys": [
+    {
+      "request": {
+        "PolicyInputList": [
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+          "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Deny\",\n      \"Action\": \"s3:ListBucket\",\n      \"Resource\": \"arn:aws:s3:::district-teams\",\n      \"Condition\": {\n        \"StringNotEquals\": {\n          \"s3:prefix\": \"${aws:TagKeys}\"\n        }\n      }\n    }\n  ]\n}"
+        ]
+      },
+      "response": {
+        "ContextKeyNames": [
+          "s3:prefix",
+          "aws:TagKeys"
+        ],
+        "ResponseMetadata": {
+          "RequestId": "34822b70-eb8a-49c5-b25a-23d800dc6841",
+          "HTTPStatusCode": 200,
+          "HTTPHeaders": {
+            "date": "Mon, 26 Oct 2026 20:27:19 GMT",
+            "x-amzn-requestid": "34822b70-eb8a-49c5-b25a-23d800dc6841",
+            "content-type": "text/xml",
+            "content-length": "432"
+          },
+          "RetryAttempts": 0
+        }
+      },
+      "error": null,
+      "request_id": "34822b70-eb8a-49c5-b25a-23d800dc6841",
+      "http_date": "Mon, 26 Oct 2026 20:27:19 GMT",
+      "raw_body": "<GetContextKeysForCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <GetContextKeysForCustomPolicyResult>\n    <ContextKeyNames>\n      <member>s3:prefix</member>\n      <member>aws:TagKeys</member>\n    </ContextKeyNames>\n  </GetContextKeysForCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>34822b70-eb8a-49c5-b25a-23d800dc6841</RequestId>\n  </ResponseMetadata>\n</GetContextKeysForCustomPolicyResponse>\n"
+    }
+  ],
+  "simulate": {
+    "request": {
+      "PolicyInputList": [
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": \"s3:*\",\n      \"Resource\": \"*\"\n    }\n  ]\n}",
+        "{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Deny\",\n      \"Action\": \"s3:ListBucket\",\n      \"Resource\": \"arn:aws:s3:::district-teams\",\n      \"Condition\": {\n        \"StringNotEquals\": {\n          \"s3:prefix\": \"${aws:TagKeys}\"\n        }\n      }\n    }\n  ]\n}"
+      ],
+      "CallerArn": "arn:aws:iam::111122223333:user/jsmith",
+      "ActionNames": [
+        "s3:ListBucket"
+      ],
+      "ResourceArns": [
+        "arn:aws:s3:::district-teams"
+      ],
+      "ContextEntries": [
+        {
+          "ContextKeyName": "aws:TagKeys",
+          "ContextKeyValues": [
+            "blue",
+            "red"
+          ],
+          "ContextKeyType": "stringList"
+        },
+        {
+          "ContextKeyName": "s3:prefix",
+          "ContextKeyValues": [
+            "red"
+          ],
+          "ContextKeyType": "string"
+        }
+      ]
+    },
+    "response": {
+      "EvaluationResults": [
+        {
+          "EvalActionName": "s3:ListBucket",
+          "EvalResourceName": "arn:aws:s3:::district-teams",
+          "EvalDecision": "explicitDeny",
+          "MatchedStatements": [
+            {
+              "SourcePolicyId": "PolicyInputList.2",
+              "SourcePolicyType": "IAM Policy",
+              "StartPosition": {
+                "Line": 3,
+                "Column": 17
+              },
+              "EndPosition": {
+                "Line": 13,
+                "Column": 6
+              }
+            }
+          ],
+          "MissingContextValues": [],
+          "EvalDecisionDetails": {},
+          "ResourceSpecificResults": [
+            {
+              "EvalResourceName": "arn:aws:s3:::district-teams",
+              "EvalResourceDecision": "explicitDeny",
+              "MatchedStatements": [
+                {
+                  "SourcePolicyId": "PolicyInputList.2",
+                  "SourcePolicyType": "IAM Policy",
+                  "StartPosition": {
+                    "Line": 3,
+                    "Column": 17
+                  },
+                  "EndPosition": {
+                    "Line": 13,
+                    "Column": 6
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "IsTruncated": false,
+      "ResponseMetadata": {
+        "RequestId": "e67e0c87-12ab-4cf5-a874-8828974ed16a",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+          "date": "Mon, 26 Oct 2026 20:27:19 GMT",
+          "x-amzn-requestid": "e67e0c87-12ab-4cf5-a874-8828974ed16a",
+          "content-type": "text/xml",
+          "content-length": "1862"
+        },
+        "RetryAttempts": 0
+      }
+    },
+    "error": null,
+    "request_id": "e67e0c87-12ab-4cf5-a874-8828974ed16a",
+    "http_date": "Mon, 26 Oct 2026 20:27:19 GMT",
+    "raw_body": "<SimulateCustomPolicyResponse xmlns=\"https://iam.amazonaws.com/doc/2010-05-08/\">\n  <SimulateCustomPolicyResult>\n    <IsTruncated>false</IsTruncated>\n    <EvaluationResults>\n      <member>\n        <EvalDecisionDetails/>\n        <MatchedStatements>\n          <member>\n            <EndPosition>\n              <Line>13</Line>\n              <Column>6</Column>\n            </EndPosition>\n            <SourcePolicyId>PolicyInputList.2</SourcePolicyId>\n            <SourcePolicyType>IAM Policy</SourcePolicyType>\n            <StartPosition>\n              <Line>3</Line>\n              <Column>17</Column>\n            </StartPosition>\n          </member>\n        </MatchedStatements>\n        <MissingContextValues/>\n        <EvalResourceName>arn:aws:s3:::district-teams</EvalResourceName>\n        <EvalActionName>s3:ListBucket</EvalActionName>\n        <EvalDecision>explicitDeny</EvalDecision>\n        <ResourceSpecificResults>\n          <member>\n            <MatchedStatements>\n              <member>\n                <EndPosition>\n                  <Line>13</Line>\n                  <Column>6</Column>\n                </EndPosition>\n                <SourcePolicyId>PolicyInputList.2</SourcePolicyId>\n                <SourcePolicyType>IAM Policy</SourcePolicyType>\n                <StartPosition>\n                  <Line>3</Line>\n                  <Column>17</Column>\n                </StartPosition>\n              </member>\n            </MatchedStatements>\n            <EvalResourceDecision>explicitDeny</EvalResourceDecision>\n            <EvalResourceName>arn:aws:s3:::district-teams</EvalResourceName>\n          </member>\n        </ResourceSpecificResults>\n      </member>\n    </EvaluationResults>\n  </SimulateCustomPolicyResult>\n  <ResponseMetadata>\n    <RequestId>e67e0c87-12ab-4cf5-a874-8828974ed16a</RequestId>\n  </ResponseMetadata>\n</SimulateCustomPolicyResponse>\n"
+  }
+}

@@ -266,6 +266,68 @@
         }
       },
       "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
+    },
+    {
+      "name": "mid_field_question_mark_crossing_a_colon",
+      "description": "Third follow-up: in us-east-1?111122223333, the ? stands where the alias's ARN has the colon between the region and the account. The pattern still has six colons, so it isn't a short ARN. It matches only if a ? in one of the first five fields can match a colon.",
+      "readings": {
+        "ALLOW": "a ? in one of the first five fields matches a colon too: Resource is a plain glob over the whole ARN",
+        "IMPLICIT_DENY": "it doesn't: in the first five fields, a ? matches one character other than a colon"
+      },
+      "policies": {
+        "invoke_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-east-1?111122223333:function:billing:canary"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
+    },
+    {
+      "name": "mid_field_question_mark_control",
+      "description": "Third follow-up, the control: the ? in us-east-? matches the 1 of us-east-1, with no colon to cross.",
+      "readings": {"ALLOW": "a ? in the region field works at all"},
+      "policies": {
+        "invoke_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "lambda:InvokeFunction", "Resource": "arn:aws:lambda:us-east-?:111122223333:function:billing:canary"}]
+        }
+      },
+      "request": {"action": "lambda:InvokeFunction", "resource": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"}
+    },
+    {
+      "name": "arn_like_star_ending_the_region_field",
+      "description": "Third follow-up: ArnLike with arn:aws:lambda:*:function:billing:canary, the pattern that matched in Resource (star_ending_the_region_field), against the canary alias's ARN. Its * ends the region field, so it matches only if that * runs on into the account field.",
+      "readings": {
+        "IMPLICIT_DENY": "ArnLike checks each of the six fields separately, as AWS documents",
+        "ALLOW": "the * runs on into the next field, as it does in Resource"
+      },
+      "policies": {
+        "alerts_from_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:*:function:billing:canary"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
+    },
+    {
+      "name": "arn_like_star_ending_the_region_field_control",
+      "description": "Third follow-up, the control: ArnLike with arn:aws:lambda:*:*:function:billing:canary, whose six fields line up with the canary alias's ARN.",
+      "readings": {"ALLOW": "the pattern works at all"},
+      "policies": {
+        "alerts_from_canary.json": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow", "Action": "sqs:SendMessage", "Resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts",
+            "Condition": {"ArnLike": {"aws:SourceArn": "arn:aws:lambda:*:*:function:billing:canary"}}
+          }]
+        }
+      },
+      "context": {"aws:SourceArn": "arn:aws:lambda:us-east-1:111122223333:function:billing:canary"},
+      "request": {"action": "sqs:SendMessage", "resource": "arn:aws:sqs:us-east-1:111122223333:district-alerts"}
     }
   ]
 }

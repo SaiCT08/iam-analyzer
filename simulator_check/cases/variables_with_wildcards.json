@@ -33,6 +33,41 @@
       },
       "context": {"aws:PrincipalTag/team": null},
       "request": {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-teams-class-of-2026/handbook.pdf"}
+    },
+    {
+      "name": "condition_star_in_a_value",
+      "description": "Third follow-up: star_in_a_value's question in a condition value. StringLike s3:prefix ${aws:PrincipalTag/team}/, for a caller whose team tag is b*, listing blue/.",
+      "readings": {
+        "ALLOW": "the * acts as a wildcard in a condition value",
+        "IMPLICIT_DENY": "it is a literal *, as in Resource"
+      },
+      "policies": {
+        "list_team_folder.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::district-teams",
+                         "Condition": {"StringLike": {"s3:prefix": "${aws:PrincipalTag/team}/"}}}]
+        }
+      },
+      "context": {"aws:PrincipalTag/team": "b*", "s3:prefix": "blue/"},
+      "request": {"action": "s3:ListBucket", "resource": "arn:aws:s3:::district-teams"}
+    },
+    {
+      "name": "condition_star_in_a_default",
+      "description": "Third follow-up: star_in_a_default's question in a condition value. StringLike s3:prefix ${aws:PrincipalTag/team, 'class-of-*'}/, for a caller with no team tag, listing class-of-2026/.",
+      "readings": {
+        "ALLOW": "the * acts as a wildcard in a condition value",
+        "IMPLICIT_DENY": "it is a literal *, as in Resource, or the simulator's handling of a key left out of the call (see calibration)"
+      },
+      "policies": {
+        "list_class_folder.json": {
+          "Version": "2012-10-17",
+          "Statement": [{"Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::district-teams",
+                         "Condition": {"StringLike": {"s3:prefix": "${aws:PrincipalTag/team, 'class-of-*'}/"}}}]
+        }
+      },
+      "context": {"aws:PrincipalTag/team": null, "s3:prefix": "class-of-2026/"},
+      "context_types": {"s3:prefix": "string"},
+      "request": {"action": "s3:ListBucket", "resource": "arn:aws:s3:::district-teams"}
     }
   ]
 }
