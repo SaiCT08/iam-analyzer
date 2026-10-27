@@ -316,7 +316,7 @@ The tables come from `python -m simulator_check.report`:
 
 | Case | Analyzer | Simulator | Verdict | Missing context values | Matched | Details |
 |---|---|---|---|---|---|---|
-| `list_all_my_buckets/allowed_on_every_bucket_arn` | refused | IMPLICIT_DENY | simulator limit | - | - | - |
+| `list_all_my_buckets/allowed_on_every_bucket_arn` | ALLOW | IMPLICIT_DENY | simulator limit | - | - | - |
 | `list_all_my_buckets/allowed_on_star_control` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | - |
 | `scp_allow_statements/not_action_allow_ec2` | IMPLICIT_DENY | IMPLICIT_DENY | agrees | - | - | AllowedByOrganizations: False |
 | `scp_allow_statements/not_action_allow_s3` | ALLOW | ALLOW | agrees | - | PolicyInputList.1 | AllowedByOrganizations: True |
@@ -492,18 +492,28 @@ quote and the link.
 **Decision:**
 - No engine change for these. The analyzer already does what AWS documents, and the fixtures keep
   the evidence.
-- `ListAllMyBuckets` (review open question 3) is the exception. Both sides deny, but the
-  analyzer's answer contradicts AWS's example too. So the analyzer will refuse a request on `*`
-  whose answer depends on a statement with a resource ARN.
-  - Narrowed on 2026-10-26: only for `s3:ListAllMyBuckets`. For any other action with no resource
-    type, the Service Authorization Reference settles it: "you must specify all resources ("\*")
-    in your policy", and "If you specify a resource that is not valid for the action, any request
-    to use that action fails, and the statement's `Effect` does not apply"
+- `ListAllMyBuckets` (review open question 3) was the exception. Both sides denied, but the
+  analyzer's answer contradicted AWS's example too.
+  - First decision: refuse a request on `*` whose answer depends on a statement with a resource
+    ARN. That covered only `s3:ListAllMyBuckets`. For any other action with no resource type, the
+    Service Authorization Reference settles it: "you must specify all resources ("\*") in your
+    policy", and "If you specify a resource that is not valid for the action, any request to use
+    that action fails, and the statement's `Effect` does not apply"
     ([actions table](https://docs.aws.amazon.com/service-authorization/latest/reference/reference_policies_actions-resources-contextkeys.html#actions_table)).
-  - **Done (2026-10-26):** `evaluator._resource_matches` marks a statement that names resource
-    ARNs as unsettled for `s3:ListAllMyBuckets` on `*`. Evaluation then works the answer out with
-    every unsettled Allow and no unsettled Deny, and the other way round. It answers when the two
-    agree, and refuses otherwise. This case now gives `refused`.
+  - **Settled (2026-10-26) by AWS's Carlos example, as a judgment call.** The simulator only
+    compared the policy's patterns with the `*` it was sent, so it can't tell what resource a real
+    request carries. The example can:
+    - the `AllowS3ListRead` statement, an Allow on `arn:aws:s3:::*`, "allows Carlos to view a list
+      of all of the buckets in the account";
+    - the `DenyS3Logs` statement, `s3:*` on `arn:aws:s3:::*log*`, "denies Carlos access to any
+      S3 bucket with `log` in its name", and doesn't stop the listing.
+  - **Done (2026-10-26):** `evaluator._matched_resource` matches `s3:ListAllMyBuckets` on `*` as
+    `arn:aws:s3:::`, a bucket ARN with an empty name.
+    - A statement covers it when its `Resource` covers every bucket, as `*` and `arn:aws:s3:::*`
+      do. It doesn't when its `Resource` names a bucket, or needs characters in the name.
+    - This case now gives AWS's documented ALLOW, and stays a simulator limit.
+    - The whole example is the scenario `list_all_my_buckets_allowed_on_every_bucket_arn`. It has
+      no fixture yet: recording it calls AWS.
 
 ### 5. Refusals that AWS answered (41 cases, of which 34 now agree)
 Each row is a case the analyzer refuses because AWS's docs don't settle it, with what the

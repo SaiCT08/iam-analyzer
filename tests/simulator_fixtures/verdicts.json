@@ -5,9 +5,9 @@
   },
   "cases": {
     "list_all_my_buckets/allowed_on_every_bucket_arn": {
-      "analyzer": "refused",
+      "analyzer": "ALLOW",
       "verdict": "simulator limit",
-      "note": "AWS's own example says an Allow on arn:aws:s3:::* lets a user list all buckets, but the simulator denies: it matches the request as * (EvalResourceName *), so its answer doesn't settle review open question 3. The analyzer refuses, since the answer is ALLOW if the ARN covers the listing and IMPLICIT_DENY if it doesn't.",
+      "note": "AWS's own example says an Allow on arn:aws:s3:::* lets a user list all buckets, but the simulator denies: it matched the patterns against the * it was sent (EvalResourceName *), which says nothing about the resource a real request carries. The analyzer follows the example: it matches the request as arn:aws:s3:::, a bucket ARN with an empty name.",
       "quote": "The AllowS3ListRead statement in this policy allows Carlos to view a list of all of the buckets in the account.",
       "link": "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-basics.html#reference_policies_evaluation-logic_policies_evaluation_example"
     },

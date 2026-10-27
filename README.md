@@ -47,8 +47,6 @@ policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
 
 Not supported yet:
 - `NotPrincipal` is refused with a clear error.
-- `s3:ListAllMyBuckets` is refused when the answer depends on a statement that names resource ARNs
-  (see [Resources](#resources)).
 - Resource-based policies other than S3 bucket policies and role trust policies. Another service's
   resource can only be described as having none.
 - Cross-account requests, KMS keys, and requests by SAML or OIDC users are refused.
@@ -214,15 +212,16 @@ Some requests need no description:
 
 A request on `"*"` is covered by a statement whose `Resource` is `"*"`, and not by one that names
 resource ARNs. For an action with no resource type, the Service Authorization Reference says "you
-must specify all resources ("*") in your policy". `s3:ListAllMyBuckets` is the exception, because
-AWS doesn't settle it:
-- its evaluation example lets an Allow on `arn:aws:s3:::*` list all buckets;
-- its IAM policy simulator matched the request only against `"*"`.
+must specify all resources ("*") in your policy".
 
-So for `s3:ListAllMyBuckets`, the analyzer works the answer out at both extremes: once as if every
-such Allow applies and no such Deny does, and once the other way round. If both give the same
-answer, it gives that answer. For example, an Allow on `"*"` with no Deny that could apply means
-`ALLOW`. If they differ, it refuses and names the statements.
+`s3:ListAllMyBuckets` is the exception, and AWS's own evaluation example shows how it works:
+- an Allow on `arn:aws:s3:::*` lets Carlos list all buckets;
+- a Deny on `arn:aws:s3:::*log*`, which denies him "any S3 bucket with `log` in its name", doesn't
+  stop that.
+
+So the analyzer matches that request as `arn:aws:s3:::`, a bucket ARN with an empty name. A
+statement covers it when its `Resource` covers every bucket, as `"*"` and `arn:aws:s3:::*` do. It
+doesn't when its `Resource` names a bucket, or needs characters in the name, as `*log*` does.
 
 The analyzer refuses:
 - A request on a resource in another account. Cross-account requests also need the other

@@ -1,0 +1,41 @@
+{
+  "description": "AWS's same-account example: \"The AllowS3ListRead statement in this policy allows Carlos to view a list of all of the buckets in the account.\" The DenyS3Logs statement, which \"denies Carlos access to any S3 bucket with log in its name\", doesn't stop that.",
+  "policies": {
+    "kwong.json": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowS3ListRead",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetBucketLocation",
+            "s3:GetAccountPublicAccessBlock",
+            "s3:ListAccessPoints",
+            "s3:ListAllMyBuckets"
+          ],
+          "Resource": "arn:aws:s3:::*"
+        },
+        {
+          "Sid": "AllowS3Self",
+          "Effect": "Allow",
+          "Action": "s3:*",
+          "Resource": [
+            "arn:aws:s3:::district-kwong-files/*",
+            "arn:aws:s3:::district-kwong-files"
+          ]
+        },
+        {
+          "Sid": "DenyS3Logs",
+          "Effect": "Deny",
+          "Action": "s3:*",
+          "Resource": "arn:aws:s3:::*log*"
+        }
+      ]
+    }
+  },
+  "request": {
+    "action": "s3:ListAllMyBuckets",
+    "resource": "*"
+  },
+  "expected": "ALLOW"
+}

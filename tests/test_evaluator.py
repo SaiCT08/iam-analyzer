@@ -658,70 +658,59 @@ def test_a_policy_for_a_request_that_no_resource_based_policy_covers():
 # --- s3:ListAllMyBuckets ---------------------------------------------------------------
 
 LIST_BUCKETS = Request(action="s3:ListAllMyBuckets", resource="*")
-# AWS's Carlos example says this statement "allows Carlos to view a list of all of the buckets in
-# the account". The IAM policy simulator matched the request only against "*".
+# AWS's Carlos example: "The AllowS3ListRead statement in this policy allows Carlos to view a list
+# of all of the buckets in the account". tests/scenarios has the whole example.
 LIST_READ = allow(
     ["s3:GetBucketLocation", "s3:ListAllMyBuckets"], "arn:aws:s3:::*", sid="AllowS3ListRead"
 )
 
 
-def test_listing_buckets_with_only_an_allow_on_arns_is_refused():
-    message = (
-        r"^s3:ListAllMyBuckets has no resource, .*\. The answer is ALLOW or IMPLICIT_DENY, "
-        r"depending on which of these statements cover it:\n  carlos statement 0 "
-        r"\(Sid=AllowS3ListRead\)$"
-    )
-    with pytest.raises(UnsupportedPolicyFeature, match=message):
-        evaluate(LIST_BUCKETS, [policy("carlos", LIST_READ)])
-
-
-def test_listing_buckets_is_answered_when_the_arns_cannot_change_it():
-    # An Allow on "*" allows it whether or not the statement on one bucket's ARN covers it, and
-    # only the Allow that holds either way is cited.
-    own_files = allow("s3:*", "arn:aws:s3:::district-kwong-files/*", sid="OwnFiles")
-    p = policy("p", allow("s3:ListAllMyBuckets", "*", sid="ListAll"), own_files)
+def test_the_carlos_example_lists_every_bucket():
+    # The example's Deny on *log*, which "denies Carlos access to any S3 bucket with log in its
+    # name", doesn't stop the listing.
+    p = policy("carlos", LIST_READ, deny("s3:*", "arn:aws:s3:::*log*", sid="DenyS3Logs"))
     result = evaluate(LIST_BUCKETS, [p])
     assert result.decision is Decision.ALLOW
-    assert reasons(result) == [("p", "ListAll", IDENTITY)]
-    # A Deny on "*" denies it either way.
-    p = policy("p", LIST_READ, deny("s3:*", "*", sid="NoS3"))
-    result = evaluate(LIST_BUCKETS, [p])
+    assert reasons(result) == [("carlos", "AllowS3ListRead", IDENTITY)]
+
+
+@pytest.mark.parametrize(
+    "resource", ["*", "arn:aws:s3:::*", "arn:aws:s3:::**", "arn:*:s3:::*", "arn:aws:s3"]
+)
+def test_a_statement_on_every_bucket_covers_listing_them(resource):
+    # The request is matched as arn:aws:s3:::, a bucket ARN with an empty name.
+    p = policy("p", allow("s3:ListAllMyBuckets", resource))
+    assert evaluate(LIST_BUCKETS, [p]).decision is Decision.ALLOW
+
+
+@pytest.mark.parametrize(
+    "resource",
+    [
+        "arn:aws:s3:::*log*",  # needs characters in the name
+        "arn:aws:s3:::district-kwong-files",  # names a bucket
+        "arn:aws:s3:::district-*",
+        "arn:aws:s3:::*/*",  # every object, not every bucket
+        "arn:aws:ec2:*:*:instance/*",
+    ],
+)
+def test_a_statement_on_some_buckets_does_not_cover_listing_them(resource):
+    assert evaluate(LIST_BUCKETS, [policy("p", allow("s3:*", resource))]).decision is (
+        Decision.IMPLICIT_DENY
+    )
+    # Nor does a Deny on them stop the listing.
+    p = policy("p", allow("s3:ListAllMyBuckets", "*"), deny("s3:*", resource))
+    assert evaluate(LIST_BUCKETS, [p]).decision is Decision.ALLOW
+
+
+def test_not_resource_is_matched_the_same_way():
+    allow_listing = allow("s3:ListAllMyBuckets", "*")
+    # A Deny on everything but every bucket doesn't apply to the listing.
+    but_every_bucket = {"Effect": "Deny", "Action": "s3:*", "NotResource": "arn:aws:s3:::*"}
+    assert evaluate(LIST_BUCKETS, [policy("p", allow_listing, but_every_bucket)]).allowed
+    # A Deny on everything but some buckets does.
+    but_some = {"Effect": "Deny", "Action": "s3:*", "NotResource": "arn:aws:s3:::district-*"}
+    result = evaluate(LIST_BUCKETS, [policy("p", allow_listing, but_some)])
     assert result.decision is Decision.EXPLICIT_DENY
-    assert reasons(result) == [("p", "NoS3", IDENTITY)]
-    # An SCP level that allows no S3 stops it either way. Only that level is named, since the
-    # identity policies may or may not allow it.
-    ec2_only = policy("Ec2Only", allow("ec2:*", "*"))
-    result = evaluate(LIST_BUCKETS, [policy("carlos", LIST_READ)], scps=org_path(ou=[ec2_only]))
-    assert result.decision is Decision.IMPLICIT_DENY
-    assert result.not_allowed_by == (scp(SCHOOLS),)
-
-
-def test_an_unsettled_deny_beside_an_allow_is_refused():
-    # AWS's Carlos example also denies s3:* on arn:aws:s3:::*log*, and says Carlos can still list
-    # all buckets. The analyzer can't tell whether that ARN covers the listing.
-    logs = deny("s3:*", "arn:aws:s3:::*log*", sid="DenyS3Logs")
-    p = policy("carlos", allow("s3:ListAllMyBuckets", "*"), logs)
-    message = r"The answer is ALLOW or EXPLICIT_DENY, .*\n  carlos statement 1 \(Sid=DenyS3Logs\)$"
-    with pytest.raises(UnsupportedPolicyFeature, match=message):
-        evaluate(LIST_BUCKETS, [p])
-
-
-def test_a_not_resource_statement_on_arns_is_unsettled_too():
-    # It denies the listing unless its ARN covers the listing.
-    other_buckets = {"Effect": "Deny", "Action": "s3:*", "NotResource": "arn:aws:s3:::district-*"}
-    p = policy("p", allow("s3:ListAllMyBuckets", "*"), other_buckets)
-    with pytest.raises(UnsupportedPolicyFeature, match="The answer is ALLOW or EXPLICIT_DENY"):
-        evaluate(LIST_BUCKETS, [p])
-
-
-def test_an_unsettled_statement_needs_its_condition_keys():
-    # Whether it applies may decide the answer, so its conditions are checked as usual.
-    p = policy("p", {**LIST_READ, "Condition": {"Bool": {"aws:SecureTransport": "true"}}})
-    with pytest.raises(MissingContextError, match="aws:SecureTransport"):
-        evaluate(LIST_BUCKETS, [p])
-    context = RequestContext.of([("aws:SecureTransport", "false")])
-    over_http = Request(action="s3:ListAllMyBuckets", resource="*", context=context)
-    assert evaluate(over_http, [p]).decision is Decision.IMPLICIT_DENY
 
 
 def test_other_requests_on_star_are_not_covered_by_arns():
@@ -736,10 +725,9 @@ def test_other_requests_on_star_are_not_covered_by_arns():
         assert evaluate(Request(action=action, resource="*"), [p]).decision is Decision.IMPLICIT_DENY
 
 
-def test_statement_matches_refuses_an_unsettled_statement():
+def test_statement_matches_reads_the_listing_the_same_way():
     [statement] = policy("carlos", LIST_READ).statements
-    with pytest.raises(UnsupportedPolicyFeature, match="^s3:ListAllMyBuckets has no resource"):
-        statement_matches(statement, LIST_BUCKETS)
+    assert statement_matches(statement, LIST_BUCKETS)
 
 
 # --- Resource-based policies -----------------------------------------------------------
