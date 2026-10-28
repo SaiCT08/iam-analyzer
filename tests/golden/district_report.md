@@ -119,7 +119,7 @@ arn:aws:s3:::district-student-records/campus-02/transcript.pdf?
 - Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
   role/ITAdmin, role/GradebookVendor, role/TeacherSignIn.
 
-Fix: Keep DenyStudentRecordsDelete on every group and role that can write student records, and the
+Keep: DenyStudentRecordsDelete on every group and role that can write student records, and the
 ProtectStudentRecords SCP on the Schools OU.
 
 Maps to:
@@ -133,7 +133,7 @@ aws:MultiFactorAuthPresent is false or absent?
 - Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
   role/ITAdmin, role/GradebookVendor, role/TeacherSignIn.
 
-Fix: Keep the Bool aws:MultiFactorAuthPresent true condition in ITAdmin's trust policy.
+Keep: The Bool aws:MultiFactorAuthPresent true condition in ITAdmin's trust policy.
 
 Maps to:
 - NIST SP 800-53 Rev. 5 IA-2(1): Multi-factor Authentication to Privileged Accounts.

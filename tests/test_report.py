@@ -422,3 +422,17 @@ def test_a_way_in_the_boundary_blocks_isnt_cited():
     [answer] = vendor["answers"]
     assert [s["sid"] for s in answer["statements"]] == ["Broad", "Public"]  # both matched
     assert [s["sid"] for s in answer["grants"]] == ["Public"]  # one grants
+
+
+def test_a_pass_says_what_to_keep_not_what_to_fix():
+    everyone_allowed = ["group/Teachers", "user/reader", "role/Admin"]
+    keep = markdown(check("a", "only", Principals=everyone_allowed, Keep="Keep this."),
+                    clerk=False)
+    assert "Keep: Keep this." in keep and "Fix: Fix a." not in keep
+    # With no Keep, a PASS has neither line, and a check that doesn't pass shows its fix.
+    plain = markdown(check("a", "only", Principals=everyone_allowed), clerk=False)
+    assert "Keep:" not in plain and "Fix:" not in plain
+    failing = markdown(check("b", "only", Keep="Keep this."), clerk=False)
+    assert "Fix: Fix b." in failing and "Keep:" not in failing
+    assert to_json(report(check("a", "only", Keep="Keep this.")))["checks"][0]["keep"] == (
+        "Keep this.")

@@ -10,7 +10,7 @@
         "Id": "counseling-notes", "Title": "Only counselors can read counseling notes",
         "Severity": "high", "Type": "only", "Principals": ["user/kwong"],
         "Actions": ["s3:GetObject"], "Resources": ["arn:aws:s3:::records/counseling/notes.pdf"],
-        "Fix": "...", "MapsTo": ["NIST AC-6"]
+        "Fix": "...", "Keep": "...", "MapsTo": ["NIST AC-6"]
       }]
     }
 
@@ -25,6 +25,9 @@ Principals are named as `user/NAME`, `role/NAME` or `group/NAME`, where a group 
 members. `Context` gives condition keys the check's question fixes, such as
 {"aws:SourceIp": "203.0.113.5"}. A list gives a key several values in one request, and null says
 the request doesn't include it.
+
+`Fix` says how to fix a failure. The optional `Keep` says what keeps the check passing, and a
+report prints it instead of the fix when the check passes.
 
 A requirement gives only an ID, a short title and a link: never the framework's own text. The
 title's length limit keeps it to a name.
@@ -43,7 +46,9 @@ from iam_analyzer.errors import FrameworkError, RequestError, UnsupportedPolicyF
 from iam_analyzer.models import Request
 
 TOP_LEVEL_KEYS = {"Framework", "Requirements", "Checks"}
-CHECK_KEYS = {"Id", "Title", "Severity", "Type", "Actions", "Resources", "Context", "Fix", "MapsTo"}
+CHECK_KEYS = {
+    "Id", "Title", "Severity", "Type", "Actions", "Resources", "Context", "Fix", "Keep", "MapsTo",
+}
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*")
 _PRINCIPAL = re.compile(r"(user|role|group)/.+")
 # Short enough for a name, too short for pasted framework text.
@@ -103,13 +108,14 @@ class Check:
     type: CheckType
     actions: tuple[str, ...]
     resources: tuple[str, ...]
-    fix: str
+    fix: str  # how to fix a failure
     principals: tuple[str, ...] = ()
     exempt: tuple[str, ...] = ()
     key: str | None = None
     value: str | None = None
     context: RequestContext = RequestContext()
     maps_to: tuple[Requirement, ...] = ()
+    keep: str | None = None  # what keeps it passing, printed instead of the fix when it passes
 
 
 @dataclass(frozen=True)
@@ -204,6 +210,9 @@ def _check(raw: Any, requirements: dict[str, Requirement], where: str) -> Check:
     fix = fields.get("Fix")
     if not (isinstance(fix, str) and fix.strip()):
         raise FrameworkError(f"{where}: 'Fix' must say how to fix a failure")
+    keep = fields.get("Keep")
+    if keep is not None and not (isinstance(keep, str) and keep.strip()):
+        raise FrameworkError(f"{where}: 'Keep' must say what keeps the check passing")
 
     principals: tuple[str, ...] = ()
     exempt: tuple[str, ...] = ()
@@ -232,6 +241,7 @@ def _check(raw: Any, requirements: dict[str, Requirement], where: str) -> Check:
         actions=actions,
         resources=check_resources,
         fix=fix.strip(),
+        keep=keep.strip() if keep else None,
         principals=principals,
         exempt=exempt,
         key=key,

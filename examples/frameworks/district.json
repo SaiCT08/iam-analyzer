@@ -50,7 +50,8 @@
       "Principals": [],
       "Actions": ["s3:DeleteObject", "s3:DeleteObjectVersion"],
       "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
-      "Fix": "Keep DenyStudentRecordsDelete on every group and role that can write student records, and the ProtectStudentRecords SCP on the Schools OU.",
+      "Fix": "Add a Deny like DenyStudentRecordsDelete, on s3:DeleteObject and s3:DeleteObjectVersion for student records, to every group and role that can write them.",
+      "Keep": "DenyStudentRecordsDelete on every group and role that can write student records, and the ProtectStudentRecords SCP on the Schools OU.",
       "MapsTo": ["NIST AC-3"]
     },
     {
@@ -62,6 +63,7 @@
       "Actions": ["s3:GetObject"],
       "Resources": ["arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"],
       "Fix": "Narrow TeacherReadGrades from district-student-records/* to the folders teachers need, and add a bucket policy Deny on counseling/* for everyone but counselors, using aws:PrincipalArn as OnlyITAdminChangesThePolicy does.",
+      "Keep": "Reads of counseling/* only through the counselors' bucket policy grant.",
       "MapsTo": ["FERPA 99.31(a)(1)(ii)", "NIST AC-6"]
     },
     {
@@ -73,6 +75,7 @@
       "Actions": ["s3:GetObject"],
       "Resources": ["arn:aws:s3:::district-roster-exports/2026/roster.csv"],
       "Fix": "Replace \"*\" in ShareRosterWithVendor with the vendor's account or role ARN, or share the export with a presigned URL, and turn on S3 Block Public Access.",
+      "Keep": "Roster exports shared with the vendor's account or role by name, never with \"*\".",
       "MapsTo": ["FERPA 99.31(a)(1)(ii)", "NIST AC-22"]
     },
     {
@@ -85,6 +88,7 @@
       "Actions": ["s3:PutObject"],
       "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
       "Fix": "Take ITAdminFullS3 off user alee, so IT staff change records through the ITAdmin role, which needs MFA to assume, and give ITAdminFullS3 a Deny like RequireMfaForChanges.",
+      "Keep": "An MFA Deny like RequireMfaForChanges on every policy that can change student records.",
       "MapsTo": ["NIST IA-2(1)", "NIST IA-2(2)"]
     },
     {
@@ -96,7 +100,8 @@
       "Value": "true",
       "Actions": ["sts:AssumeRole"],
       "Resources": ["arn:aws:iam::111122223333:role/ITAdmin"],
-      "Fix": "Keep the Bool aws:MultiFactorAuthPresent true condition in ITAdmin's trust policy.",
+      "Fix": "Add Bool aws:MultiFactorAuthPresent true to every statement in ITAdmin's trust policy that allows sts:AssumeRole.",
+      "Keep": "The Bool aws:MultiFactorAuthPresent true condition in ITAdmin's trust policy.",
       "MapsTo": ["NIST IA-2(1)"]
     },
     {
@@ -107,7 +112,8 @@
       "Principals": ["group/Registrars"],
       "Actions": ["s3:PutObject"],
       "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
-      "Fix": "Registrars change records with MFA, by design. If they can't even with MFA, check RegistrarCampusRecords and each registrar's campus tag."
+      "Fix": "Registrars change records with MFA, by design. If they can't even with MFA, check RegistrarCampusRecords and each registrar's campus tag.",
+      "Keep": "RegistrarCampusRecords on the Registrars group, and each registrar's campus tag."
     },
     {
       "Id": "lesson-plans-teachers-only",
@@ -118,6 +124,7 @@
       "Actions": ["s3:GetObject"],
       "Resources": ["arn:aws:s3:::district-lesson-plans/week1.pdf"],
       "Fix": "Describe district-lesson-plans in the account file's Resources, with its bucket policy or as {} if it has none, so the analyzer can answer.",
+      "Keep": "Lesson plan reads only through the Teachers group's policies.",
       "MapsTo": ["NIST AC-3"]
     }
   ]

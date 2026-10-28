@@ -202,7 +202,11 @@ def _check_markdown(result: CheckResult, account: Account) -> list[str]:
     lines = [f"## {LABELS[result.result]}: {check.title} ({check.severity.value})", "",
              _wrap(f"Asked: {_question(check)}"), ""]
     lines += _items_markdown(result, account)
-    lines += ["", _wrap(f"Fix: {check.fix}")]
+    # A check that passes has nothing to fix: it says what keeps it passing, if the framework does.
+    if result.result is not Result.PASS:
+        lines += ["", _wrap(f"Fix: {check.fix}")]
+    elif check.keep:
+        lines += ["", _wrap(f"Keep: {check.keep}")]
     if check.maps_to:
         lines += ["", "Maps to:"]
         lines += [_bullet(f"{r.framework} {r.id}: {r.title}. {r.link}") for r in check.maps_to]
@@ -559,6 +563,7 @@ def _check_json(result: CheckResult) -> dict:
             "absent": sorted(check.context.spellings[k] for k in check.context.absent),
         },
         "fix": check.fix,
+        "keep": check.keep,
         "maps_to": [{"framework": r.framework, "id": r.id, "title": r.title, "link": r.link}
                     for r in check.maps_to],
         "not_asked": list(result.not_asked),

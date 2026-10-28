@@ -51,6 +51,12 @@ def test_a_framework_reads_its_checks():
                                                 ("role/BreakGlass",))
 
 
+def test_keep_says_what_keeps_a_check_passing():
+    assert parse(only()).checks[0].keep is None
+    assert parse(only(Keep="  The counselors' grant only.  ")).checks[0].keep == (
+        "The counselors' grant only.")
+
+
 def test_a_can_check_expects_access():
     framework = parse({**only(), "Type": "can", "Principals": ["group/Counselors"]})
     assert not framework.checks[0].type.forbids
@@ -115,6 +121,8 @@ def test_load_framework_file_errors(tmp_path):
         (document(only(Resources=[f"{NOTES}*"])), "can't have wildcards"),
         (document(requires(Resources=["*"])), "sts:AssumeRole is a request on a role"),
         (document(only(Fix="  ")), "'Fix' must say how to fix a failure"),
+        (document(only(Keep="")), "'Keep' must say what keeps the check passing"),
+        (document(only(Keep=["a"])), "'Keep' must say what keeps the check passing"),
         (document(only(Principals=["jsmith"])), "must be user/NAME, role/NAME or group/NAME"),
         (document(only(Principals=["user/a", "user/a"])), "names someone more than once"),
         (document({**only(), "Type": "can", "Principals": []}), "needs at least one principal"),

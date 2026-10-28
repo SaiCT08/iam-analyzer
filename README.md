@@ -709,14 +709,16 @@ A framework is a JSON file, so adding one never changes the analyzer. See
     "Actions": ["s3:GetObject"],
     "Resources": ["arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"],
     "Fix": "Narrow TeacherReadGrades from district-student-records/* to the folders teachers need.",
+    "Keep": "Reads of counseling/* only through the counselors' bucket policy grant.",
     "MapsTo": ["NIST AC-6"]
   }]
 }
 ```
 
 Every check has an `Id`, a `Title`, a `Severity` (`critical`, `high`, `medium` or `low`), the
-`Actions` and `Resources` it asks about, and a `Fix`. `MapsTo` and `Context` are optional. There
-are three types:
+`Actions` and `Resources` it asks about, and a `Fix` that says how to fix a failure. `Keep`,
+`MapsTo` and `Context` are optional. `Keep` says what keeps the check passing: a check that
+passes shows it as "Keep:", and any other result shows the fix. There are three types:
 
 | `Type` | Asks | Expects |
 |---|---|---|
