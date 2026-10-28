@@ -191,7 +191,11 @@ def test_a_roles_item_carries_the_mfa_note():
     note = " ".join(line.strip() for line in lines[admin + 1:admin + 5])
     assert note.startswith(
         "- Note: MFA for a role is checked when it's assumed. role/Admin's trust policy lets "
-        f"someone assume it in Sid AccountWithMfa, when Bool {MFA} is true. AWS's docs disagree")
+        f"someone assume it in Sid AccountWithMfa, when Bool {MFA} is true. AWS says \"The "
+        "temporary credentials returned by AssumeRole do not include MFA information in the "
+        "context\", so the role's own requests never show MFA, and only its trust policy can "
+        "require it.")
+    assert "disagree" not in note
 
 
 def test_scope_says_what_a_pass_covers():

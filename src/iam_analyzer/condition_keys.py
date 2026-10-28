@@ -7,13 +7,13 @@ many values to try, so the report can't tell until the check gives it one.
 
 Each entry quotes the "Availability" line that says whether a request can leave the key out.
 
-aws:MultiFactorAuthPresent can be absent for every principal, roles included. AWS says it is
-missing for long-term access keys and for federated identities. For a role's session, AWS's
-"Secure API access with MFA" page says both that "The temporary credentials returned by
-AssumeRole do not include MFA information in the context" and that a role assumed "without MFA
-information" has a session that "does not indicate that the user authenticated with MFA". Since
-the docs don't settle it, all three values are tried. A value that can't really happen can only
-make the report find more access, never less.
+aws:MultiFactorAuthPresent can be absent for every principal. AWS says it is missing for
+long-term access keys and for federated identities. Its "Secure API access with MFA" page also says
+"The temporary credentials returned by AssumeRole do not include MFA information in the context",
+so a role's own requests never show MFA. Every principal is still tried with true, false and
+absent, roles included. For a role, true is a value AWS says its requests don't have, and trying it
+can only make a report find more access, never less. Whether to stop trying it for roles is an
+open question.
 """
 
 from dataclasses import dataclass

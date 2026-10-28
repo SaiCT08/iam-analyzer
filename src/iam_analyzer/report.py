@@ -408,9 +408,9 @@ def _note(note: RoleMfaNote) -> str:
             when = f"when {' and '.join(checks)}" if checks else "without checking MFA"
             ways.append(f"in {_sid(statement, index)}, {when}")
         trust = f"{role}'s trust policy lets someone assume it {'; and '.join(ways)}."
-    return (f"MFA for a role is checked when it's assumed. {trust} AWS's docs disagree on whether "
-            "a role's requests carry MFA after that, so this check asks about them without MFA, "
-            "as for anyone.")
+    return (f"MFA for a role is checked when it's assumed. {trust} AWS says \"The temporary "
+            "credentials returned by AssumeRole do not include MFA information in the context\", "
+            "so the role's own requests never show MFA, and only its trust policy can require it.")
 
 
 def _outside_markdown(outside: Outside, account: Account) -> str:

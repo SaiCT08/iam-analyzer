@@ -750,12 +750,11 @@ as `aws:SourceIp`, has too many values to try. The report is CAN'T TELL and name
 check gives it a value in `Context`.
 
 `aws:MultiFactorAuthPresent` can be absent for any principal. AWS says it's missing for requests
-made with long-term access keys and for federated users. For a role's session, AWS's docs
-contradict each other: "The temporary credentials returned by `AssumeRole` do not include MFA
-information in the context", and also that a role assumed "without MFA information" has a session
-that "does not indicate that the user authenticated with MFA". So a role's item in a check that
-requires MFA carries a note. It says MFA for a role is checked when the role is assumed, and
-points to the trust policy statements that say how.
+made with long-term access keys and for federated users. It also says "The temporary credentials
+returned by `AssumeRole` do not include MFA information in the context". So MFA for a role is
+checked when the role is assumed, and the role's own requests never show it. A role's item in a
+check that requires MFA carries a note saying so, and points to the trust policy statements that
+check MFA. The report still tries `true` for roles too, which can only find more access, not less.
 
 ### Who a report can't ask about
 

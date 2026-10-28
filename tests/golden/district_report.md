@@ -66,9 +66,9 @@ when aws:MultiFactorAuthPresent is false or absent?
 - user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
 - role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
   - Note: MFA for a role is checked when it's assumed. role/ITAdmin's trust policy lets someone
-    assume it in Sid AccountWithMfa, when Bool aws:MultiFactorAuthPresent is true. AWS's docs
-    disagree on whether a role's requests carry MFA after that, so this check asks about them
-    without MFA, as for anyone.
+    assume it in Sid AccountWithMfa, when Bool aws:MultiFactorAuthPresent is true. AWS says "The
+    temporary credentials returned by AssumeRole do not include MFA information in the context", so
+    the role's own requests never show MFA, and only its trust policy can require it.
 - Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
   role/GradebookVendor, role/TeacherSignIn.
 
