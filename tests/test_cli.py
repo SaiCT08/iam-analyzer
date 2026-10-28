@@ -3,7 +3,15 @@ from pathlib import Path
 
 import pytest
 
-from iam_analyzer.cli import EXIT_ALLOWED, EXIT_DENIED, EXIT_INPUT_ERROR, main
+from iam_analyzer.cli import (
+    EXIT_ALLOWED,
+    EXIT_DENIED,
+    EXIT_FAILED,
+    EXIT_INPUT_ERROR,
+    EXIT_PASSED,
+    EXIT_UNSETTLED,
+    main,
+)
 
 POLICIES = Path(__file__).parent.parent / "examples" / "policies"
 TEACHER = str(POLICIES / "teacher_read_grades.json")
@@ -794,3 +802,79 @@ def test_a_role_always_has_a_trust_policy(capsys):
                        "--action", "sts:AssumeRole", "--resource", IT_ADMIN_ROLE)
     assert code == EXIT_INPUT_ERROR
     assert "every role has a trust policy that must allow this request" in err
+
+
+# --- Compliance reports ----------------------------------------------------------------
+
+REGISTRAR_RECORDS = "arn:aws:s3:::district-student-records/campus-02/transcript.pdf"
+
+
+def framework_file(tmp_path, *checks):
+    path = tmp_path / "fw.json"
+    path.write_text(json.dumps({"Framework": {"Id": "fw", "Title": "Student records"},
+                                "Checks": list(checks)}))
+    return str(path)
+
+
+def report_check(check_type, **fields):
+    names = {"requires": {"Key": "aws:MultiFactorAuthPresent", "Value": "true"}}.get(
+        check_type, {"Principals": []})
+    return {"Id": "c", "Title": "A check", "Severity": "high", "Type": check_type,
+            "Actions": ["s3:DeleteObject"], "Resources": [REGISTRAR_RECORDS], "Fix": "Fix it.",
+            **names, **fields}
+
+
+def report(capsys, framework, *args):
+    code = main(["report", "--account", ACCOUNT, "--framework", framework, *args])
+    out, err = capsys.readouterr()
+    return code, out, err
+
+
+@pytest.mark.parametrize("check, expected, heading", [
+    (report_check("only"), EXIT_PASSED, "## PASS: A check (high)"),
+    (report_check("only", Actions=["s3:GetObject"]), EXIT_FAILED, "## FAIL: A check (high)"),
+    (report_check("can", Principals=["group/Registrars"], Actions=["s3:PutObject"]),
+     EXIT_UNSETTLED, "## DEPENDS: A check (high)"),
+    (report_check("only", Resources=["arn:aws:s3:::district-lesson-plans/week1.pdf"]),
+     EXIT_UNSETTLED, "## CAN'T TELL: A check (high)"),
+])
+def test_report_exit_codes(capsys, tmp_path, check, expected, heading):
+    code, out, err = report(capsys, framework_file(tmp_path, check), "--org", ORG)
+    assert (code, err) == (expected, "")
+    assert out.startswith("# Compliance report: Student records\n")
+    assert heading in out.splitlines()
+
+
+def test_report_writes_json_too(capsys, tmp_path):
+    framework = framework_file(tmp_path, report_check("only", Actions=["s3:GetObject"]))
+    json_path = tmp_path / "out" / "report.json"
+    code, out, _ = report(capsys, framework, "--no-org", "--json", str(tmp_path / "report.json"))
+    assert code == EXIT_FAILED
+    data = json.loads((tmp_path / "report.json").read_text())
+    assert data["checks"][0]["result"] == "FAIL"
+    assert data["organization"] is None
+    assert "## FAIL: A check (high)" in out
+    code, _, err = report(capsys, framework, "--no-org", "--json", str(json_path))
+    assert code == EXIT_INPUT_ERROR
+    assert "report.json: cannot write file" in err
+
+
+def test_report_needs_scps_stated(tmp_path):
+    framework = framework_file(tmp_path, report_check("only"))
+    with pytest.raises(SystemExit) as exc:
+        main(["report", "--account", ACCOUNT, "--framework", framework])
+    assert exc.value.code == EXIT_INPUT_ERROR
+    with pytest.raises(SystemExit):
+        main(["report", "--account", ACCOUNT, "--framework", framework, "--org", ORG, "--no-org"])
+
+
+@pytest.mark.parametrize("check, message", [
+    ({**report_check("only"), "Severity": "urgent"}, "'Severity' must be critical"),
+    (report_check("only", Principals=["user/ghost"]), "no user 'ghost' in district.json"),
+    (report_check("only", Context={"aws:username": "jsmith"}),
+     "'aws:username' comes from district.json"),
+])
+def test_report_input_errors(capsys, tmp_path, check, message):
+    code, out, err = report(capsys, framework_file(tmp_path, check), "--no-org")
+    assert (code, out) == (EXIT_INPUT_ERROR, "")
+    assert message in err

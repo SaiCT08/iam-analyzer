@@ -5,6 +5,7 @@
                        --action ACTION --resource ARN [CONTEXT]
     iam-analyzer check --account FILE --principal user/NAME [--org FILE] [--no-session-tags]
                        --action ACTION --resource ARN [CONTEXT]
+    iam-analyzer report --account FILE (--org FILE | --no-org) --framework FILE [--json FILE]
 
 CONTEXT describes the request's condition keys:
     --context KEY=VALUE   a key's value (repeat for more keys, or for more values of one key)
@@ -16,18 +17,27 @@ resource-based policy, such as its bucket's policy, and --no-resource-policy say
 Either flag says the resource is in the same account, and for an S3 bucket, that its ACLs are
 disabled.
 
-Exit codes: 0 = allowed, 1 = denied, 2 = input error.
+Exit codes for check: 0 = allowed, 1 = denied, 2 = input error.
+
+`report` prints a framework's checks, graded against the account file, as Markdown, and writes
+JSON too with --json. --org gives the SCPs, and --no-org says the account isn't in an
+organization: one of them is required, since leaving SCPs out could allow what they deny.
+Exit codes for report: 0 = every check passed, 1 = a check failed, 2 = input error,
+3 = nothing failed, but some check is DEPENDS or CAN'T TELL.
 """
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
-from iam_analyzer import resources
+from iam_analyzer import report, resources
 from iam_analyzer.account import load_account_file
 from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import MissingContextError, MissingResourceError, PolicyError
 from iam_analyzer.evaluator import evaluate
+from iam_analyzer.framework import load_framework_file
 from iam_analyzer.loader import load_policy_file
 from iam_analyzer.models import (
     Condition,
@@ -45,6 +55,10 @@ from iam_analyzer.organization import load_organization_file
 EXIT_ALLOWED = 0
 EXIT_DENIED = 1
 EXIT_INPUT_ERROR = 2
+# For report: every check passed, a check failed, or nothing failed but something is unsettled.
+EXIT_PASSED = 0
+EXIT_FAILED = 1
+EXIT_UNSETTLED = 3
 MISSING_CONTEXT_HINT = (
     "hint: give each key a value with --context KEY=VALUE, "
     "or use --absent KEY if the request doesn't include it"
@@ -166,6 +180,30 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="KEY",
         help="a condition key the request doesn't include, e.g. aws:MultiFactorAuthPresent",
     )
+
+    graded = subcommands.add_parser(
+        "report", help="Grade a framework's checks against an account file"
+    )
+    graded.add_argument(
+        "--account", action=_StoreOnce, required=True, metavar="FILE",
+        help="account JSON file with users, groups, roles and resources",
+    )
+    scps = graded.add_mutually_exclusive_group(required=True)
+    scps.add_argument(
+        "--org", action=_StoreOnce, metavar="FILE",
+        help="organization JSON file with the SCPs that apply to the account",
+    )
+    scps.add_argument(
+        "--no-org", action="store_true",
+        help="the account isn't in an AWS organization, so no SCPs apply",
+    )
+    graded.add_argument(
+        "--framework", action=_StoreOnce, required=True, metavar="FILE",
+        help="framework JSON file with the checks to grade",
+    )
+    graded.add_argument(
+        "--json", action=_StoreOnce, metavar="FILE", help="also write the report as JSON to FILE"
+    )
     return parser
 
 
@@ -236,6 +274,8 @@ def _target(target: OrgTarget) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "report":
+        return _report(args)
     if bool(args.account) != bool(args.principal):
         parser.error("--account and --principal must be used together")
     if args.account and args.boundary:
@@ -292,6 +332,28 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(format_result(result, request.context))
     return EXIT_ALLOWED if result.allowed else EXIT_DENIED
+
+
+def _report(args: argparse.Namespace) -> int:
+    try:
+        account = load_account_file(args.account)
+        organization = load_organization_file(args.org) if args.org else None
+        framework = load_framework_file(args.framework)
+        graded = report.build(framework, account, organization=organization)
+    except PolicyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_INPUT_ERROR
+    if args.json:
+        data = json.dumps(report.to_json(graded), indent=2) + "\n"
+        try:
+            Path(args.json).write_text(data, encoding="utf-8")
+        except OSError as exc:
+            print(f"error: {args.json}: cannot write file: {exc.strerror}", file=sys.stderr)
+            return EXIT_INPUT_ERROR
+    print(report.to_markdown(graded), end="")
+    if graded.failed:
+        return EXIT_FAILED
+    return EXIT_UNSETTLED if graded.unsettled else EXIT_PASSED
 
 
 
