@@ -139,10 +139,18 @@ def _finding_markdown(finding: Finding) -> list[str]:
     found = finding.type
     lines = [f"### {finding.severity.value.upper()}: {found.title}", "",
              _bullet(f"In: {_where(finding)}.")]
+    if finding.principal is not None:
+        lines.append(_bullet(f"Principal: {_principal(finding.principal)}."))
     if finding.condition is not None:
         lines.append(_bullet(f"Condition: {_condition(finding.condition)}."))
-    lines += [_bullet(f"Why: {found.why}"), _bullet(f"Evidence: {_evidence(found)}"),
-              _bullet(f"Fix: {found.fix}")]
+    lines.append(_bullet(f"Why: {found.why}"))
+    if finding.unsettled:
+        conditions = "; ".join(_condition(c) for c in finding.unsettled)
+        lines.append(_bullet(
+            f"Not settled: {conditions}. S3's page names aws:PrincipalOrgID only as an example "
+            "of a principal key, so it doesn't say whether a condition on this key makes the "
+            "grant non-public."))
+    lines += [_bullet(f"Evidence: {_evidence(found)}"), _bullet(f"Fix: {found.fix}")]
     return lines
 
 
@@ -229,6 +237,7 @@ def _items_markdown(result: CheckResult, account: Account) -> list[str]:
     lines: list[str] = []
     passed: list[str] = []
     refused: dict[str, list[str]] = {}  # message: the items that got only that refusal
+    alike: dict[str, list[str]] = {}  # what an item says: the items that say just that
     for item in result.items:
         if item.principal not in unpassed:
             if item.principal not in passed:
@@ -236,13 +245,18 @@ def _items_markdown(result: CheckResult, account: Account) -> list[str]:
             continue
         label = _label(item, check)
         reasons = {_refusal(answer.refusal) for answer in item.answers if answer.refusal}
+        texts = {_outcome(answer) for answer in item.answers}
         if item.result is Result.PASS:
             passed.append(label)
         elif item.result is Result.CANT_TELL and len(reasons) == 1 and all(
                 answer.refusal for answer in item.answers):
             refused.setdefault(reasons.pop(), []).append(label)
+        elif len(texts) == 1 and (item.note is None or item.result is Result.PASS):
+            alike.setdefault(texts.pop(), []).append(label)
         else:
             lines += _item_markdown(item, label)
+    # Items that say the same thing share a line, in the order they were asked.
+    lines[:0] = [_bullet(f"{', '.join(labels)} {text}") for text, labels in alike.items()]
     for message, labels in refused.items():
         who = "everyone asked" if len(labels) == len(result.items) else ", ".join(labels)
         lines.append(_bullet(f"Can't tell for {who}: {message}"))
@@ -491,8 +505,10 @@ def _finding_json(finding: Finding) -> dict:
         "policy_type": finding.kind.value,
         **_statement_ref(finding.statement, finding.index),
         "uses": [_use_json(use) for use in finding.uses],
-        "condition": None if condition is None else {
-            "operator": condition.name, "key": condition.key, "values": list(condition.values)},
+        "condition": None if condition is None else _condition_json(condition),
+        "principal": None if finding.principal is None else {
+            "type": finding.principal.type.value, "value": finding.principal.value},
+        "unsettled": [_condition_json(c) for c in finding.unsettled],
         "why": found.why,
         "fix": found.fix,
         "evidence": {
@@ -500,6 +516,10 @@ def _finding_json(finding: Finding) -> dict:
             "docs": [{"link": d.link, "quote": d.quote} for d in found.docs],
         },
     }
+
+
+def _condition_json(condition: Condition) -> dict:
+    return {"operator": condition.name, "key": condition.key, "values": list(condition.values)}
 
 
 def _use_json(use: Use) -> dict:
@@ -589,8 +609,7 @@ def _matched_json(matched: MatchedStatement) -> dict:
 
 
 def _statement_ref(statement: Statement, index: int | None) -> dict:
-    conditions = [{"operator": c.name, "key": c.key, "values": list(c.values)}
-                  for c in statement.conditions]
+    conditions = [_condition_json(c) for c in statement.conditions]
     return {"sid": statement.sid, "index": index, "conditions": conditions}
 
 

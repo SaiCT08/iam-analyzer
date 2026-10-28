@@ -645,8 +645,7 @@ arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
 
 - user/jsmith can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Teachers.
 - user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
-- user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
+- user/alee, role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
 - Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
 - Not asked: user/kwong.
 ```
@@ -776,10 +775,31 @@ request the author meant to let through.
 |---|---|---|
 | A four-digit date is read as epoch seconds | a date condition with a value such as `2027`, which AWS reads as a moment in 1970 | simulator: `dates_without_a_time_zone/four_digits` |
 | A Bool value with a policy variable never matches | `Bool` with a value such as `${aws:MultiFactorAuthPresent}` | simulator: `bool_with_a_variable/*`; AWS's policy variables page |
+| A bucket policy grants access to everyone | an Allow for `"*"` that no condition limits to fixed values of a key S3 names | S3's "The meaning of public" |
+| A trust policy lets everyone assume the role | an Allow for `"*"` (critical without a condition) | the Principal page: "Do not leave your role accessible to everyone!" |
+| Another account can assume the role without an external ID | an `sts:AssumeRole` Allow for an account outside the organization, with no `sts:ExternalId` condition | the third-party access page |
+| A principal is shown as a unique ID, so it was deleted | an AWS principal such as `AIDAEXAMPLEEXAMPLE123` | the Principal page |
 
-The district account's `SummerSchoolRecords` policy has the first one. It allows reads "until
-2027", but `DateLessThan` compares against early 1970, so the Allow never applies and `tbrooks`
-can't read anything.
+The district account has two of these mistakes on purpose:
+- `SummerSchoolRecords` allows reads "until 2027", but `DateLessThan` compares against early 1970,
+  so the Allow never applies and `tbrooks` can't read anything.
+- `district-roster-exports` was opened to everyone to share a roster with a vendor. Its
+  `ShareRosterWithVendor` statement allows `"*"`, so the roster check fails for every principal in
+  the file and is CAN'T TELL for everyone outside it.
+
+A public bucket follows S3's definition: a grant to `"*"` is public unless a condition pins one of
+these keys to fixed values, with no wildcard and no policy variable:
+- `aws:SourceIp`, no broader than /8 for IPv4 or /32 for IPv6;
+- `aws:SourceArn`, `aws:SourceVpc`, `aws:SourceVpce`, `aws:SourceOwner` or `aws:SourceAccount`;
+- `aws:userid`;
+- `s3:DataAccessPointArn` (the access point's name may have a wildcard) or
+  `s3:DataAccessPointAccount`;
+- `aws:PrincipalOrgID`.
+
+Negated operators, `...IfExists` and `ForAllValues` don't pin a key, since they also hold for
+requests without it. S3 names `aws:PrincipalOrgID` only as an example of a principal key. So a
+grant pinned only by another principal key, such as `aws:PrincipalArn`, is still reported, and the
+finding says S3's page doesn't settle it.
 
 ### Mapping checks to requirements
 

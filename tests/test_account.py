@@ -393,6 +393,7 @@ def test_example_account_describes_its_buckets():
         RECORDS,
         "arn:aws:s3:::district-staff-files",
         "arn:aws:s3:::district-gradebook-app",
+        "arn:aws:s3:::district-roster-exports",
     }
 
 

@@ -16,6 +16,12 @@
       "Title": "Access Enforcement",
       "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
     },
+    "NIST AC-22": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-22",
+      "Title": "Publicly Accessible Content",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
     "NIST AC-6": {
       "Framework": "NIST SP 800-53 Rev. 5",
       "Id": "AC-6",
@@ -57,6 +63,17 @@
       "Resources": ["arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"],
       "Fix": "Narrow TeacherReadGrades from district-student-records/* to the folders teachers need, and add a bucket policy Deny on counseling/* for everyone but counselors, using aws:PrincipalArn as OnlyITAdminChangesThePolicy does.",
       "MapsTo": ["FERPA 99.31(a)(1)(ii)", "NIST AC-6"]
+    },
+    {
+      "Id": "roster-exports-registrars-only",
+      "Title": "Only registrars can read roster exports",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": ["group/Registrars"],
+      "Actions": ["s3:GetObject"],
+      "Resources": ["arn:aws:s3:::district-roster-exports/2026/roster.csv"],
+      "Fix": "Replace \"*\" in ShareRosterWithVendor with the vendor's account or role ARN, or share the export with a presigned URL, and turn on S3 Block Public Access.",
+      "MapsTo": ["FERPA 99.31(a)(1)(ii)", "NIST AC-22"]
     },
     {
       "Id": "record-changes-need-mfa",

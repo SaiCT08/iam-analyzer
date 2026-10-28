@@ -116,7 +116,8 @@ def test_a_fail_cites_each_grant_and_how_the_principal_gets_it():
     assert lines[2] == f"Asked: Can anyone do s3:GetObject on {OBJECT}?"
     assert ("- user/teacher can. Granted by Read, Sid Read, through group Teachers." in lines)
     # A statement without a Sid is named by its place in its policy.
-    assert "- user/reader can. Granted by Unnamed, statement 0, attached directly." in lines
+    assert ("- user/reader, role/Admin can. Granted by Unnamed, statement 0, attached "
+            "directly.") in lines
     assert "- Can't: user/registrar, user/clerk." in lines
     assert "Fix: Fix a." in lines
     assert ("- NIST SP 800-53 Rev. 5 AC-6: Least Privilege. "
@@ -169,7 +170,8 @@ def test_principals_outside_the_file_are_cited():
     public = {"Statement": [{"Sid": "Public", "Effect": "Allow", "Principal": "*",
                              "Action": "s3:GetObject", "Resource": f"{BUCKET}/*"}]}
     text = flat(markdown(check("a", "only"), bucket_policy=public))
-    assert ("- user/registrar can. Granted by the resource policy on "
+    # Principals whose answers read the same share a line.
+    assert ("- user/registrar, user/clerk can. Granted by the resource policy on "
             "arn:aws:s3:::district-student-records, Sid Public, which names everyone.") in text
     assert ('Can\'t tell for principals outside acct.json: the resource policy on '
             'arn:aws:s3:::district-student-records, Sid Public, allows s3:GetObject for '
@@ -262,6 +264,7 @@ def test_the_district_framework_gives_every_result():
     assert {r.check.id: r.result for r in district_report().checks} == {
         "student-records-no-deletes": Result.PASS,
         "counseling-notes-counselors-only": Result.FAIL,
+        "roster-exports-registrars-only": Result.FAIL,
         "record-changes-need-mfa": Result.FAIL,
         "admin-role-needs-mfa": Result.PASS,
         "registrars-update-own-campus": Result.DEPENDS,
@@ -333,6 +336,7 @@ def test_json_lists_the_findings():
         "uses": [{"policy_type": "identity", "principal": "group/Staff", "resource": None,
                   "org_target": None}],
         "condition": {"operator": "DateLessThan", "key": "aws:CurrentTime", "values": ["2026"]},
+        "principal": None, "unsettled": [],
         "why": high["why"], "fix": high["fix"],
         "evidence": {"fixtures": [{"case": "dates_without_a_time_zone/four_digits", "aws": "ALLOW"}],
                      "docs": []},

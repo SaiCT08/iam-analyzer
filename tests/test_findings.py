@@ -145,8 +145,140 @@ def test_findings_are_sorted_by_severity():
     assert found(acct) == [(DATE_NUMBER.id, Severity.HIGH, 1), (DATE_NUMBER.id, Severity.LOW, 0)]
 
 
-def test_the_district_example_has_its_summer_school_date():
-    [finding] = scan(load_account_file(EXAMPLES / "accounts" / "district.json"), organization=None)
-    assert (finding.type, finding.severity, finding.policy.name) == (
+def test_the_district_example_has_its_two_mistakes():
+    public, date = scan(load_account_file(EXAMPLES / "accounts" / "district.json"),
+                        organization=None)
+    assert (public.type.id, public.severity, public.statement.sid) == (
+        "public-bucket-policy", Severity.HIGH, "ShareRosterWithVendor")
+    assert public.uses == (
+        Use(PolicyType.RESOURCE_BASED, resource="arn:aws:s3:::district-roster-exports"),)
+    assert (date.type, date.severity, date.policy.name) == (
         DATE_NUMBER, Severity.LOW, "SummerSchoolRecords")
-    assert finding.uses == (Use(PolicyType.IDENTITY, principal="group/SummerSchool"),)
+    assert date.uses == (Use(PolicyType.IDENTITY, principal="group/SummerSchool"),)
+
+
+# --- Who policies grant access to ------------------------------------------------------
+
+PUBLIC = "public-bucket-policy"
+
+
+def bucket(*statements, version="2012-10-17"):
+    return parse_account({"AccountId": "111122223333", "Policies": {}, "Resources": {
+        BUCKET: {"Policy": {"Version": version, "Statement": list(statements)}}}},
+        name="acct.json")
+
+
+def grant(principal="*", effect="Allow", **condition):
+    return {"Effect": effect, "Principal": principal, "Action": "s3:GetObject",
+            "Resource": f"{BUCKET}/*", **({"Condition": condition} if condition else {})}
+
+
+@pytest.mark.parametrize("condition", [
+    {},
+    {"Bool": {"aws:SecureTransport": "true"}},  # TLS says nothing about who
+    {"StringLike": {"aws:SourceVpc": "vpc-*"}},  # S3's own public example
+    {"StringNotEquals": {"aws:SourceVpce": "vpce-1a2b3c4d"}},
+    {"StringEqualsIfExists": {"aws:SourceVpce": "vpce-1a2b3c4d"}},
+    {"ForAllValues:StringEquals": {"aws:SourceVpce": "vpce-1a2b3c4d"}},
+    {"StringEquals": {"aws:SourceVpce": "${aws:username}"}},
+    {"IpAddress": {"aws:SourceIp": "0.0.0.0/1"}},  # broader than /8
+    {"IpAddress": {"aws:SourceIp": "2001:db8::/16"}},  # broader than /32
+    {"NotIpAddress": {"aws:SourceIp": "203.0.113.0/24"}},
+    {"ArnLike": {"s3:DataAccessPointArn": "arn:aws:s3:us-west-2:*:accesspoint/*"}},
+])
+def test_a_grant_to_everyone_is_public(condition):
+    [finding] = scan(bucket(grant(**condition)), organization=None)
+    assert (finding.type.id, finding.severity) == (PUBLIC, Severity.HIGH)
+    assert finding.principal.value == "*"
+    assert finding.kind is PolicyType.RESOURCE_BASED
+    assert finding.unsettled == ()
+
+
+@pytest.mark.parametrize("condition", [
+    {"StringEquals": {"aws:SourceVpce": "vpce-1a2b3c4d"}},  # S3's own non-public example
+    {"ForAnyValue:StringEquals": {"aws:SourceVpc": "vpc-91237329"}},
+    {"StringEquals": {"aws:PrincipalOrgID": "o-a1b2c3d4e5"}},
+    {"StringEquals": {"aws:SourceAccount": "111122223333"}},
+    {"ArnEquals": {"aws:SourceArn": "arn:aws:cloudtrail:us-east-1:111122223333:trail/t"}},
+    {"StringEquals": {"aws:userid": "AIDAEXAMPLEEXAMPLE123"}},
+    {"IpAddress": {"aws:SourceIp": "203.0.113.0/24"}},
+    {"IpAddress": {"aws:SourceIp": ["10.0.0.0/8", "2001:db8::/32"]}},
+    {"ArnLike": {"s3:DataAccessPointArn": "arn:aws:s3:us-west-2:111122223333:accesspoint/*"}},
+    {"StringEquals": {"s3:DataAccessPointAccount": "111122223333"}},
+    {"Bool": {"aws:SecureTransport": "true"}, "StringEquals": {"aws:SourceVpce": "vpce-1"}},
+])
+def test_a_grant_limited_to_fixed_values_of_a_key_s3_names_isnt_public(condition):
+    assert found(bucket(grant(**condition))) == []
+
+
+def test_a_principal_key_s3_doesnt_name_is_unsettled():
+    condition = {"ArnEquals": {"aws:PrincipalArn": "arn:aws:iam::111122223333:role/Vendor"}}
+    [finding] = scan(bucket(grant(**condition)), organization=None)
+    assert finding.type.id == PUBLIC
+    assert [c.key for c in finding.unsettled] == ["aws:PrincipalArn"]
+
+
+def test_denies_and_named_principals_arent_public():
+    named = grant({"AWS": "arn:aws:iam::111122223333:user/kwong"})
+    assert found(bucket(grant(effect="Deny"), named)) == []
+
+
+TRUST = "arn:aws:iam::111122223333:role/Admin"
+
+
+def trust(*statements, organization=None):
+    acct = parse_account({"AccountId": "111122223333", "Policies": {}, "Roles": {"Admin": {
+        "AssumeRolePolicyDocument": {"Statement": list(statements)}}}}, name="acct.json")
+    return scan(acct, organization=organization)
+
+
+def assume(principal, effect="Allow", action="sts:AssumeRole", **condition):
+    return {"Effect": effect, "Principal": principal, "Action": action,
+            **({"Condition": condition} if condition else {})}
+
+
+def test_a_trust_policy_that_names_everyone():
+    [finding] = trust(assume("*"))
+    assert (finding.type.id, finding.severity) == ("trust-policy-names-everyone", Severity.CRITICAL)
+    assert finding.uses == (Use(PolicyType.TRUST, resource=TRUST),)
+    org_id = {"StringEquals": {"aws:PrincipalOrgID": "o-a1b2c3d4e5"}}
+    [limited] = trust(assume("*", **org_id))
+    assert limited.severity is Severity.HIGH
+    assert trust(assume("*", effect="Deny")) == ()
+
+
+@pytest.mark.parametrize("principal", [
+    {"AWS": "444455556666"},
+    {"AWS": "arn:aws:iam::444455556666:root"},
+    {"AWS": "arn:aws:iam::444455556666:role/Deployer"},
+])
+def test_another_account_without_an_external_id(principal):
+    [finding] = trust(assume(principal))
+    assert (finding.type.id, finding.severity) == (
+        "cross-account-trust-without-external-id", Severity.MEDIUM)
+    assert finding.principal.value == principal["AWS"]
+
+
+def test_an_external_id_the_same_account_or_the_organization_raises_nothing():
+    external_id = {"StringEquals": {"sts:ExternalId": "district-gradebook-7f3a"}}
+    assert trust(assume({"AWS": "444455556666"}, **external_id)) == ()
+    assert trust(assume({"AWS": "arn:aws:iam::111122223333:root"})) == ()
+    org = parse_organization({
+        "ManagementAccountId": "444455556666",
+        "ServiceControlPolicies": {"All": {"Statement": [
+            {"Effect": "Allow", "Action": "*", "Resource": "*"}]}},
+        "Root": {"ServiceControlPolicies": ["All"], "Accounts": {
+            "444455556666": {"ServiceControlPolicies": ["All"]},
+            "111122223333": {"ServiceControlPolicies": ["All"]}}},
+    }, name="org.json")
+    assert trust(assume({"AWS": "444455556666"}), organization=org) == ()
+    saml = {"Federated": "arn:aws:iam::111122223333:saml-provider/DistrictIdP"}
+    assert trust(assume(saml, action="sts:AssumeRoleWithSAML")) == ()
+
+
+@pytest.mark.parametrize("effect, severity", [("Deny", Severity.HIGH), ("Allow", Severity.LOW)])
+def test_a_unique_id_principal_was_deleted(effect, severity):
+    [finding] = scan(bucket(grant({"AWS": "AIDAEXAMPLEEXAMPLE123"}, effect=effect)),
+                     organization=None)
+    assert (finding.type.id, finding.severity) == ("principal-is-a-unique-id", severity)
+    assert finding.principal.value == "AIDAEXAMPLEEXAMPLE123"

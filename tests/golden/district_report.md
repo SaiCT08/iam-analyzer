@@ -1,17 +1,17 @@
 # Compliance report: Texas school district student records
 
-- Framework: district.json (district-student-records), 6 checks.
+- Framework: district.json (district-student-records), 7 checks.
 - Account: district.json (111122223333), 7 users and 3 roles.
 - Organization: district.json, whose SCPs are applied.
 
 | Result | Checks |
 |---|---|
-| FAIL | 2 |
+| FAIL | 3 |
 | DEPENDS | 1 |
 | CAN'T TELL | 1 |
 | PASS | 2 |
 
-Findings: 1 low.
+Findings: 1 high, 1 low.
 
 ## FAIL: Only counselors can read counseling notes (high)
 
@@ -20,8 +20,7 @@ arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
 
 - user/jsmith can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Teachers.
 - user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
-- user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
+- user/alee, role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
 - Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
 - Not asked: user/kwong.
 
@@ -33,6 +32,31 @@ Maps to:
 - FERPA (34 CFR Part 99) 34 CFR 99.31(a)(1)(ii): Reasonable methods to limit school officials'
   access. https://www.law.cornell.edu/cfr/text/34/99.31
 - NIST SP 800-53 Rev. 5 AC-6: Least Privilege. https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
+
+## FAIL: Only registrars can read roster exports (high)
+
+Asked: Can anyone but group/Registrars do s3:GetObject on
+arn:aws:s3:::district-roster-exports/2026/roster.csv?
+
+- user/jsmith, user/mgarcia, user/dpatel, user/kwong, user/tbrooks, role/TeacherSignIn can. Granted
+  by the resource policy on arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor, which
+  names everyone.
+- user/alee, role/ITAdmin, role/GradebookVendor can. Granted by ITAdminFullS3, Sid FullS3Access,
+  attached directly; the resource policy on arn:aws:s3:::district-roster-exports, Sid
+  ShareRosterWithVendor, which names everyone.
+- Can't tell for principals outside district.json: the resource policy on
+  arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor, allows s3:GetObject for everyone
+  ("*"), and the analyzer doesn't evaluate requests from outside the account file yet.
+- Not asked: user/rnguyen.
+
+Fix: Replace "*" in ShareRosterWithVendor with the vendor's account or role ARN, or share the export
+with a presigned URL, and turn on S3 Block Public Access.
+
+Maps to:
+- FERPA (34 CFR Part 99) 34 CFR 99.31(a)(1)(ii): Reasonable methods to limit school officials'
+  access. https://www.law.cornell.edu/cfr/text/34/99.31
+- NIST SP 800-53 Rev. 5 AC-22: Publicly Accessible Content.
+  https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
 
 ## FAIL: Changing student records needs MFA (high)
 
@@ -116,6 +140,20 @@ Maps to:
   https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
 
 ## Findings
+
+### HIGH: A bucket policy grants access to everyone
+
+- In: the resource policy on arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor.
+- Principal: everyone ("*").
+- Why: The statement allows "*", and no condition limits it to fixed values of a key that S3 names,
+  such as aws:SourceVpce or aws:PrincipalOrgID, so S3 counts the policy as public: anyone on the
+  internet can make the request, unless S3 Block Public Access stops it, which the analyzer doesn't
+  model.
+- Evidence: AWS: "When evaluating a bucket policy, Amazon S3 begins by assuming that the policy is
+  public. It then evaluates the policy to determine whether it qualifies as non-public."
+  https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html#access-control-block-public-access-policy-status
+- Fix: Name the account or role that needs access instead of "*", or limit the grant with a fixed
+  aws:SourceVpce or aws:PrincipalOrgID, and turn on S3 Block Public Access.
 
 ### LOW: A four-digit date is read as epoch seconds
 

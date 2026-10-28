@@ -824,8 +824,19 @@ def report_check(check_type, **fields):
             **names, **fields}
 
 
-def report(capsys, framework, *args):
-    code = main(["report", "--account", ACCOUNT, "--framework", framework, *args])
+def private_account(tmp_path):
+    """The district account without its public roster bucket, whose high finding would make every
+    report exit 1."""
+    document = json.loads(Path(ACCOUNT).read_text())
+    del document["Resources"]["arn:aws:s3:::district-roster-exports"]
+    path = tmp_path / "district.json"
+    path.write_text(json.dumps(document))
+    return str(path)
+
+
+def report(capsys, framework, *args, account=None):
+    code = main(["report", "--account", account or private_account(Path(framework).parent),
+                 "--framework", framework, *args])
     out, err = capsys.readouterr()
     return code, out, err
 
@@ -857,6 +868,14 @@ def test_report_writes_json_too(capsys, tmp_path):
     code, _, err = report(capsys, framework, "--no-org", "--json", str(json_path))
     assert code == EXIT_INPUT_ERROR
     assert "report.json: cannot write file" in err
+
+
+def test_report_a_public_bucket_fails_the_district_report(capsys, tmp_path):
+    code, out, _ = report(capsys, framework_file(tmp_path, report_check("only")), "--org", ORG,
+                          account=ACCOUNT)
+    assert code == EXIT_FAILED
+    assert "## PASS: A check (high)" in out
+    assert "### HIGH: A bucket policy grants access to everyone" in out
 
 
 def test_report_needs_scps_stated(tmp_path):
