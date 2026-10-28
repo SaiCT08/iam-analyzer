@@ -756,7 +756,9 @@ made with long-term access keys and for federated users. It also says "The tempo
 returned by `AssumeRole` do not include MFA information in the context". So MFA for a role is
 checked when the role is assumed, and the role's own requests never show it. A role's item in a
 check that requires MFA carries a note saying so, and points to the trust policy statements that
-check MFA. The report still tries `true` for roles too, which can only find more access, not less.
+check MFA. The report still tries `true` for roles too. When it's unsure whether a value can
+happen, it tries it: an impossible value can only add a false alarm, while skipping a possible one
+could hide real access.
 
 ### Who a report can't ask about
 

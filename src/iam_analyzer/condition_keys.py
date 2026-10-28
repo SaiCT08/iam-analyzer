@@ -11,9 +11,9 @@ aws:MultiFactorAuthPresent can be absent for every principal. AWS says it is mis
 long-term access keys and for federated identities. Its "Secure API access with MFA" page also says
 "The temporary credentials returned by AssumeRole do not include MFA information in the context",
 so a role's own requests never show MFA. Every principal is still tried with true, false and
-absent, roles included. For a role, true is a value AWS says its requests don't have, and trying it
-can only make a report find more access, never less. Whether to stop trying it for roles is an
-open question.
+absent, roles included: when it's unsure whether a value can happen, the analyzer tries it.
+If AWS's page is right, true for a role can only add a false alarm. If it's wrong,
+skipping true could let a check that forbids access PASS when it should FAIL.
 """
 
 from dataclasses import dataclass
