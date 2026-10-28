@@ -20,10 +20,12 @@ ADMIN_TRUST = {"Statement": [{"Sid": "AccountWithMfa", "Effect": "Allow",
                               "Action": "sts:AssumeRole", "Condition": {"Bool": {MFA: "true"}}}]}
 
 
-def account(bucket_policy=None):
+def account(bucket_policy=None, clerk=True):
+    """A small account. The clerk's policy has an MFA Deny that skips access keys, a high
+    finding, so reports about other things can leave the clerk out."""
     bucket = {} if bucket_policy is None else {"Policy": bucket_policy}
     read = {"Effect": "Allow", "Action": "s3:GetObject", "Resource": f"{BUCKET}/*"}
-    return parse_account({
+    document = {
         "AccountId": "111122223333",
         "Policies": {
             "Read": {"Statement": [{**read, "Sid": "Read"}]},
@@ -42,10 +44,14 @@ def account(bucket_policy=None):
         },
         "Groups": {"Teachers": {"Policies": ["Read"]}},
         "Users": {"teacher": {"Groups": ["Teachers"]}, "reader": {"Policies": ["Unnamed"]},
-                  "registrar": {"Policies": ["Write"]}, "clerk": {"Policies": ["SkipsAccessKeys"]}},
+                  "registrar": {"Policies": ["Write"]},
+                  **({"clerk": {"Policies": ["SkipsAccessKeys"]}} if clerk else {})},
         "Roles": {"Admin": {"Policies": ["Unnamed"], "AssumeRolePolicyDocument": ADMIN_TRUST}},
         "Resources": {BUCKET: bucket},
-    }, name="acct.json")
+    }
+    if not clerk:
+        del document["Policies"]["SkipsAccessKeys"]
+    return parse_account(document, name="acct.json")
 
 
 def check(check_id, check_type, severity="high", **fields):
@@ -55,11 +61,11 @@ def check(check_id, check_type, severity="high", **fields):
             "Fix": f"Fix {check_id}.", **names, **fields}
 
 
-def report(*checks, bucket_policy=None):
+def report(*checks, bucket_policy=None, clerk=True):
     framework = parse_framework({"Framework": {"Id": "fw", "Title": "Student records"},
                                  "Requirements": {"NIST AC-6": AC_6}, "Checks": list(checks)},
                                 name="fw.json")
-    return build(framework, account(bucket_policy), organization=None)
+    return build(framework, account(bucket_policy, clerk), organization=None)
 
 
 def markdown(*checks, **kwargs):
@@ -227,12 +233,17 @@ def test_json_keeps_the_typed_fields():
 
 
 def test_failed_and_unsettled():
-    passed = report(check("a", "only", Principals=["group/Teachers", "user/reader", "role/Admin"]))
+    passed = report(check("a", "only", Principals=["group/Teachers", "user/reader", "role/Admin"]),
+                    clerk=False)
     assert (passed.failed, passed.unsettled) == (False, False)
-    depends = report(check("a", "can", Principals=["user/registrar"], Actions=["s3:PutObject"]))
+    depends = report(check("a", "can", Principals=["user/registrar"], Actions=["s3:PutObject"]),
+                     clerk=False)
     assert (depends.failed, depends.unsettled) == (False, True)
-    failed = report(check("a", "only"), check("b", "only", Resources=[LESSONS]))
+    failed = report(check("a", "only"), check("b", "only", Resources=[LESSONS]), clerk=False)
     assert (failed.failed, failed.unsettled) == (True, True)
+    # With the clerk, a passing check still fails the report: its policy has a high finding.
+    assert report(check("a", "only", Principals=["group/Teachers", "user/reader", "role/Admin",
+                                                 "user/clerk"])).failed
 
 
 def test_labels_show_only_what_varies_and_passing_principals_appear_once():
@@ -321,8 +332,9 @@ def test_a_high_finding_fails_the_report():
 
 
 def test_no_findings_says_so():
-    assert "## Findings\n\nNo findings.\n" in markdown(check("a", "only"))
-    assert "Findings: none." in markdown(check("a", "only"))
+    text = markdown(check("a", "only"), clerk=False)
+    assert "## Findings\n\nNo findings.\n" in text
+    assert "Findings: none." in text
 
 
 def test_json_lists_the_findings():

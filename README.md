@@ -779,6 +779,12 @@ request the author meant to let through.
 | A trust policy lets everyone assume the role | an Allow for `"*"` (critical without a condition) | the Principal page: "Do not leave your role accessible to everyone!" |
 | Another account can assume the role without an external ID | an `sts:AssumeRole` Allow for an account outside the organization, with no `sts:ExternalId` condition | the third-party access page |
 | A principal is shown as a unique ID, so it was deleted | an AWS principal such as `AIDAEXAMPLEEXAMPLE123` | the Principal page |
+| An MFA Deny skips requests made with access keys | a Deny with plain `Bool aws:MultiFactorAuthPresent: false`, which fails when the key is missing | the global condition keys page, which recommends `...IfExists` |
+| A ForAllValues Allow also applies when the key is missing | an Allow with `ForAllValues:` and no `Null` false check on the key | simulator: `scenarios/condition_for_all_values_holds_when_the_key_is_missing`; the condition operators page |
+| IfExists does nothing with ForAnyValue | `ForAnyValue:...IfExists`, which still fails on a missing key | simulator: `for_any_value_if_exists/key_absent` |
+| A set operator turns a Null check around | `ForAnyValue:Null` true, which never holds, or `ForAllValues:Null` false, which holds on a missing key | simulator: `set_operator_on_null/*` |
+| A date with no time zone is read as UTC (always low) | a date such as `2026-08-15` or `2026-08-15T07:30` | simulator: `dates_without_a_time_zone/*` |
+| An IP range with host bits covers the whole network | a range such as `203.0.113.5/24` | simulator: `ip_ranges/range_with_host_bits` |
 
 The district account has two of these mistakes on purpose:
 - `SummerSchoolRecords` allows reads "until 2027", but `DateLessThan` compares against early 1970,

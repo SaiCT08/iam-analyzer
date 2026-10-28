@@ -71,8 +71,9 @@ def test_a_four_digit_date_is_found(effect, operator, severity):
 
 
 @pytest.mark.parametrize("value", ["2027-01-01T00:00:00Z", "2027-01-01", "1798761600", "202"])
-def test_other_dates_are_not_found(value):
-    assert found(account(statement(DateLessThan={"aws:CurrentTime": value}))) == []
+def test_other_dates_arent_read_as_epoch_seconds(value):
+    acct = account(statement(DateLessThan={"aws:CurrentTime": value}))
+    assert DATE_NUMBER.id not in [type_id for type_id, _, _ in found(acct)]
 
 
 @pytest.mark.parametrize("effect, severity", [("Deny", Severity.HIGH), ("Allow", Severity.LOW)])
@@ -187,7 +188,8 @@ def grant(principal="*", effect="Allow", **condition):
     {"ArnLike": {"s3:DataAccessPointArn": "arn:aws:s3:us-west-2:*:accesspoint/*"}},
 ])
 def test_a_grant_to_everyone_is_public(condition):
-    [finding] = scan(bucket(grant(**condition)), organization=None)
+    [finding] = [f for f in scan(bucket(grant(**condition)), organization=None)
+                 if f.type.id == PUBLIC]
     assert (finding.type.id, finding.severity) == (PUBLIC, Severity.HIGH)
     assert finding.principal.value == "*"
     assert finding.kind is PolicyType.RESOURCE_BASED
@@ -282,3 +284,75 @@ def test_a_unique_id_principal_was_deleted(effect, severity):
                      organization=None)
     assert (finding.type.id, finding.severity) == ("principal-is-a-unique-id", severity)
     assert finding.principal.value == "AIDAEXAMPLEEXAMPLE123"
+
+
+# --- Condition surprises ---------------------------------------------------------------
+
+MFA = "aws:MultiFactorAuthPresent"
+
+
+def types(*statements):
+    return [(type_id, severity) for type_id, severity, _ in found(account(*statements))]
+
+
+def test_an_mfa_deny_that_skips_access_keys():
+    assert types(statement("Deny", Bool={MFA: "false"})) == [
+        ("mfa-deny-skips-access-keys", Severity.HIGH)]
+    assert types(statement("Deny", BoolIfExists={MFA: "false"})) == []  # AWS's recommendation
+    assert types(statement("Allow", Bool={MFA: "true"})) == []  # needs MFA: missing fails, safely
+
+
+def test_a_for_all_values_allow_without_a_null_check():
+    tags = {"ForAllValues:StringEquals": {"aws:TagKeys": ["campus", "grade"]}}
+    assert types(statement("Allow", **tags)) == [("for-all-values-allow-without-null",
+                                                  Severity.HIGH)]
+    assert types(statement("Allow", **tags, Null={"aws:TagKeys": "false"})) == []
+    assert types(statement("Deny", **tags)) == []
+
+
+@pytest.mark.parametrize("effect, severity", [("Deny", Severity.HIGH), ("Allow", Severity.LOW)])
+def test_for_any_value_with_if_exists(effect, severity):
+    condition = {"ForAnyValue:StringEqualsIfExists": {"aws:TagKeys": "campus"}}
+    assert types(statement(effect, **condition)) == [("for-any-value-ignores-if-exists", severity)]
+
+
+@pytest.mark.parametrize("operator, value, effect, severity", [
+    ("ForAnyValue:Null", "true", "Deny", Severity.HIGH),  # never holds, so the Deny never applies
+    ("ForAnyValue:Null", "true", "Allow", Severity.LOW),
+    ("ForAllValues:Null", "false", "Allow", Severity.HIGH),  # holds when the key is missing
+    ("ForAllValues:Null", "false", "Deny", Severity.LOW),
+])
+def test_a_set_operator_on_null(operator, value, effect, severity):
+    assert types(statement(effect, **{operator: {"aws:TagKeys": value}})) == [
+        ("set-operator-on-null", severity)]
+
+
+@pytest.mark.parametrize("operator, value", [("ForAnyValue:Null", "false"),
+                                             ("ForAllValues:Null", "true")])
+def test_a_set_operator_on_null_that_reads_as_written(operator, value):
+    assert types(statement(**{operator: {"aws:TagKeys": value}})) == []
+
+
+@pytest.mark.parametrize("value", ["2026-08", "2026-08-15", "2026-08-15T07:30",
+                                   "2026-08-15T07:30:00"])
+def test_a_date_without_a_time_zone(value):
+    assert types(statement(DateGreaterThan={"aws:CurrentTime": value})) == [
+        ("date-without-a-time-zone", Severity.LOW)]
+
+
+def test_a_date_with_a_time_zone_or_a_number():
+    assert types(statement(DateGreaterThan={"aws:CurrentTime": "2026-08-15T07:30:00Z"})) == []
+    assert "date-without-a-time-zone" not in dict(
+        types(statement(DateGreaterThan={"aws:CurrentTime": "2026"})))
+
+
+@pytest.mark.parametrize("operator, value, found_it", [
+    ("IpAddress", "203.0.113.5/24", True),
+    ("NotIpAddress", "10.1.2.3/8", True),
+    ("IpAddress", "203.0.113.0/24", False),
+    ("IpAddress", "203.0.113.5", False),
+    ("IpAddress", "2001:db8::/32", False),
+])
+def test_an_ip_range_with_host_bits(operator, value, found_it):
+    result = types(statement(**{operator: {"aws:SourceIp": value}}))
+    assert result == ([("ip-range-with-host-bits", Severity.LOW)] if found_it else [])

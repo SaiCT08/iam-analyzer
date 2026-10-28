@@ -20,6 +20,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
 from iam_analyzer.account import Account
+from iam_analyzer.condition_keys import values_of
 from iam_analyzer.conditions import OPERATORS
 from iam_analyzer.framework import Severity
 from iam_analyzer.matching import match_action
@@ -52,8 +53,15 @@ EXTERNAL_ID_PAGE = (
     "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_third-party.html"
     "#id_roles_third-party_external-id"
 )
+OPERATORS_PAGE = (
+    "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html"
+)
 EVERYONE = Principal(PrincipalType.AWS, "*")
+MFA_KEY = "aws:MultiFactorAuthPresent"
 _ACCOUNT_ID = re.compile(r"[0-9]{12}")
+# The date forms with no time zone that AWS's IAM policy simulator read as UTC: a month, a day, or a
+# day and a time to the minute or the second (see `conditions`).
+_ZONELESS_DATE = re.compile(r"\d{4}-\d{2}(-\d{2}(T\d{2}:\d{2}(:\d{2})?)?)?")
 
 
 @dataclass(frozen=True)
@@ -184,7 +192,82 @@ UNIQUE_ID = FindingType(
               "has a new principal ID that does not match the ID stored in the trust policy."),),
 )
 
-TYPES = (DATE_NUMBER, BOOL_VARIABLE, PUBLIC_BUCKET, TRUST_EVERYONE, CROSS_ACCOUNT_TRUST, UNIQUE_ID)
+MFA_DENY = FindingType(
+    id="mfa-deny-skips-access-keys",
+    title="An MFA Deny skips requests made with access keys",
+    why="The Deny uses Bool on aws:MultiFactorAuthPresent. Requests signed with long-term access "
+    "keys don't include that key at all, and Bool fails on a missing key, so the Deny doesn't "
+    "apply to them.",
+    fix="Use BoolIfExists aws:MultiFactorAuthPresent false, which also applies when the key is "
+    "missing.",
+    docs=(Doc(values_of(MFA_KEY).link,
+              "The aws:MultiFactorAuthPresent key is not present when an API or CLI command is "
+              "called with long-term credentials, such as user access key pairs. Therefore we "
+              "recommend that when you check for this key that you use the ...IfExists versions "
+              "of the condition operators."),),
+)
+FOR_ALL_VALUES_WITHOUT_NULL = FindingType(
+    id="for-all-values-allow-without-null",
+    title="A ForAllValues Allow also applies when the key is missing",
+    why="ForAllValues holds when the request doesn't include the key at all, so this Allow applies "
+    "to requests that carry none of the values it lists.",
+    fix="Add a Null condition with false on the same key, so the Allow needs the key.",
+    fixtures=(Fixture("scenarios/condition_for_all_values_holds_when_the_key_is_missing", "ALLOW"),),
+    docs=(Doc(OPERATORS_PAGE,
+              "The ForAllValues qualifier returns true if there are no context keys in the request "
+              "or if the context key value resolves to a null dataset, such as an empty string."),),
+)
+FOR_ANY_VALUE_IF_EXISTS = FindingType(
+    id="for-any-value-ignores-if-exists",
+    title="IfExists does nothing with ForAnyValue",
+    why="ForAnyValue fails when the request doesn't include the key, even with IfExists, so the "
+    "condition doesn't hold for a missing key as IfExists suggests.",
+    fix="Drop IfExists, and add a Null condition on the key for the case where it's missing.",
+    fixtures=(Fixture("for_any_value_if_exists/key_absent", "IMPLICIT_DENY"),),
+)
+SET_OPERATOR_ON_NULL = FindingType(
+    id="set-operator-on-null",
+    title="A set operator turns a Null check around",
+    why="On a missing key, ForAllValues holds and ForAnyValue fails, whatever Null's value. So "
+    "ForAnyValue:Null true never holds, and ForAllValues:Null false holds when the key is missing.",
+    fix="Use Null without a set operator.",
+    fixtures=(
+        Fixture("set_operator_on_null/for_any_value_null_true_key_absent", "IMPLICIT_DENY"),
+        Fixture("set_operator_on_null/for_all_values_null_false_key_absent", "ALLOW"),
+    ),
+)
+ZONELESS_DATE = FindingType(
+    id="date-without-a-time-zone",
+    title="A date with no time zone is read as UTC",
+    why="AWS reads a date or time with no time zone as UTC, so the moment can be hours from the "
+    "local one the author may have meant. It's low, because which way it errs depends on the "
+    "author's time zone.",
+    fix="Give the time zone, such as 2026-08-15T00:00:00-05:00.",
+    fixtures=(
+        Fixture("dates_without_a_time_zone/date_only_just_after_midnight_utc", "ALLOW"),
+        Fixture("dates_without_a_time_zone/date_only_just_before_midnight_utc", "IMPLICIT_DENY"),
+        Fixture("dates_without_a_time_zone/month_only_just_after_midnight_utc", "ALLOW"),
+        Fixture("dates_without_a_time_zone/month_only_just_before_midnight_utc", "IMPLICIT_DENY"),
+        Fixture("dates_without_a_time_zone/time_without_a_zone_just_after", "ALLOW"),
+        Fixture("dates_without_a_time_zone/time_without_a_zone_just_before", "IMPLICIT_DENY"),
+        Fixture("dates_without_a_time_zone/time_without_seconds_just_after", "ALLOW"),
+        Fixture("dates_without_a_time_zone/time_without_seconds_just_before", "IMPLICIT_DENY"),
+    ),
+)
+HOST_BITS = FindingType(
+    id="ip-range-with-host-bits",
+    title="An IP range with host bits covers the whole network",
+    why="AWS masks the host bits of an IP range, so a value such as 203.0.113.5/24 covers all of "
+    "203.0.113.0/24, not just 203.0.113.5.",
+    fix="Write the network itself, such as 203.0.113.0/24, or /32 for one address.",
+    fixtures=(Fixture("ip_ranges/range_with_host_bits", "ALLOW"),),
+)
+
+TYPES = (
+    DATE_NUMBER, BOOL_VARIABLE, PUBLIC_BUCKET, TRUST_EVERYONE, CROSS_ACCOUNT_TRUST, UNIQUE_ID,
+    MFA_DENY, FOR_ALL_VALUES_WITHOUT_NULL, FOR_ANY_VALUE_IF_EXISTS, SET_OPERATOR_ON_NULL,
+    ZONELESS_DATE, HOST_BITS,
+)
 
 
 # --- Scanning --------------------------------------------------------------------------
@@ -422,7 +505,69 @@ def _unique_ids(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
             yield _Hit(UNIQUE_ID, severity, principal=principal)
 
 
+def _mfa_denies(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    if statement.effect is not Effect.DENY:
+        return
+    for condition in statement.conditions:
+        if (condition.operator == "Bool" and not condition.if_exists
+                and condition.set_operator is None
+                and condition.key.casefold() == MFA_KEY.casefold() and "false" in condition.values):
+            yield _Hit(MFA_DENY, Severity.HIGH, condition)
+
+
+def _for_all_values_without_null(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    if statement.effect is not Effect.ALLOW:
+        return
+    needed = {condition.key.casefold() for condition in statement.conditions
+              if condition.operator == "Null" and condition.set_operator is None
+              and condition.values == ("false",)}
+    for condition in statement.conditions:
+        if (condition.set_operator is SetOperator.FOR_ALL_VALUES and condition.operator != "Null"
+                and condition.key.casefold() not in needed):
+            yield _Hit(FOR_ALL_VALUES_WITHOUT_NULL, Severity.HIGH, condition)
+
+
+def _for_any_value_if_exists(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    for condition in statement.conditions:
+        if condition.set_operator is SetOperator.FOR_ANY_VALUE and condition.if_exists:
+            # IfExists suggests the condition holds on a missing key, but it fails there.
+            yield _Hit(FOR_ANY_VALUE_IF_EXISTS, _opens(statement, always=False), condition)
+
+
+def _set_operators_on_null(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    for condition in statement.conditions:
+        if condition.operator != "Null" or condition.set_operator is None:
+            continue
+        if condition.set_operator is SetOperator.FOR_ANY_VALUE and "true" in condition.values:
+            yield _Hit(SET_OPERATOR_ON_NULL, _opens(statement, always=False), condition)
+        if condition.set_operator is SetOperator.FOR_ALL_VALUES and "false" in condition.values:
+            yield _Hit(SET_OPERATOR_ON_NULL, _opens(statement, always=True), condition)
+
+
+def _zoneless_dates(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    for condition in statement.conditions:
+        if condition.operator.startswith("Date") and any(
+                _ZONELESS_DATE.fullmatch(value) for value in condition.values):
+            yield _Hit(ZONELESS_DATE, Severity.LOW, condition)
+
+
+def _host_bits(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    for condition in statement.conditions:
+        if condition.operator in ("IpAddress", "NotIpAddress") and any(
+                _has_host_bits(value) for value in condition.values):
+            yield _Hit(HOST_BITS, Severity.LOW, condition)
+
+
+def _has_host_bits(value: str) -> bool:
+    try:
+        ipaddress.ip_network(value)
+    except ValueError:
+        return True  # the loader already read it with its host bits masked
+    return False
+
+
 DETECTORS: tuple[Detector, ...] = (
     _date_numbers, _bool_variables, _public_bucket, _trust_everyone, _cross_account_trust,
-    _unique_ids,
+    _unique_ids, _mfa_denies, _for_all_values_without_null, _for_any_value_if_exists,
+    _set_operators_on_null, _zoneless_dates, _host_bits,
 )
