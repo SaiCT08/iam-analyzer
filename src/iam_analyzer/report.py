@@ -6,8 +6,10 @@ table. Checks that need attention come first. The JSON keeps every typed field, 
 `via_group` and each statement's layer, so other tools can group results without parsing text.
 """
 
+import ipaddress
+import re
 import textwrap
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from iam_analyzer import compliance, condition_keys, findings, resources
@@ -28,6 +30,7 @@ from iam_analyzer.framework import Check, CheckType, Framework, Severity
 from iam_analyzer.models import (
     Condition,
     Decision,
+    Effect,
     Layer,
     MatchedStatement,
     OrgTarget,
@@ -147,6 +150,7 @@ def _finding_markdown(finding: Finding) -> list[str]:
         lines.append(_bullet(f"Affects: {', '.join(finding.subjects)}."))
     if finding.condition is not None:
         lines.append(_bullet(f"Condition: {_condition(finding.condition)}."))
+    lines.append(_bullet(f"Impact: {_impact(finding)}"))
     lines.append(_bullet(f"Why: {found.why}"))
     if finding.unsettled:
         conditions = "; ".join(_condition(c) for c in finding.unsettled)
@@ -179,6 +183,207 @@ def _attached(uses: Sequence[Use]) -> str:
     if bounds:
         parts.append(f"the permissions boundary of {', '.join(bounds)}")
     return "; and ".join(parts) or "that isn't attached to anyone"
+
+
+# --- What each finding's mistake does in its policy ------------------------------------
+
+
+def _impact(finding: Finding) -> str:
+    """What the mistake does in this statement, for the principals who get it: "The Allow never
+    applies, so it never lets group/SummerSchool do s3:GetObject on ..."."""
+    return IMPACTS[finding.type.id](finding)
+
+
+def _does(finding: Finding, how: str, who: str | None = None, what: str | None = None) -> str:
+    """The statement's effect on `who` doing `what`. `how` is "lets", "never", "not" or "also":
+    "never lets group/X do s3:GetObject on ...", or for "not", "doesn't stop user/Y from doing"."""
+    who = _who(finding) if who is None else who
+    what = _what(finding) if what is None else what
+    allow = finding.statement.effect is Effect.ALLOW
+    if how == "lets":
+        return f"lets {who} do {what}" if allow else f"stops {who} from doing {what}"
+    if how == "not":
+        return f"doesn't let {who} do {what}" if allow else f"doesn't stop {who} from doing {what}"
+    verb = "lets" if allow else "stops"
+    return f"{how} {verb} {who} do {what}" if allow else f"{how} {verb} {who} from doing {what}"
+
+
+def _who(finding: Finding) -> str:
+    """Whom the statement is about: the principals it names, or the ones that get its policy."""
+    if finding.subjects:
+        return _and(finding.subjects)
+    statement = finding.statement
+    if finding.kind in (PolicyType.RESOURCE_BASED, PolicyType.TRUST):
+        named = statement.principals or ()
+        names = _and([_principal(p) for p in named])
+        if statement.not_principal:
+            return f"everyone but {names}"
+        return "anyone" if findings.EVERYONE in named else names
+    if finding.kind is PolicyType.SCP:
+        targets = [_target(use.org_target) for use in finding.uses]
+        return f"principals in {_and(targets)}" if targets else "no one, since it isn't attached"
+    attached = [use.principal for use in finding.uses]
+    return _and(attached) if attached else "no one yet, since the policy isn't attached"
+
+
+def _what(finding: Finding, patterns: Sequence[str] | None = None) -> str:
+    """The statement's actions on its resources: "s3:GetObject on arn:aws:s3:::bucket/*"."""
+    statement = finding.statement
+    actions = ("every action but " if statement.not_action else "") + _or(statement.actions)
+    if not statement.resources:  # a trust policy: it's about its role
+        return f"{actions} on {finding.uses[0].resource}"
+    patterns = statement.resources if patterns is None else patterns
+    if statement.not_resource:
+        return f"{actions} on any resource but {_or(patterns)}"
+    return f"{actions} on {'any resource' if tuple(patterns) == ('*',) else _or(patterns)}"
+
+
+def _date_impact(finding: Finding) -> str:
+    effect = finding.statement.effect.value
+    if finding.always:
+        return (f"The condition always holds, so the {effect} {_does(finding, 'lets')} whatever "
+                "the date.")
+    return f"The {effect} never applies, so it {_does(finding, 'never')}."
+
+
+def _bool_impact(finding: Finding) -> str:
+    return (f"The condition never holds in a request that includes {finding.condition.key}, so the "
+            f"{finding.statement.effect.value} {_does(finding, 'never')} in one.")
+
+
+def _public_impact(finding: Finding) -> str:
+    return (f"It lets anyone do {_what(finding)}, with credentials from any AWS account or with "
+            "none.")
+
+
+def _trust_everyone_impact(finding: Finding) -> str:
+    role = finding.uses[0].resource
+    unless = ", unless its conditions stop them" if finding.statement.conditions else ""
+    return f"It lets any principal in any AWS account assume {role}{unless}."
+
+
+def _cross_account_impact(finding: Finding) -> str:
+    return (f"It lets {_principal(finding.principal)} assume {finding.uses[0].resource} without "
+            "giving an external ID.")
+
+
+def _unique_id_impact(finding: Finding) -> str:
+    statement = finding.statement
+    if statement.effect is Effect.ALLOW:
+        return f"The principal it names is gone, so it no longer lets anyone do {_what(finding)}."
+    if statement.not_principal:
+        return (f"The principal NotPrincipal names is gone, so the Deny on {_what(finding)} no "
+                "longer spares anyone it was meant to.")
+    return (f"The principal it names is gone, so it no longer stops anyone from doing "
+            f"{_what(finding)}, even a new principal with the same name.")
+
+
+def _mfa_deny_impact(finding: Finding) -> str:
+    return f"It {_does(finding, 'not')} in requests made with long-term access keys."
+
+
+def _for_all_values_impact(finding: Finding) -> str:
+    return (f"It {_does(finding, 'also')} in requests that don't include "
+            f"{finding.condition.key}.")
+
+
+def _for_any_value_impact(finding: Finding) -> str:
+    return (f"It {_does(finding, 'never')} in a request that doesn't include "
+            f"{finding.condition.key}.")
+
+
+def _null_impact(finding: Finding) -> str:
+    effect = finding.statement.effect.value
+    if finding.always:
+        return (f"The condition always holds, so the {effect} {_does(finding, 'lets')} whether or "
+                f"not the request includes {finding.condition.key}.")
+    return f"The condition never holds, so the {effect} {_does(finding, 'never')}."
+
+
+# The forms with no time zone that AWS reads as UTC (see `findings`).
+_ZONELESS = re.compile(r"(\d{4})-(\d{2})(?:-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?)?")
+
+
+def _zoneless_impact(finding: Finding) -> str:
+    value = next(v for v in finding.condition.values if _ZONELESS.fullmatch(v))
+    year, month, day, hour, minute, second = _ZONELESS.fullmatch(value).groups()
+    moment = (f"{year}-{month}-{day or '01'}T{hour or '00'}:{minute or '00'}:{second or '00'}"
+              " UTC")
+    return (f"The {finding.statement.effect.value} for {_who(finding)} on {_what(finding)} "
+            f"switches at {moment}, which may be hours from the local time meant.")
+
+
+def _host_bits_impact(finding: Finding) -> str:
+    condition = finding.condition
+    value = next(v for v in condition.values if "/" in v and _masked(v) != v)
+    network, address = _masked(value), value.split("/")[0]
+    effect = finding.statement.effect.value
+    if condition.operator == "NotIpAddress":
+        return (f"The {effect} skips requests from all of {network}, not only from {address}, so "
+                f"it {_does(finding, 'not')} from any of those addresses.")
+    return (f"The {effect} applies to requests from all of {network}, not only from {address}, so "
+            f"it {_does(finding, 'lets')} from any of those addresses.")
+
+
+def _masked(value: str) -> str:
+    return str(ipaddress.ip_network(value, strict=False))
+
+
+def _no_value_impact(finding: Finding) -> str:
+    effect = finding.statement.effect.value
+    actions = ("every action but " if finding.statement.not_action else "") + _or(
+        finding.statement.actions)
+    key = f"${{{finding.variable}".casefold()
+    patterns = [p for p in finding.statement.resources if key in p.casefold()]
+    who = f"For {_and(finding.subjects)}"
+    if finding.element == "NotResource":
+        return (f"{who}, NotResource {_or(patterns)} excludes nothing, so the {effect} "
+                f"{_does(finding, 'lets', 'them', f'{actions} on any resource')}.")
+    if finding.element == "Resource":
+        return (f"{who}, {_or(patterns)} matches nothing, so the {effect} "
+                f"{_does(finding, 'never', 'them', f'{actions} on it')}.")
+    if finding.always:
+        return (f"{who}, the condition always holds, so the {effect} "
+                f"{_does(finding, 'lets', 'them')} whatever {finding.condition.key} is.")
+    return f"{who}, the condition never holds, so the {effect} {_does(finding, 'never', 'them')}."
+
+
+def _not_principal_impact(finding: Finding) -> str:
+    return (f"It stops {_who(finding)} from doing {_what(finding)}, and which principals that "
+            "spares depends on how each service reads NotPrincipal.")
+
+
+def _not_principal_boundary_impact(finding: Finding) -> str:
+    return (f"It always stops {_who(finding)} from doing {_what(finding)}, even if NotPrincipal "
+            "names them.")
+
+
+IMPACTS: dict[str, Callable[[Finding], str]] = {
+    findings.DATE_NUMBER.id: _date_impact,
+    findings.BOOL_VARIABLE.id: _bool_impact,
+    findings.PUBLIC_BUCKET.id: _public_impact,
+    findings.TRUST_EVERYONE.id: _trust_everyone_impact,
+    findings.CROSS_ACCOUNT_TRUST.id: _cross_account_impact,
+    findings.UNIQUE_ID.id: _unique_id_impact,
+    findings.MFA_DENY.id: _mfa_deny_impact,
+    findings.FOR_ALL_VALUES_WITHOUT_NULL.id: _for_all_values_impact,
+    findings.FOR_ANY_VALUE_IF_EXISTS.id: _for_any_value_impact,
+    findings.SET_OPERATOR_ON_NULL.id: _null_impact,
+    findings.ZONELESS_DATE.id: _zoneless_impact,
+    findings.HOST_BITS.id: _host_bits_impact,
+    findings.NO_VALUE.id: _no_value_impact,
+    findings.NOT_PRINCIPAL.id: _not_principal_impact,
+    findings.NOT_PRINCIPAL_BOUNDARY.id: _not_principal_boundary_impact,
+}
+
+
+def _and(items: Sequence[str]) -> str:
+    """ "a", "a and b", or "a, b and c"."""
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def _or(items: Sequence[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} or {items[-1]}"
 
 
 def _condition(condition: Condition) -> str:
@@ -519,6 +724,7 @@ def _finding_json(finding: Finding) -> dict:
         "variable": finding.variable,
         "element": finding.element,
         "subjects": list(finding.subjects),
+        "always": finding.always,
         "why": found.why,
         "fix": found.fix,
         "evidence": {

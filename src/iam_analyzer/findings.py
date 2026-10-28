@@ -129,6 +129,8 @@ class Finding:
     variable: str | None = None
     element: str | None = None
     subjects: tuple[str, ...] = ()
+    # For a mistake that makes a condition or pattern always match (True) or never (False).
+    always: bool | None = None
 
     @property
     def statement(self) -> Statement:
@@ -348,6 +350,7 @@ class _Hit:
     principal: Principal | None = None
     unsettled: tuple[Condition, ...] = ()
     subjects: tuple[str, ...] = ()
+    always: bool | None = None
 
 
 Detector = Callable[[Statement, _Scope], Iterator[_Hit]]
@@ -365,7 +368,7 @@ def scan(account: Account, *, organization: Organization | None) -> tuple[Findin
         scope = _Scope(kind, account.account_id, accounts, bounded)
         return [
             Finding(hit.type, hit.severity, kind, policy, index, uses, hit.condition,
-                    hit.principal, hit.unsettled, subjects=hit.subjects)
+                    hit.principal, hit.unsettled, subjects=hit.subjects, always=hit.always)
             for index, statement in enumerate(policy.statements)
             for detect in DETECTORS
             for hit in detect(statement, scope)
@@ -411,7 +414,7 @@ def _without_values(account: Account) -> list[Finding]:
     return [
         Finding(NO_VALUE, _opens(account.policies[name].statements[index], always=always),
                 PolicyType.IDENTITY, account.policies[name], index, _uses(account, name),
-                condition, variable=key, element=element, subjects=tuple(who))
+                condition, variable=key, element=element, subjects=tuple(who), always=always)
         for (name, index, key, element, condition, always), who in subjects.items()
     ]
 
@@ -496,7 +499,7 @@ def _date_numbers(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
         if condition.operator.startswith("Date") and any(
                 len(value) == 4 and value.isdigit() for value in condition.values):
             always = condition.operator in _ALWAYS_AFTER_1970
-            yield _Hit(DATE_NUMBER, _opens(statement, always=always), condition)
+            yield _Hit(DATE_NUMBER, _opens(statement, always=always), condition, always=always)
 
 
 def _bool_variables(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
@@ -661,9 +664,11 @@ def _set_operators_on_null(statement: Statement, scope: _Scope) -> Iterator[_Hit
         if condition.operator != "Null" or condition.set_operator is None:
             continue
         if condition.set_operator is SetOperator.FOR_ANY_VALUE and "true" in condition.values:
-            yield _Hit(SET_OPERATOR_ON_NULL, _opens(statement, always=False), condition)
+            yield _Hit(SET_OPERATOR_ON_NULL, _opens(statement, always=False), condition,
+                       always=False)
         if condition.set_operator is SetOperator.FOR_ALL_VALUES and "false" in condition.values:
-            yield _Hit(SET_OPERATOR_ON_NULL, _opens(statement, always=True), condition)
+            yield _Hit(SET_OPERATOR_ON_NULL, _opens(statement, always=True), condition,
+                       always=True)
 
 
 def _zoneless_dates(statement: Statement, scope: _Scope) -> Iterator[_Hit]:

@@ -145,6 +145,8 @@ Maps to:
 
 - In: the resource policy on arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor.
 - Principal: everyone ("*").
+- Impact: It lets anyone do s3:GetObject on arn:aws:s3:::district-roster-exports/*, with credentials
+  from any AWS account or with none.
 - Why: The statement allows "*", and no condition limits it to fixed values of a key that S3 names,
   such as aws:SourceVpce or aws:PrincipalOrgID, so S3 counts the policy as public: anyone on the
   internet can make the request, unless S3 Block Public Access stops it, which the analyzer doesn't
@@ -160,6 +162,8 @@ Maps to:
 - In: SummerSchoolRecords, Sid ReadCampus01UntilNextYear: an identity policy attached to
   group/SummerSchool.
 - Condition: DateLessThan aws:CurrentTime: 2027.
+- Impact: The Allow never applies, so it never lets group/SummerSchool do s3:GetObject on
+  arn:aws:s3:::district-student-records/campus-01/*.
 - Why: AWS reads a number in a date condition as epoch seconds, four digits included, so a value
   such as 2027 is a moment early on January 1, 1970, not the year.
 - Evidence: AWS's IAM policy simulator answered ALLOW in dates_without_a_time_zone/four_digits

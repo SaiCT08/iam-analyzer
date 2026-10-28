@@ -773,8 +773,10 @@ files allow it, while an `only` or `requires` PASS stays true whatever those pol
 
 Some AWS surprises need no question: they're in the policy text. Every report scans all of the
 account file's policies for them: identity policies and boundaries, bucket policies, trust
-policies, and with `--org`, SCPs. Each finding names the statement and where its policy is used,
-says why it matters and how to fix it, and cites its evidence. That evidence is either answers
+policies, and with `--org`, SCPs. Each finding names the statement and where its policy is used.
+It then says what the mistake does there, such as "The Allow never applies, so it never lets
+group/SummerSchool do s3:GetObject on ...", why it happens, and how to fix it, and cites its
+evidence. That evidence is either answers
 recorded from AWS's IAM policy simulator (in `tests/simulator_fixtures`, and the tests check that
 AWS's recorded answer is the one claimed) or AWS's documentation.
 

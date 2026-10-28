@@ -353,6 +353,7 @@ def test_json_lists_the_findings():
                   "org_target": None}],
         "condition": {"operator": "DateLessThan", "key": "aws:CurrentTime", "values": ["2026"]},
         "principal": None, "unsettled": [], "variable": None, "element": None, "subjects": [],
+        "always": False,  # the Deny's DateLessThan 2026 never holds
         "why": high["why"], "fix": high["fix"],
         "evidence": {
             "fixtures": [{"case": "dates_without_a_time_zone/four_digits", "aws": "ALLOW"}],
@@ -436,3 +437,122 @@ def test_a_pass_says_what_to_keep_not_what_to_fix():
     assert "Fix: Fix b." in failing and "Keep:" not in failing
     assert to_json(report(check("a", "only", Keep="Keep this.")))["checks"][0]["keep"] == (
         "Keep this.")
+
+
+# --- What each finding does ------------------------------------------------------------
+
+ROLES = "arn:aws:iam::111122223333:role"
+
+
+def every_mistake():
+    """An account with one of every finding type, and the principals that get each."""
+    def p(sid, effect, action="s3:GetObject", resource=f"{BUCKET}/*", **condition):
+        statement = {"Sid": sid, "Effect": effect, "Action": action, "Resource": resource}
+        return {"Version": "2012-10-17",
+                "Statement": [{**statement, **({"Condition": condition} if condition else {})}]}
+    tags = "aws:TagKeys"
+    policies = {
+        "Window": p("Window", "Allow", DateLessThan={"aws:CurrentTime": "2027"}),
+        "Closed": p("Closed", "Deny", DateGreaterThan={"aws:CurrentTime": "2026"}),
+        "BoolVar": p("BoolVar", "Deny",
+                     Bool={"aws:SecureTransport": "${aws:MultiFactorAuthPresent}"}),
+        "MfaDeny": p("MfaDeny", "Deny", "s3:PutObject", Bool={MFA: "false"}),
+        "AllTags": p("AllTags", "Allow", "s3:PutObject",
+                     **{"ForAllValues:StringEquals": {tags: ["campus"]}}),
+        "AnyTag": p("AnyTag", "Deny", "s3:PutObject",
+                    **{"ForAnyValue:StringEqualsIfExists": {tags: "campus"}}),
+        "NullSet": p("NullSet", "Allow", "s3:PutObject", **{"ForAllValues:Null": {tags: "false"}}),
+        "Zoneless": p("Zoneless", "Allow", DateGreaterThan={"aws:CurrentTime": "2026-08-15"}),
+        "HostBits": p("HostBits", "Allow", IpAddress={"aws:SourceIp": "203.0.113.5/24"}),
+        "Home": p("Home", "Allow", resource=f"{BUCKET}/home/${{aws:username}}/*"),
+        "Bound": p("Bound", "Allow", "s3:*", "*"),
+    }
+    bucket = {"Statement": [
+        {"Sid": "Public", "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject",
+         "Resource": f"{BUCKET}/*"},
+        {"Sid": "Gone", "Effect": "Deny", "Principal": {"AWS": "AIDAEXAMPLEEXAMPLE123"},
+         "Action": "s3:DeleteObject", "Resource": f"{BUCKET}/*"},
+        {"Sid": "AllButKwong", "Effect": "Deny", "NotPrincipal": {"AWS": [
+            "arn:aws:iam::111122223333:root", "arn:aws:iam::111122223333:user/kwong"]},
+         "Action": "s3:PutBucketPolicy", "Resource": BUCKET},
+    ]}
+    def trust(principal):
+        return {"Statement": [{"Effect": "Allow", "Principal": principal,
+                               "Action": "sts:AssumeRole"}]}
+    return parse_account({
+        "AccountId": "111122223333", "Policies": policies,
+        "Groups": {"Staff": {"Policies": [n for n in policies if n not in ("Home", "Bound")]}},
+        "Users": {"kwong": {"PermissionsBoundary": "Bound"}},
+        "Roles": {"Reports": {"Policies": ["Home"]},
+                  "Open": {"AssumeRolePolicyDocument": trust("*")},
+                  "Vendor": {"AssumeRolePolicyDocument": trust({"AWS": "444455556666"})}},
+        "Resources": {BUCKET: {"Policy": bucket}},
+    }, name="acct.json")
+
+
+def test_each_finding_says_what_its_mistake_does():
+    from iam_analyzer.findings import scan
+    from iam_analyzer.report import _impact
+    impacts = {(f.type.id, f.statement.sid or f.policy.name): _impact(f)
+               for f in scan(every_mistake(), organization=None)}
+    on = f"on {BUCKET}/*"
+    assert impacts == {
+        ("date-number-is-epoch-seconds", "Window"):
+            f"The Allow never applies, so it never lets group/Staff do s3:GetObject {on}.",
+        ("date-number-is-epoch-seconds", "Closed"):
+            f"The condition always holds, so the Deny stops group/Staff from doing s3:GetObject "
+            f"{on} whatever the date.",
+        ("bool-variable-never-matches", "BoolVar"):
+            "The condition never holds in a request that includes aws:SecureTransport, so the "
+            f"Deny never stops group/Staff from doing s3:GetObject {on} in one.",
+        ("mfa-deny-skips-access-keys", "MfaDeny"):
+            f"It doesn't stop group/Staff from doing s3:PutObject {on} in requests made with "
+            "long-term access keys.",
+        ("for-all-values-allow-without-null", "AllTags"):
+            f"It also lets group/Staff do s3:PutObject {on} in requests that don't include "
+            "aws:TagKeys.",
+        ("for-any-value-ignores-if-exists", "AnyTag"):
+            f"It never stops group/Staff from doing s3:PutObject {on} in a request that doesn't "
+            "include aws:TagKeys.",
+        ("set-operator-on-null", "NullSet"):
+            f"The condition always holds, so the Allow lets group/Staff do s3:PutObject {on} "
+            "whether or not the request includes aws:TagKeys.",
+        ("date-without-a-time-zone", "Zoneless"):
+            f"The Allow for group/Staff on s3:GetObject {on} switches at 2026-08-15T00:00:00 UTC, "
+            "which may be hours from the local time meant.",
+        ("ip-range-with-host-bits", "HostBits"):
+            "The Allow applies to requests from all of 203.0.113.0/24, not only from 203.0.113.5, "
+            f"so it lets group/Staff do s3:GetObject {on} from any of those addresses.",
+        ("variable-without-a-value", "Home"):
+            f"For role/Reports, {BUCKET}/home/${{aws:username}}/* matches nothing, so the Allow "
+            "never lets them do s3:GetObject on it.",
+        ("public-bucket-policy", "Public"):
+            f"It lets anyone do s3:GetObject {on}, with credentials from any AWS account or with "
+            "none.",
+        ("principal-is-a-unique-id", "Gone"):
+            f"The principal it names is gone, so it no longer stops anyone from doing "
+            f"s3:DeleteObject {on}, even a new principal with the same name.",
+        ("not-principal", "AllButKwong"):
+            "It stops everyone but arn:aws:iam::111122223333:root and "
+            f"arn:aws:iam::111122223333:user/kwong from doing s3:PutBucketPolicy on {BUCKET}, and "
+            "which principals that spares depends on how each service reads NotPrincipal.",
+        ("not-principal-deny-with-a-boundary", "AllButKwong"):
+            f"It always stops user/kwong from doing s3:PutBucketPolicy on {BUCKET}, even if "
+            "NotPrincipal names them.",
+        ("trust-policy-names-everyone", f"{ROLES}/Open"):
+            f"It lets any principal in any AWS account assume {ROLES}/Open.",
+        ("cross-account-trust-without-external-id", f"{ROLES}/Vendor"):
+            f"It lets account 444455556666 assume {ROLES}/Vendor without giving an external ID.",
+    }
+
+
+def test_every_finding_type_has_an_impact():
+    from iam_analyzer.findings import TYPES
+    from iam_analyzer.report import IMPACTS
+    assert set(IMPACTS) == {t.id for t in TYPES}
+
+
+def test_the_district_date_finding_says_whom_it_shuts_out():
+    text = flat(to_markdown(district_report()))
+    assert ("- Impact: The Allow never applies, so it never lets group/SummerSchool do "
+            "s3:GetObject on arn:aws:s3:::district-student-records/campus-01/*.") in text
