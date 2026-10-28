@@ -149,12 +149,17 @@ def _given(context: RequestContext) -> str:
 
 def _items_markdown(result: CheckResult, account: Account) -> list[str]:
     check = result.check
-    several = len(check.actions) > 1 or len(check.resources) > 1
+    # A principal whose every item passed is listed once, by name.
+    unpassed = {item.principal for item in result.items if item.result is not Result.PASS}
     lines: list[str] = []
     passed: list[str] = []
     refused: dict[str, list[str]] = {}  # message: the items that got only that refusal
     for item in result.items:
-        label = _label(item, several)
+        if item.principal not in unpassed:
+            if item.principal not in passed:
+                passed.append(item.principal)
+            continue
+        label = _label(item, check)
         reasons = {_refusal(answer.refusal) for answer in item.answers if answer.refusal}
         if item.result is Result.PASS:
             passed.append(label)
@@ -177,8 +182,12 @@ def _items_markdown(result: CheckResult, account: Account) -> list[str]:
     return lines
 
 
-def _label(item: Item, several: bool) -> str:
-    return f"{item.principal} ({item.action} on {item.resource})" if several else item.principal
+def _label(item: Item, check: Check) -> str:
+    """The item's principal, plus whichever of its action and resource the check has several of."""
+    parts = [item.action] if len(check.actions) > 1 else []
+    if len(check.resources) > 1:
+        parts.append(f"on {item.resource}")
+    return f"{item.principal} ({' '.join(parts)})" if parts else item.principal
 
 
 def _item_markdown(item: Item, label: str) -> list[str]:

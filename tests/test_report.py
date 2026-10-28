@@ -1,6 +1,13 @@
-from iam_analyzer.account import parse_account
-from iam_analyzer.framework import parse_framework
+from pathlib import Path
+
+from iam_analyzer.account import load_account_file, parse_account
+from iam_analyzer.compliance import Result
+from iam_analyzer.framework import load_framework_file, parse_framework
+from iam_analyzer.organization import load_organization_file
 from iam_analyzer.report import WIDTH, build, to_json, to_markdown
+
+EXAMPLES = Path(__file__).parent.parent / "examples"
+GOLDEN = Path(__file__).parent / "golden" / "district_report.md"
 
 BUCKET = "arn:aws:s3:::district-student-records"
 OBJECT = f"{BUCKET}/campus-02/transcript.pdf"
@@ -223,3 +230,49 @@ def test_failed_and_unsettled():
     assert (depends.failed, depends.unsettled) == (False, True)
     failed = report(check("a", "only"), check("b", "only", Resources=[LESSONS]))
     assert (failed.failed, failed.unsettled) == (True, True)
+
+
+def test_labels_show_only_what_varies_and_passing_principals_appear_once():
+    lines = section(markdown(check("a", "only", Actions=["s3:GetObject", "s3:PutObject"])),
+                    "Check a")
+    # The registrar can write but not read; the clerk can write too. Both have their own lines.
+    assert f"- user/registrar (s3:PutObject), depending on {MFA}:" in lines
+    assert "- user/teacher (s3:GetObject) can. Granted by Read, Sid Read, through group Teachers." in (
+        lines)
+    assert ("- Can't: user/teacher (s3:PutObject), user/reader (s3:PutObject), user/registrar "
+            "(s3:GetObject), user/clerk") in flat("\n".join(lines))
+    # One resource, so it isn't repeated; with every item passing, a principal is just its name.
+    assert OBJECT not in "\n".join(lines[5:])
+    passing = section(markdown(check("b", "only", Actions=["s3:DeleteObject", "s3:PutBucketTagging"])),
+                      "Check b")
+    assert "- Can't: user/teacher, user/reader, user/registrar, user/clerk, role/Admin." in passing
+
+
+# --- The district example --------------------------------------------------------------
+
+
+def district_report():
+    return build(load_framework_file(EXAMPLES / "frameworks" / "district.json"),
+                 load_account_file(EXAMPLES / "accounts" / "district.json"),
+                 organization=load_organization_file(EXAMPLES / "organizations" / "district.json"))
+
+
+def test_the_district_framework_gives_every_result():
+    assert {r.check.id: r.result for r in district_report().checks} == {
+        "student-records-no-deletes": Result.PASS,
+        "counseling-notes-counselors-only": Result.FAIL,
+        "record-changes-need-mfa": Result.FAIL,
+        "admin-role-needs-mfa": Result.PASS,
+        "registrars-update-own-campus": Result.DEPENDS,
+        "lesson-plans-teachers-only": Result.CANT_TELL,
+    }
+
+
+def test_the_district_report_matches_its_golden_file():
+    """After an intended change to the report, regenerate the golden file:
+
+        iam-analyzer report --account examples/accounts/district.json \\
+          --org examples/organizations/district.json \\
+          --framework examples/frameworks/district.json > tests/golden/district_report.md
+    """
+    assert to_markdown(district_report()) == GOLDEN.read_text()

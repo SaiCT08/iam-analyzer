@@ -1,0 +1,107 @@
+{
+  "Framework": {
+    "Id": "district-student-records",
+    "Title": "Texas school district student records"
+  },
+  "Requirements": {
+    "FERPA 99.31(a)(1)(ii)": {
+      "Framework": "FERPA (34 CFR Part 99)",
+      "Id": "34 CFR 99.31(a)(1)(ii)",
+      "Title": "Reasonable methods to limit school officials' access",
+      "Link": "https://www.law.cornell.edu/cfr/text/34/99.31"
+    },
+    "NIST AC-3": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-3",
+      "Title": "Access Enforcement",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST AC-6": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-6",
+      "Title": "Least Privilege",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST IA-2(1)": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "IA-2(1)",
+      "Title": "Multi-factor Authentication to Privileged Accounts",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST IA-2(2)": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "IA-2(2)",
+      "Title": "Multi-factor Authentication to Non-privileged Accounts",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    }
+  },
+  "Checks": [
+    {
+      "Id": "student-records-no-deletes",
+      "Title": "No one can delete student records",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": [],
+      "Actions": ["s3:DeleteObject", "s3:DeleteObjectVersion"],
+      "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
+      "Fix": "Keep DenyStudentRecordsDelete on every group and role that can write student records, and the ProtectStudentRecords SCP on the Schools OU.",
+      "MapsTo": ["NIST AC-3"]
+    },
+    {
+      "Id": "counseling-notes-counselors-only",
+      "Title": "Only counselors can read counseling notes",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": ["user/kwong"],
+      "Actions": ["s3:GetObject"],
+      "Resources": ["arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"],
+      "Fix": "Narrow TeacherReadGrades from district-student-records/* to the folders teachers need, and add a bucket policy Deny on counseling/* for everyone but counselors, using aws:PrincipalArn as OnlyITAdminChangesThePolicy does.",
+      "MapsTo": ["FERPA 99.31(a)(1)(ii)", "NIST AC-6"]
+    },
+    {
+      "Id": "record-changes-need-mfa",
+      "Title": "Changing student records needs MFA",
+      "Severity": "high",
+      "Type": "requires",
+      "Key": "aws:MultiFactorAuthPresent",
+      "Value": "true",
+      "Actions": ["s3:PutObject"],
+      "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
+      "Fix": "Take ITAdminFullS3 off user alee, so IT staff change records through the ITAdmin role, which needs MFA to assume, and give ITAdminFullS3 a Deny like RequireMfaForChanges.",
+      "MapsTo": ["NIST IA-2(1)", "NIST IA-2(2)"]
+    },
+    {
+      "Id": "admin-role-needs-mfa",
+      "Title": "Assuming the IT admin role needs MFA",
+      "Severity": "high",
+      "Type": "requires",
+      "Key": "aws:MultiFactorAuthPresent",
+      "Value": "true",
+      "Actions": ["sts:AssumeRole"],
+      "Resources": ["arn:aws:iam::111122223333:role/ITAdmin"],
+      "Fix": "Keep the Bool aws:MultiFactorAuthPresent true condition in ITAdmin's trust policy.",
+      "MapsTo": ["NIST IA-2(1)"]
+    },
+    {
+      "Id": "registrars-update-own-campus",
+      "Title": "Registrars can update their own campus's records",
+      "Severity": "medium",
+      "Type": "can",
+      "Principals": ["group/Registrars"],
+      "Actions": ["s3:PutObject"],
+      "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
+      "Fix": "Registrars change records with MFA, by design. If they can't even with MFA, check RegistrarCampusRecords and each registrar's campus tag."
+    },
+    {
+      "Id": "lesson-plans-teachers-only",
+      "Title": "Only teachers can read lesson plans",
+      "Severity": "medium",
+      "Type": "only",
+      "Principals": ["group/Teachers"],
+      "Actions": ["s3:GetObject"],
+      "Resources": ["arn:aws:s3:::district-lesson-plans/week1.pdf"],
+      "Fix": "Describe district-lesson-plans in the account file's Resources, with its bucket policy or as {} if it has none, so the analyzer can answer.",
+      "MapsTo": ["NIST AC-3"]
+    }
+  ]
+}

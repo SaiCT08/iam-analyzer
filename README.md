@@ -4,7 +4,8 @@ An AWS IAM effective-permissions analyzer, written in Python. Given a set of pol
 "can this principal perform this action on this resource?" using AWS's policy evaluation logic, and
 explains *which statements* produced the answer. It's general-purpose and works with any AWS account.
 Texas school districts (TEA/FERPA) are the first showcase use case, so the examples use district
-policies. Compliance reporting will support pluggable frameworks.
+policies. Compliance reports grade an account against a framework's checks, and a framework is a
+data file, so new ones need no code (see [Compliance reports](#compliance-reports)).
 
 It works entirely on local policy JSON files. No AWS account or credentials are needed.
 
@@ -617,6 +618,157 @@ when it was asked, and refuses otherwise:
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 
+## Compliance reports
+
+`iam-analyzer report` grades an account against a framework's checks, and prints a report someone
+can act on:
+
+```sh
+iam-analyzer report \
+  --account examples/accounts/district.json \
+  --org examples/organizations/district.json \
+  --framework examples/frameworks/district.json \
+  --json report.json
+```
+
+The Markdown report goes to the screen, and `--json` writes the same report as JSON. `--org` gives
+the SCPs, and `--no-org` says the account isn't in an AWS organization. One of them is required:
+leaving SCPs out without saying so could allow what they deny.
+
+Part of the district report ([the whole report](tests/golden/district_report.md)):
+
+```
+## FAIL: Only counselors can read counseling notes (high)
+
+Asked: Can anyone but user/kwong do s3:GetObject on
+arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
+
+- user/jsmith can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Teachers.
+- user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
+- user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
+- role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
+- Can't: user/dpatel, user/rnguyen, role/GradebookVendor, role/TeacherSignIn.
+- Not asked: user/kwong.
+```
+
+### Results
+
+Every check gets one of four results:
+- **PASS:** the answer the check expects, for every question it asked.
+- **FAIL:** a principal gets the access a check forbids, or doesn't get the access a check
+  expects. Each principal that gets access is listed with every statement that grants it: the
+  policy, its Sid (or its position, such as "statement 0"), and how the principal gets it, such as
+  "through group Teachers" or "attached directly".
+- **DEPENDS:** only for checks that expect access. The answer depends on a condition key, such as
+  `aws:MultiFactorAuthPresent`, and the report lists its values with each answer.
+- **CAN'T TELL:** the analyzer refused, with its reason and what would settle it, such as a
+  bucket the account file doesn't describe. A refusal is never a PASS.
+
+In a check that forbids access, any value that allows the request is a FAIL, never DEPENDS: an
+MFA Deny that skips requests made with access keys fails the check, and the report lists
+`absent` as the value that gets in. A check takes the worst result of its questions: FAIL, then
+DEPENDS, then CAN'T TELL, then PASS.
+
+Exit codes: `0` when every check passes, `1` when a check fails, `3` when nothing failed but some
+check is DEPENDS or CAN'T TELL, and `2` for input errors. CI can fail on `1`, and decide for
+itself what `3` means.
+
+### Framework files
+
+A framework is a JSON file, so adding one never changes the analyzer. See
+[`examples/frameworks/district.json`](examples/frameworks/district.json).
+
+```json
+{
+  "Framework": { "Id": "district-student-records", "Title": "Texas school district student records" },
+  "Requirements": {
+    "NIST AC-6": {
+      "Framework": "NIST SP 800-53 Rev. 5", "Id": "AC-6", "Title": "Least Privilege",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    }
+  },
+  "Checks": [{
+    "Id": "counseling-notes-counselors-only",
+    "Title": "Only counselors can read counseling notes",
+    "Severity": "high",
+    "Type": "only",
+    "Principals": ["user/kwong"],
+    "Actions": ["s3:GetObject"],
+    "Resources": ["arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"],
+    "Fix": "Narrow TeacherReadGrades from district-student-records/* to the folders teachers need.",
+    "MapsTo": ["NIST AC-6"]
+  }]
+}
+```
+
+Every check has an `Id`, a `Title`, a `Severity` (`critical`, `high`, `medium` or `low`), the
+`Actions` and `Resources` it asks about, and a `Fix`. `MapsTo` and `Context` are optional. There
+are three types:
+
+| `Type` | Asks | Expects |
+|---|---|---|
+| `only` | can anyone outside `Principals` do it? (`[]` means anyone at all) | no |
+| `requires` | can anyone do it unless `Key` has `Value`? `Except` leaves principals out | no |
+| `can` | can each of `Principals` do it? | yes |
+
+- Principals are `user/NAME`, `role/NAME` or `group/NAME`, where a group stands for its members.
+  `only` and `requires` ask every user and role in the account file except the ones they name.
+- A check asks about exactly the actions and resources it lists. A resource is `"*"` or one full
+  ARN, with no wildcards, as in a real request.
+- `requires` takes a key whose every value AWS documents, such as `aws:MultiFactorAuthPresent`
+  with `"Value": "true"`. The report then asks with each other value: `false` and absent.
+- `Context` gives condition keys the check's question fixes, such as
+  `{"aws:SourceIp": "203.0.113.5"}`. A list gives a key several values in one request, and `null`
+  says the request doesn't include it. It can't change what the account file says, such as
+  `aws:username`.
+
+The file is checked when it loads, as account files are: unknown or repeated keys, wildcard
+actions, resources that aren't one full ARN, and references to undefined requirements are input
+errors.
+
+### The values the report tries
+
+A check states only what its question fixes. When a statement needs a condition key the check
+doesn't give, the report tries each value AWS documents for that key:
+`aws:MultiFactorAuthPresent` (true, false or absent), `aws:SecureTransport` and
+`aws:ViaAWSService` (true or false). For example, ITAdmin's trust policy needs MFA, so "can a
+teacher assume ITAdmin?" is asked three times, and the answer is no every time. Any other key, such
+as `aws:SourceIp`, has too many values to try. The report is CAN'T TELL and names the key until the
+check gives it a value in `Context`.
+
+`aws:MultiFactorAuthPresent` can be absent for any principal. AWS says it's missing for requests
+made with long-term access keys and for federated users. For a role's session, AWS's docs
+contradict each other: "The temporary credentials returned by `AssumeRole` do not include MFA
+information in the context", and also that a role assumed "without MFA information" has a session
+that "does not indicate that the user authenticated with MFA". So a role's item in a check that
+requires MFA carries a note. It says MFA for a role is checked when the role is assumed, and
+points to the trust policy statements that say how.
+
+### Who a report can't ask about
+
+The report asks about the users and roles in the account file. When a bucket policy or trust
+policy allows the action for someone else, such as `"*"`, another account, a service or a
+federated provider, the check is CAN'T TELL and cites the statement. The analyzer doesn't evaluate
+requests from outside the account yet.
+
+A `can` check is weaker than the other two. Session policies, resource control policies and VPC
+endpoint policies aren't modeled, and they can only take access away. So a `can` PASS means the
+files allow it, while an `only` or `requires` PASS stays true whatever those policies say.
+
+### Mapping checks to requirements
+
+A requirement gives the framework, the requirement's ID, a short title and a link:
+- never the framework's own text (the title is at most 60 characters, on one line);
+- never an ID that hasn't been checked against its source.
+
+The district framework maps to two:
+- FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy, since eCFR blocks automated
+  reads;
+- NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables.
+
+It maps no CIS recommendations, because their IDs change between benchmark versions and their text
+is licensed. It maps no TEA requirements yet, since none has been checked.
+
 ## Tests
 
 ```sh
@@ -635,3 +787,7 @@ resource-based policy, as `--no-resource-policy` does. To add a case, drop in a 
 [docs/simulator-check.md](docs/simulator-check.md) has the results and the differences found.
 Recording new answers calls AWS and needs boto3 (`pip install -e ".[dev,simulator]"`). The
 analyzer itself doesn't need boto3. See `simulator_check/__init__.py`.
+
+`tests/golden/district_report.md` is the district report, exactly as `iam-analyzer report` prints
+it, and `tests/test_report.py` checks that the report still matches it. After an intended change
+to the report, regenerate it with the command in that test's docstring and review the diff.
