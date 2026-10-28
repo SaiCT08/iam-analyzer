@@ -47,7 +47,8 @@ policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
   [Resources](#resources)).
 
 Not supported yet:
-- `NotPrincipal` is refused with a clear error.
+- `NotPrincipal` is refused, with a clear error, when its statement applies to the request. Other
+  requests on the same resource are answered as usual.
 - Resource-based policies other than S3 bucket policies and role trust policies. Another service's
   resource can only be described as having none.
 - Cross-account requests, KMS keys, and requests by SAML or OIDC users are refused.
@@ -315,7 +316,10 @@ providers never name an IAM user or role. The analyzer refuses what the account 
 - S3 canonical user IDs, and IAM unique IDs, which AWS shows for a principal that was deleted;
 - a role ARN that matches the caller's only if case is ignored, since AWS doesn't say whether role
   names are case sensitive there;
-- `NotPrincipal`, which AWS recommends replacing with `aws:PrincipalArn` conditions.
+- `NotPrincipal`, when its statement covers the request and its conditions hold. AWS says which
+  principals it leaves out depends on the service, and recommends `aws:PrincipalArn` conditions
+  instead. A NotPrincipal Deny on one bucket action doesn't stop the analyzer from answering
+  others.
 
 Treating `"*"` as a direct grant is a judgment call: AWS says that for "IAM users and role
 principals within your account, no other permissions are required", and that boundaries "do not

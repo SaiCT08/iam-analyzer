@@ -579,12 +579,14 @@ def _unique_ids(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
     else but IAM unique IDs (`principals`)."""
     if scope.kind not in (PolicyType.RESOURCE_BASED, PolicyType.TRUST):
         return
+    # A deleted principal in a Deny's Principal no longer stops anyone. In a NotPrincipal, it no
+    # longer spares anyone, which can only block more.
+    opens = statement.effect is Effect.DENY and not statement.not_principal
     for principal in statement.principals or ():
         value = principal.value
         if (principal.type is PrincipalType.AWS and value != "*"
                 and not _ACCOUNT_ID.fullmatch(value) and Arn.parse(value) is None):
-            severity = Severity.HIGH if statement.effect is Effect.DENY else Severity.LOW
-            yield _Hit(UNIQUE_ID, severity, principal=principal)
+            yield _Hit(UNIQUE_ID, Severity.HIGH if opens else Severity.LOW, principal=principal)
 
 
 def _mfa_denies(statement: Statement, scope: _Scope) -> Iterator[_Hit]:

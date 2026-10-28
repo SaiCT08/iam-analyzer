@@ -424,3 +424,11 @@ def test_a_boundary_is_read_for_its_principals():
                            Roles={"r": {"PermissionsBoundary": "P"}})
     assert finding.subjects == ("role/r",)
     assert finding.uses == (Use(PolicyType.PERMISSIONS_BOUNDARY, principal="role/r"),)
+
+
+def test_a_unique_id_in_not_principal_only_blocks_more():
+    deny = {"Effect": "Deny", "NotPrincipal": {"AWS": "AIDAEXAMPLEEXAMPLE123"},
+            "Action": "s3:GetObject", "Resource": f"{BUCKET}/*"}
+    [finding] = [f for f in scan(bucket(deny), organization=None)
+                 if f.type.id == "principal-is-a-unique-id"]
+    assert finding.severity is Severity.LOW

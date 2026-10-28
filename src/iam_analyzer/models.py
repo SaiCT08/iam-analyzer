@@ -126,6 +126,8 @@ class Statement:
 
     `principals` is the Principal element of a resource-based policy's statement: it applies only
     when one of them names the caller. It is None in identity-based policies, which have none.
+    `not_principal` means the statement used NotPrincipal, which AWS only allows with Deny: the
+    principals are the ones it does NOT cover.
 
     `resources` is empty in a role's trust policy, which has no Resource element: its statements
     cover the role the policy belongs to.
@@ -140,6 +142,7 @@ class Statement:
     policy_variables: bool = False
     conditions: tuple[Condition, ...] = ()
     principals: tuple[Principal, ...] | None = None
+    not_principal: bool = False
 
 
 @dataclass(frozen=True)

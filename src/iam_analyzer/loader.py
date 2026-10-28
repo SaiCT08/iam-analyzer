@@ -124,7 +124,9 @@ def _parse_statement(raw: Any, where: str, version: str | None, kind: PolicyType
         ) from None
     if kind is PolicyType.TRUST and "NotPrincipal" in raw:
         raise PolicyParseError(f"{where}: AWS doesn't allow 'NotPrincipal' in a role trust policy")
-    statement_principals = _principals(raw, effect, where) if resource_based else None
+    statement_principals, not_principal = (
+        _principals(raw, effect, where) if resource_based else (None, False)
+    )
 
     actions, not_action = _patterns(raw, "Action", "NotAction", where)
     action_key = "NotAction" if not_action else "Action"
@@ -158,12 +160,14 @@ def _parse_statement(raw: Any, where: str, version: str | None, kind: PolicyType
         policy_variables=policy_variables,
         conditions=parsed_conditions,
         principals=statement_principals,
+        not_principal=not_principal,
     )
 
 
-def _principals(raw: dict, effect: Effect, where: str) -> tuple[Principal, ...]:
-    """Read the Principal that a resource-based policy's statement needs. NotPrincipal is
-    refused."""
+def _principals(raw: dict, effect: Effect, where: str) -> tuple[tuple[Principal, ...], bool]:
+    """Read the Principal or NotPrincipal that a resource-based policy's statement needs, and
+    whether it was NotPrincipal. NotPrincipal loads, so the rest of the policy can be evaluated,
+    and the evaluator refuses a request that its statement applies to."""
     if "Principal" in raw and "NotPrincipal" in raw:
         raise PolicyParseError(f"{where}: cannot have both 'Principal' and 'NotPrincipal'")
     if "NotPrincipal" in raw:
@@ -171,13 +175,10 @@ def _principals(raw: dict, effect: Effect, where: str) -> tuple[Principal, ...]:
             raise PolicyParseError(
                 f"{where}: AWS only allows 'NotPrincipal' with \"Effect\": \"Deny\""
             )
-        raise UnsupportedPolicyFeature(
-            f"{where}: 'NotPrincipal' isn't supported yet: AWS says which principals it checks "
-            "depends on the service, and recommends aws:PrincipalArn conditions instead"
-        )
+        return principals.parse(raw["NotPrincipal"], where), True
     if "Principal" not in raw:
         raise PolicyParseError(f"{where}: a resource-based policy's statement needs a 'Principal'")
-    return principals.parse(raw["Principal"], where)
+    return principals.parse(raw["Principal"], where), False
 
 
 def _patterns(raw: dict, key: str, not_key: str, where: str) -> tuple[tuple[str, ...], bool]:

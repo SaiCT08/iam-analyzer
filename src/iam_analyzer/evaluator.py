@@ -37,6 +37,11 @@ When matching a statement needs a condition key the request context says nothing
 there is no answer to give: evaluation raises one MissingContextError that names every such
 key and the statements that use it.
 
+A NotPrincipal Deny is refused once the rest of its statement applies to the request. AWS says
+NotPrincipal "might validate the account first, then the role, and then the assumed-role user",
+depending on the service, so whom it leaves out isn't settled. Requests the statement doesn't
+cover are answered as usual.
+
 s3:ListAllMyBuckets has no resource, so its request is on "*". AWS's own evaluation example
 settles which statements cover it, so it is matched as arn:aws:s3:::, a bucket ARN with an empty
 name (see `_matched_resource`).
@@ -84,6 +89,10 @@ FEDERATED_ACTIONS = ("sts:assumerolewithsaml", "sts:assumerolewithwebidentity")
 # bucket ARN with an empty name that its request is matched as (see `_matched_resource`).
 LIST_ALL_MY_BUCKETS = "s3:ListAllMyBuckets"
 EVERY_BUCKET = "arn:aws:s3:::"
+NOT_PRINCIPAL_REFUSAL = (
+    "'NotPrincipal' isn't supported yet: AWS says which principals it checks depends on the "
+    "service, and recommends aws:PrincipalArn conditions instead"
+)
 
 
 def statement_matches(statement: Statement, request: Request) -> bool:
@@ -110,7 +119,9 @@ def _applies(statement: Statement, request: Request) -> tuple[bool, PrincipalMat
         if resource_ok == statement.not_resource:
             return False, None
     found = refused = None
-    if statement.principals is not None:
+    if statement.not_principal:
+        refused = UnsupportedPolicyFeature(NOT_PRINCIPAL_REFUSAL)
+    elif statement.principals is not None:
         if principals.needs_caller(statement.principals):
             _require([principals.CALLER_KEY], request.context)
         deny = statement.effect is Effect.DENY

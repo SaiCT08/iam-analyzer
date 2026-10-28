@@ -1070,3 +1070,34 @@ def test_scenario(path):
     request = Request(**scenario["request"], context=context)
     result = evaluate(request, policies, boundary=boundary, scps=scps, resource=resource)
     assert result.decision is Decision(scenario["expected"]), scenario.get("description")
+
+
+# --- NotPrincipal ----------------------------------------------------------------------
+
+
+def not_principal(action="s3:GetObject", **elements):
+    return {"Sid": "AllButKwong", "Effect": "Deny", "NotPrincipal": {"AWS": KWONG},
+            "Action": action, "Resource": f"{BUCKET}/*", **elements}
+
+
+def test_a_not_principal_deny_is_refused_when_it_applies():
+    with pytest.raises(UnsupportedPolicyFeature,
+                       match=f"{BUCKET} statement 0 \\(Sid=AllButKwong\\): 'NotPrincipal' isn't "
+                             "supported yet"):
+        with_bucket_policy(get_by(KWONG), [BROAD_S3], not_principal())
+
+
+def test_a_not_principal_deny_that_doesnt_cover_the_request_is_ignored():
+    # It covers PutObject only, so a read is answered as if it weren't there.
+    result = with_bucket_policy(get_by(KWONG), [BROAD_S3], not_principal("s3:PutObject"))
+    assert result.decision is Decision.ALLOW
+    # Its conditions fail here, so it doesn't apply either.
+    tls = not_principal(Condition={"Bool": {"aws:SecureTransport": "false"}})
+    request = get_by(KWONG, ("aws:SecureTransport", "true"))
+    assert with_bucket_policy(request, [BROAD_S3], tls).decision is Decision.ALLOW
+
+
+def test_a_not_principal_deny_needs_its_condition_keys():
+    tls = not_principal(Condition={"Bool": {"aws:SecureTransport": "false"}})
+    with pytest.raises(MissingContextError, match="aws:SecureTransport"):
+        with_bucket_policy(get_by(KWONG), [BROAD_S3], tls)

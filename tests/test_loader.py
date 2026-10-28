@@ -325,6 +325,16 @@ def test_identity_policies_have_no_principals():
     assert parse_policy({"Statement": [READ]}, name="p").statements[0].principals is None
 
 
+def test_not_principal_loads_with_deny():
+    # The evaluator refuses a request the statement applies to; the rest of the policy still loads.
+    deny = {**BUCKET_READ, "Effect": "Deny", "NotPrincipal": {"AWS": KWONG}}
+    del deny["Principal"]
+    [statement] = resource_policy(deny).statements
+    assert statement.not_principal
+    assert statement.principals == (Principal(PrincipalType.AWS, KWONG),)
+    assert not resource_policy(BUCKET_READ).statements[0].not_principal
+
+
 def test_id_is_allowed_in_resource_based_policies():
     resource_policy(BUCKET_READ, Id="cd3ad3d9-2776-4ef1-a904-4c229d1642ee")
     with pytest.raises(PolicyParseError, match="'Id' must be a string"):
@@ -340,11 +350,6 @@ def test_id_is_allowed_in_resource_based_policies():
             {"Principal": None, "NotPrincipal": {"AWS": KWONG}},
             PolicyParseError,
             "AWS only allows 'NotPrincipal' with \"Effect\": \"Deny\"",
-        ),
-        (
-            {"Principal": None, "NotPrincipal": {"AWS": KWONG}, "Effect": "Deny"},
-            UnsupportedPolicyFeature,
-            "'NotPrincipal' isn't supported yet",
         ),
         ({"Principal": "111122223333"}, PolicyParseError, "must be \"\\*\" or a non-empty JSON"),
         ({"Principal": {}}, PolicyParseError, "must be \"\\*\" or a non-empty JSON"),
