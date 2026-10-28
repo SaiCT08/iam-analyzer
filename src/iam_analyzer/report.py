@@ -141,6 +141,10 @@ def _finding_markdown(finding: Finding) -> list[str]:
              _bullet(f"In: {_where(finding)}.")]
     if finding.principal is not None:
         lines.append(_bullet(f"Principal: {_principal(finding.principal)}."))
+    if finding.variable is not None:
+        where = f" in {finding.element}" if finding.element else ""
+        lines.append(_bullet(f"Variable: ${{{finding.variable}}}{where}, with no value for "
+                             f"{', '.join(finding.subjects)}."))
     if finding.condition is not None:
         lines.append(_bullet(f"Condition: {_condition(finding.condition)}."))
     lines.append(_bullet(f"Why: {found.why}"))
@@ -509,6 +513,9 @@ def _finding_json(finding: Finding) -> dict:
         "principal": None if finding.principal is None else {
             "type": finding.principal.type.value, "value": finding.principal.value},
         "unsettled": [_condition_json(c) for c in finding.unsettled],
+        "variable": finding.variable,
+        "element": finding.element,
+        "subjects": list(finding.subjects),
         "why": found.why,
         "fix": found.fix,
         "evidence": {

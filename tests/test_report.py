@@ -348,9 +348,23 @@ def test_json_lists_the_findings():
         "uses": [{"policy_type": "identity", "principal": "group/Staff", "resource": None,
                   "org_target": None}],
         "condition": {"operator": "DateLessThan", "key": "aws:CurrentTime", "values": ["2026"]},
-        "principal": None, "unsettled": [],
+        "principal": None, "unsettled": [], "variable": None, "element": None, "subjects": [],
         "why": high["why"], "fix": high["fix"],
         "evidence": {"fixtures": [{"case": "dates_without_a_time_zone/four_digits", "aws": "ALLOW"}],
                      "docs": []},
     }
     assert low["sid"] == "Late"
+
+
+def test_a_variable_without_a_value_names_the_principals():
+    acct = parse_account({"AccountId": "111122223333", "Policies": {"Home": {
+        "Version": "2012-10-17", "Statement": [{
+            "Sid": "OwnFolder", "Effect": "Allow", "Action": "s3:GetObject",
+            "Resource": f"{BUCKET}/home/${{aws:username}}/*"}]}},
+        "Roles": {"Reports": {"Policies": ["Home"]}}, "Resources": {BUCKET: {}}}, name="acct.json")
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"},
+                                 "Checks": [check("a", "only")]}, name="fw.json")
+    text = flat(to_markdown(build(framework, acct, organization=None)))
+    assert ("### LOW: A policy variable has no value for some principals - In: Home, Sid "
+            "OwnFolder: an identity policy attached to role/Reports. - Variable: ${aws:username} "
+            "in Resource, with no value for role/Reports.") in text

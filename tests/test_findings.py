@@ -356,3 +356,71 @@ def test_a_date_with_a_time_zone_or_a_number():
 def test_an_ip_range_with_host_bits(operator, value, found_it):
     result = types(statement(**{operator: {"aws:SourceIp": value}}))
     assert result == ([("ip-range-with-host-bits", Severity.LOW)] if found_it else [])
+
+
+# --- A policy variable with no value for a principal -----------------------------------
+
+HOME = f"{BUCKET}/home/${{aws:username}}/*"
+
+
+def principals(policy, **sections):
+    acct = parse_account({"AccountId": "111122223333",
+                          "Policies": {"P": {"Version": "2012-10-17", "Statement": [policy]}},
+                          **sections}, name="acct.json")
+    return [f for f in scan(acct, organization=None) if f.type.id == "variable-without-a-value"]
+
+
+@pytest.mark.parametrize("effect, element, severity", [
+    ("Allow", "Resource", Severity.LOW),  # covers nothing
+    ("Deny", "Resource", Severity.HIGH),  # the Deny never applies
+    ("Allow", "NotResource", Severity.HIGH),  # excludes nothing, so it covers everything
+    ("Deny", "NotResource", Severity.LOW),
+])
+def test_a_role_has_no_user_name(effect, element, severity):
+    [finding] = principals({"Effect": effect, "Action": "s3:GetObject", element: HOME},
+                           Users={"jsmith": {"Policies": ["P"]}},
+                           Roles={"r1": {"Policies": ["P"]}, "r2": {"Policies": ["P"]}})
+    assert (finding.severity, finding.variable, finding.element) == (
+        severity, "aws:username", element)
+    assert finding.subjects == ("role/r1", "role/r2")  # jsmith has a user name
+    assert finding.uses == (Use(PolicyType.IDENTITY, principal="user/jsmith"),
+                            Use(PolicyType.IDENTITY, principal="role/r1"),
+                            Use(PolicyType.IDENTITY, principal="role/r2"))
+
+
+@pytest.mark.parametrize("operator, effect, severity", [
+    ("StringEquals", "Allow", Severity.LOW),  # fails, so the Allow never applies
+    ("StringNotEquals", "Allow", Severity.HIGH),  # holds, so the Allow always applies
+    ("StringNotEquals", "Deny", Severity.LOW),
+])
+def test_a_variable_in_a_condition(operator, effect, severity):
+    owner = {operator: {"aws:ResourceTag/owner": "${aws:username}"}}
+    [finding] = principals({"Effect": effect, "Action": "s3:GetObject", "Resource": "*",
+                            "Condition": owner}, Roles={"r": {"Policies": ["P"]}})
+    assert (finding.severity, finding.element, finding.condition.operator) == (
+        severity, None, operator)
+
+
+def test_a_user_without_the_tag_a_policy_reads():
+    campus = {"Effect": "Allow", "Action": "s3:GetObject",
+              "Resource": f"{BUCKET}/${{aws:PrincipalTag/campus}}/*"}
+    tagged = {"Policies": ["P"], "Tags": [{"Key": "campus", "Value": "campus-01"}]}
+    [finding] = principals(campus, Users={"tagged": tagged, "untagged": {"Policies": ["P"]}})
+    assert (finding.variable, finding.subjects) == ("aws:PrincipalTag/campus", ("user/untagged",))
+
+
+def test_what_the_file_doesnt_know_isnt_reported():
+    campus = {"Effect": "Allow", "Action": "s3:GetObject",
+              "Resource": f"{BUCKET}/${{aws:PrincipalTag/campus}}/*"}
+    # A role's tags are unknown while session tags are possible, and a default is used when the
+    # key is absent.
+    assert principals(campus, Roles={"r": {"Policies": ["P"]}}) == []
+    default = {**campus, "Resource": f"{BUCKET}/${{aws:PrincipalTag/campus, 'shared'}}/*"}
+    assert principals(default, Users={"u": {"Policies": ["P"]}}) == []
+
+
+def test_a_boundary_is_read_for_its_principals():
+    [finding] = principals({"Effect": "Allow", "Action": "s3:GetObject", "Resource": HOME},
+                           Roles={"r": {"PermissionsBoundary": "P"}})
+    assert finding.subjects == ("role/r",)
+    assert finding.uses == (Use(PolicyType.PERMISSIONS_BOUNDARY, principal="role/r"),)

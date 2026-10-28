@@ -19,9 +19,11 @@ import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 
+from iam_analyzer import variables
 from iam_analyzer.account import Account
 from iam_analyzer.condition_keys import values_of
 from iam_analyzer.conditions import OPERATORS
+from iam_analyzer.context import RequestContext
 from iam_analyzer.framework import Severity
 from iam_analyzer.matching import match_action
 from iam_analyzer.models import (
@@ -104,7 +106,11 @@ class Use:
 class Finding:
     """One finding: a statement, where its policy is used, and the condition or the principal
     it's about. `unsettled` lists conditions whose effect AWS's docs don't settle, such as a
-    condition on a principal key that S3's definition of public doesn't name."""
+    condition on a principal key that S3's definition of public doesn't name.
+
+    A finding about a policy variable names the `variable`'s key, the `element` it's in
+    ("Resource" or "NotResource", or None in a condition), and the `subjects`: the principals
+    who get the policy and for whom it has no value."""
 
     type: FindingType
     severity: Severity
@@ -115,6 +121,9 @@ class Finding:
     condition: Condition | None = None
     principal: Principal | None = None
     unsettled: tuple[Condition, ...] = ()
+    variable: str | None = None
+    element: str | None = None
+    subjects: tuple[str, ...] = ()
 
     @property
     def statement(self) -> Statement:
@@ -263,10 +272,27 @@ HOST_BITS = FindingType(
     fixtures=(Fixture("ip_ranges/range_with_host_bits", "ALLOW"),),
 )
 
+NO_VALUE = FindingType(
+    id="variable-without-a-value",
+    title="A policy variable has no value for some principals",
+    why="The variable's key is never in these principals' requests, such as aws:username for a "
+    "role, and it has no default, so the pattern or value it's in matches nothing: a Resource "
+    "covers nothing, a NotResource excludes nothing, StringEquals fails and StringNotEquals holds.",
+    fix="Give the variable a default, as in ${aws:PrincipalTag/campus, 'none'}, or attach the "
+    "policy only to principals that have the key.",
+    fixtures=(
+        Fixture("variables_without_a_value/allow_control", "IMPLICIT_DENY"),
+        Fixture("variables_without_a_value/deny_not_resource", "EXPLICIT_DENY"),
+    ),
+    docs=(Doc(POLICY_VARIABLES_PAGE,
+              "the resource that includes a policy variable with no value will not match any "
+              "resource"),),
+)
+
 TYPES = (
     DATE_NUMBER, BOOL_VARIABLE, PUBLIC_BUCKET, TRUST_EVERYONE, CROSS_ACCOUNT_TRUST, UNIQUE_ID,
     MFA_DENY, FOR_ALL_VALUES_WITHOUT_NULL, FOR_ANY_VALUE_IF_EXISTS, SET_OPERATOR_ON_NULL,
-    ZONELESS_DATE, HOST_BITS,
+    ZONELESS_DATE, HOST_BITS, NO_VALUE,
 )
 
 
@@ -321,7 +347,63 @@ def scan(account: Account, *, organization: Organization | None) -> tuple[Findin
     if organization is not None:
         for name, policy in organization.policies.items():
             found += findings(PolicyType.SCP, policy, _scp_uses(organization, name))
+    found += _without_values(account)
     return tuple(sorted(found, key=lambda f: (f.severity.rank, f.policy.name, f.index)))
+
+
+def _without_values(account: Account) -> list[Finding]:
+    """Policy variables with no value for some of the principals who get the policy: the account
+    file says their requests don't include the key, and the variable has no default. A key the
+    file doesn't know, such as a role's tags when session tags are possible, is never reported."""
+    subjects: dict[tuple, list[str]] = {}
+    principals = [f"user/{name}" for name in account.users] + [
+        f"role/{name}" for name in account.roles
+    ]
+    for principal in principals:
+        context = account.principal_context(principal)
+        names = [policy.name for policy in account.policies_for(principal)]
+        boundary = account.boundary_for(principal)
+        names += [boundary.name] if boundary is not None else []
+        for name in dict.fromkeys(names):
+            for index, statement in enumerate(account.policies[name].statements):
+                for key, element, condition, always in _variables(statement):
+                    if _has_no_value(context, key):
+                        found = (name, index, key, element, condition, always)
+                        subjects.setdefault(found, []).append(principal)
+    return [
+        Finding(NO_VALUE, _opens(account.policies[name].statements[index], always=always),
+                PolicyType.IDENTITY, account.policies[name], index, _uses(account, name),
+                condition, variable=key, element=element, subjects=tuple(who))
+        for (name, index, key, element, condition, always), who in subjects.items()
+    ]
+
+
+def _variables(statement: Statement) -> Iterator[tuple[str, str | None, Condition | None, bool]]:
+    """Each policy variable without a default: its key, the element it's in (or its condition),
+    and whether matching nothing makes the statement hold always (True) or never (False)."""
+    if not statement.policy_variables:
+        return
+    element = "NotResource" if statement.not_resource else "Resource"
+    for pattern in statement.resources:
+        for key in _keys_without_defaults(pattern):
+            # A Resource pattern that matches nothing covers nothing; a NotResource one excludes
+            # nothing, so the statement covers everything.
+            yield key, element, None, statement.not_resource
+    for condition in statement.conditions:
+        operator = OPERATORS[condition.operator]
+        if operator.family.takes_variables:
+            for value in condition.values:
+                for key in _keys_without_defaults(value):
+                    yield key, None, condition, operator.negated
+
+
+def _keys_without_defaults(text: str) -> list[str]:
+    return [part.key for part in variables.parse(text)
+            if isinstance(part, variables.Variable) and part.default is None]
+
+
+def _has_no_value(context: RequestContext, key: str) -> bool:
+    return context.knows(key) and context.get(key) is None
 
 
 def _uses(account: Account, name: str) -> tuple[Use, ...]:
