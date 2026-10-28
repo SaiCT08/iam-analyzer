@@ -257,7 +257,8 @@ def _check_requests(actions: tuple[str, ...], check_resources: tuple[str, ...], 
     for resource in check_resources:
         if "*" in resource.removeprefix("*") or "?" in resource:
             raise FrameworkError(
-                f"{where}: {resource!r}: a check asks about one resource, so it can't have wildcards"
+                f"{where}: {resource!r}: a check asks about one resource, so it can't have "
+                "wildcards"
             )
 
 

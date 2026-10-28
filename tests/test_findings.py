@@ -126,8 +126,9 @@ def test_bucket_trust_and_service_control_policies_are_scanned():
             {"Effect": "Deny", "Action": "*", "Resource": "*", "Condition": four_digits}]},
             "All": {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]}},
         "Root": {"ServiceControlPolicies": ["All", "Window"],
-                 "OrganizationalUnits": {"Schools": {"ServiceControlPolicies": ["Window"], "Accounts": {
-                     "111122223333": {"ServiceControlPolicies": ["All"]}}}},
+                 "OrganizationalUnits": {"Schools": {
+                     "ServiceControlPolicies": ["Window"],
+                     "Accounts": {"111122223333": {"ServiceControlPolicies": ["All"]}}}},
                  "Accounts": {"999988887777": {"ServiceControlPolicies": ["All"]}}},
     }, name="org.json")
     kinds = {f.kind: f.uses for f in scan(acct, organization=org)}

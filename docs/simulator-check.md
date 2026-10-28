@@ -13,6 +13,9 @@ rounds.
   probes on 2026-10-26 settled the questions still open (see
   [Differences and decisions](#differences-and-decisions)). Since 2026-10-26 the engine follows
   every decision below.
+- **Policy findings:** compliance reports cite these fixtures as evidence for the AWS surprises
+  they find, such as a four-digit date read as epoch seconds (`src/iam_analyzer/findings.py`).
+  `tests/test_findings.py` checks that each cited fixture holds the answer the finding claims.
 
 ## Summary
 

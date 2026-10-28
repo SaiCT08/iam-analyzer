@@ -59,7 +59,8 @@ EXTERNAL_ID_PAGE = (
     "#id_roles_third-party_external-id"
 )
 OPERATORS_PAGE = (
-    "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition_operators.html"
+    "https://docs.aws.amazon.com/IAM/latest/UserGuide/"
+    "reference_policies_elements_condition_operators.html"
 )
 EVERYONE = Principal(PrincipalType.AWS, "*")
 MFA_KEY = "aws:MultiFactorAuthPresent"
@@ -117,7 +118,8 @@ class Finding:
 
     type: FindingType
     severity: Severity
-    kind: PolicyType  # the kind of policy: identity (boundaries included), resource-based, trust, SCP
+    # The kind of policy: identity (boundaries included), resource-based, trust or SCP.
+    kind: PolicyType
     policy: Policy
     index: int
     uses: tuple[Use, ...]  # empty when the policy isn't attached to anything
@@ -224,7 +226,9 @@ FOR_ALL_VALUES_WITHOUT_NULL = FindingType(
     why="ForAllValues holds when the request doesn't include the key at all, so this Allow applies "
     "to requests that carry none of the values it lists.",
     fix="Add a Null condition with false on the same key, so the Allow needs the key.",
-    fixtures=(Fixture("scenarios/condition_for_all_values_holds_when_the_key_is_missing", "ALLOW"),),
+    fixtures=(
+        Fixture("scenarios/condition_for_all_values_holds_when_the_key_is_missing", "ALLOW"),
+    ),
     docs=(Doc(OPERATORS_PAGE,
               "The ForAllValues qualifier returns true if there are no context keys in the request "
               "or if the context key value resolves to a null dataset, such as an empty string."),),

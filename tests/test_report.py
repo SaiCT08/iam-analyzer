@@ -156,10 +156,10 @@ def test_a_prohibition_lists_the_values_that_allow_it():
 
 def test_refusals_are_grouped_and_say_what_would_settle_them():
     text = flat("\n".join(section(markdown(check("a", "only", Resources=[LESSONS])), "Check a")))
-    assert ("- Can't tell for everyone asked: nothing describes arn:aws:s3:::district-lesson-plans: "
-            "it can have a resource-based policy, and the analyzer can't tell whether it has one, "
-            "or which account it is in. Describe it in the account file's Resources, as {} if it "
-            "has no resource-based policy.") in text
+    assert ("- Can't tell for everyone asked: nothing describes "
+            "arn:aws:s3:::district-lesson-plans: it can have a resource-based policy, and the "
+            "analyzer can't tell whether it has one, or which account it is in. Describe it in "
+            "the account file's Resources, as {} if it has no resource-based policy.") in text
 
 
 def test_a_key_that_cant_be_tried_says_to_give_it():
@@ -251,14 +251,14 @@ def test_labels_show_only_what_varies_and_passing_principals_appear_once():
                     "Check a")
     # The registrar can write but not read; the clerk can write too. Both have their own lines.
     assert f"- user/registrar (s3:PutObject), depending on {MFA}:" in lines
-    assert "- user/teacher (s3:GetObject) can. Granted by Read, Sid Read, through group Teachers." in (
-        lines)
+    assert ("- user/teacher (s3:GetObject) can. Granted by Read, Sid Read, through group "
+            "Teachers.") in lines
     assert ("- Can't: user/teacher (s3:PutObject), user/reader (s3:PutObject), user/registrar "
             "(s3:GetObject), user/clerk") in flat("\n".join(lines))
     # One resource, so it isn't repeated; with every item passing, a principal is just its name.
     assert OBJECT not in "\n".join(lines[5:])
-    passing = section(markdown(check("b", "only", Actions=["s3:DeleteObject", "s3:PutBucketTagging"])),
-                      "Check b")
+    actions = ["s3:DeleteObject", "s3:PutBucketTagging"]
+    passing = section(markdown(check("b", "only", Actions=actions)), "Check b")
     assert "- Can't: user/teacher, user/reader, user/registrar, user/clerk, role/Admin." in passing
 
 
@@ -350,8 +350,10 @@ def test_json_lists_the_findings():
         "condition": {"operator": "DateLessThan", "key": "aws:CurrentTime", "values": ["2026"]},
         "principal": None, "unsettled": [], "variable": None, "element": None, "subjects": [],
         "why": high["why"], "fix": high["fix"],
-        "evidence": {"fixtures": [{"case": "dates_without_a_time_zone/four_digits", "aws": "ALLOW"}],
-                     "docs": []},
+        "evidence": {
+            "fixtures": [{"case": "dates_without_a_time_zone/four_digits", "aws": "ALLOW"}],
+            "docs": [],
+        },
     }
     assert low["sid"] == "Late"
 

@@ -45,6 +45,10 @@ policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
 - A request on a specific resource needs that resource described: whether it has a resource-based
   policy, and that it's in the principal's own account. The analyzer never assumes either (see
   [Resources](#resources)).
+- Compliance reports. `iam-analyzer report` grades an account against a framework's checks:
+  PASS, FAIL, DEPENDS or CAN'T TELL, each with the statements behind it. It adds policy findings,
+  AWS surprises in the policy text that need no question, and prints Markdown and JSON with exit
+  codes for CI. A framework is a data file (see [Compliance reports](#compliance-reports)).
 
 Not supported yet:
 - `NotPrincipal` is refused, with a clear error, when its statement applies to the request. Other
