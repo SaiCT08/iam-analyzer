@@ -51,6 +51,9 @@ S3_PUBLIC_PAGE = (
     "https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html"
     "#access-control-block-public-access-policy-status"
 )
+NOT_PRINCIPAL_PAGE = (
+    "https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_notprincipal.html"
+)
 EXTERNAL_ID_PAGE = (
     "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_third-party.html"
     "#id_roles_third-party_external-id"
@@ -289,10 +292,35 @@ NO_VALUE = FindingType(
               "resource"),),
 )
 
+NOT_PRINCIPAL = FindingType(
+    id="not-principal",
+    title="A Deny uses NotPrincipal",
+    why="Which principals NotPrincipal leaves out depends on the service, which may check the "
+    "account, then the role, then the session, so it can deny more than it seems to. The "
+    "analyzer refuses a request the statement applies to.",
+    fix='Use "Principal": "*" with an ArnNotEquals aws:PrincipalArn condition instead, as the '
+    "district's OnlyITAdminChangesThePolicy statement does.",
+    docs=(Doc(NOT_PRINCIPAL_PAGE,
+              "We recommend using the aws:PrincipalArn context key with ARN condition operators "
+              "instead."),),
+)
+NOT_PRINCIPAL_BOUNDARY = FindingType(
+    id="not-principal-deny-with-a-boundary",
+    title="A NotPrincipal Deny always denies principals with a boundary",
+    why="AWS says a NotPrincipal Deny denies every IAM principal that has a permissions boundary, "
+    "whatever NotPrincipal names, so these principals are denied even if the statement means to "
+    "spare them. It's low, because it can only block access.",
+    fix='Use "Principal": "*" with an ArnNotEquals aws:PrincipalArn condition instead.',
+    docs=(Doc(f"{NOT_PRINCIPAL_PAGE}#notprincipal-key-points",
+              "The NotPrincipal element with a Deny effect will always deny any IAM principal that "
+              "has a permissions boundary policy attached, regardless of the values specified in "
+              "the NotPrincipal element."),),
+)
+
 TYPES = (
     DATE_NUMBER, BOOL_VARIABLE, PUBLIC_BUCKET, TRUST_EVERYONE, CROSS_ACCOUNT_TRUST, UNIQUE_ID,
     MFA_DENY, FOR_ALL_VALUES_WITHOUT_NULL, FOR_ANY_VALUE_IF_EXISTS, SET_OPERATOR_ON_NULL,
-    ZONELESS_DATE, HOST_BITS, NO_VALUE,
+    ZONELESS_DATE, HOST_BITS, NO_VALUE, NOT_PRINCIPAL, NOT_PRINCIPAL_BOUNDARY,
 )
 
 
@@ -305,6 +333,7 @@ class _Scope:
     kind: PolicyType
     account_id: str | None
     organization_accounts: frozenset[str]  # empty without an organization
+    bounded: tuple[str, ...]  # the account file's users and roles with a permissions boundary
 
 
 @dataclass(frozen=True)
@@ -314,6 +343,7 @@ class _Hit:
     condition: Condition | None = None
     principal: Principal | None = None
     unsettled: tuple[Condition, ...] = ()
+    subjects: tuple[str, ...] = ()
 
 
 Detector = Callable[[Statement, _Scope], Iterator[_Hit]]
@@ -322,12 +352,16 @@ Detector = Callable[[Statement, _Scope], Iterator[_Hit]]
 def scan(account: Account, *, organization: Organization | None) -> tuple[Finding, ...]:
     """Every finding in the account file's policies, and in the organization's SCPs."""
     accounts = frozenset(organization.account_paths) if organization else frozenset()
+    bounded = tuple(
+        [f"user/{name}" for name, user in account.users.items() if user.boundary]
+        + [f"role/{name}" for name, role in account.roles.items() if role.boundary]
+    )
 
     def findings(kind: PolicyType, policy: Policy, uses: tuple[Use, ...]) -> list[Finding]:
-        scope = _Scope(kind, account.account_id, accounts)
+        scope = _Scope(kind, account.account_id, accounts, bounded)
         return [
             Finding(hit.type, hit.severity, kind, policy, index, uses, hit.condition,
-                    hit.principal, hit.unsettled)
+                    hit.principal, hit.unsettled, subjects=hit.subjects)
             for index, statement in enumerate(policy.statements)
             for detect in DETECTORS
             for hit in detect(statement, scope)
@@ -650,8 +684,15 @@ def _has_host_bits(value: str) -> bool:
     return False
 
 
+def _not_principals(statement: Statement, scope: _Scope) -> Iterator[_Hit]:
+    if statement.not_principal:
+        yield _Hit(NOT_PRINCIPAL, Severity.MEDIUM)
+        if scope.bounded:
+            yield _Hit(NOT_PRINCIPAL_BOUNDARY, Severity.LOW, subjects=scope.bounded)
+
+
 DETECTORS: tuple[Detector, ...] = (
     _date_numbers, _bool_variables, _public_bucket, _trust_everyone, _cross_account_trust,
     _unique_ids, _mfa_denies, _for_all_values_without_null, _for_any_value_if_exists,
-    _set_operators_on_null, _zoneless_dates, _host_bits,
+    _set_operators_on_null, _zoneless_dates, _host_bits, _not_principals,
 )

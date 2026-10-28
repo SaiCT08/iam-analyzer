@@ -790,6 +790,8 @@ request the author meant to let through.
 | A date with no time zone is read as UTC (always low) | a date such as `2026-08-15` or `2026-08-15T07:30` | simulator: `dates_without_a_time_zone/*` |
 | An IP range with host bits covers the whole network | a range such as `203.0.113.5/24` | simulator: `ip_ranges/range_with_host_bits` |
 | A policy variable has no value for some principals | a variable with no default whose key the account file says some principals never have, such as `${aws:username}` for a role, or a tag a user lacks | simulator: `variables_without_a_value/*`; the policy variables page |
+| A Deny uses NotPrincipal (medium) | any `NotPrincipal` | the NotPrincipal page, which recommends `aws:PrincipalArn` conditions instead |
+| A NotPrincipal Deny always denies principals with a boundary (low) | a `NotPrincipal` Deny, when users or roles in the file have a permissions boundary | the NotPrincipal page: it "will always deny any IAM principal that has a permissions boundary policy attached" |
 
 The district account has two of these mistakes on purpose:
 - `SummerSchoolRecords` allows reads "until 2027", but `DateLessThan` compares against early 1970,

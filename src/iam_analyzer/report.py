@@ -145,6 +145,8 @@ def _finding_markdown(finding: Finding) -> list[str]:
         where = f" in {finding.element}" if finding.element else ""
         lines.append(_bullet(f"Variable: ${{{finding.variable}}}{where}, with no value for "
                              f"{', '.join(finding.subjects)}."))
+    elif finding.subjects:
+        lines.append(_bullet(f"Affects: {', '.join(finding.subjects)}."))
     if finding.condition is not None:
         lines.append(_bullet(f"Condition: {_condition(finding.condition)}."))
     lines.append(_bullet(f"Why: {found.why}"))

@@ -368,3 +368,22 @@ def test_a_variable_without_a_value_names_the_principals():
     assert ("### LOW: A policy variable has no value for some principals - In: Home, Sid "
             "OwnFolder: an identity policy attached to role/Reports. - Variable: ${aws:username} "
             "in Resource, with no value for role/Reports.") in text
+
+
+def test_a_finding_about_principals_lists_them():
+    acct = parse_account({"AccountId": "111122223333", "Policies": {"Bound": {"Statement": [
+        {"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]}},
+        "Users": {"kwong": {"PermissionsBoundary": "Bound"}},
+        "Resources": {BUCKET: {"Policy": {"Statement": [{
+            "Sid": "AllButKwong", "Effect": "Deny", "NotPrincipal": {"AWS": [
+                "arn:aws:iam::111122223333:root", "arn:aws:iam::111122223333:user/kwong"]},
+            "Action": "s3:PutObject", "Resource": f"{BUCKET}/*"}]}}}}, name="acct.json")
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"},
+                                 "Checks": [check("a", "only")]}, name="fw.json")
+    text = flat(to_markdown(build(framework, acct, organization=None)))
+    # The check reads, which the NotPrincipal Deny doesn't cover, so it's still answered: kwong
+    # has the policy only as a boundary, so nothing grants the read.
+    assert "## PASS: Check a (high)" in text
+    assert ("### LOW: A NotPrincipal Deny always denies principals with a boundary - In: the "
+            "resource policy on arn:aws:s3:::district-student-records, Sid AllButKwong. - "
+            "Affects: user/kwong.") in text

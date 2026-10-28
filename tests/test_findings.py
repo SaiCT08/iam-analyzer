@@ -432,3 +432,32 @@ def test_a_unique_id_in_not_principal_only_blocks_more():
     [finding] = [f for f in scan(bucket(deny), organization=None)
                  if f.type.id == "principal-is-a-unique-id"]
     assert finding.severity is Severity.LOW
+
+
+# --- NotPrincipal ----------------------------------------------------------------------
+
+ALL_BUT_KWONG = {"Sid": "AllButKwong", "Effect": "Deny",
+                 "NotPrincipal": {"AWS": ["arn:aws:iam::111122223333:root",
+                                          "arn:aws:iam::111122223333:user/kwong"]},
+                 "Action": "s3:GetObject", "Resource": f"{BUCKET}/*"}
+
+
+def with_not_principal(**sections):
+    return scan(parse_account({"AccountId": "111122223333", "Policies": {"Bound": {
+        "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]}},
+        "Resources": {BUCKET: {"Policy": {"Statement": [ALL_BUT_KWONG]}}}, **sections},
+        name="acct.json"), organization=None)
+
+
+def test_a_not_principal_deny_is_found():
+    [finding] = with_not_principal(Users={"kwong": {}})
+    assert (finding.type.id, finding.severity, finding.statement.sid) == (
+        "not-principal", Severity.MEDIUM, "AllButKwong")
+
+
+def test_principals_with_a_boundary_are_always_denied_by_it():
+    found_types = with_not_principal(Users={"kwong": {"PermissionsBoundary": "Bound"}},
+                                     Roles={"r": {"PermissionsBoundary": "Bound"}, "s": {}})
+    boundary = next(f for f in found_types if f.type.id == "not-principal-deny-with-a-boundary")
+    assert boundary.severity is Severity.LOW  # it can only block access
+    assert boundary.subjects == ("user/kwong", "role/r")
