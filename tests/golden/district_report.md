@@ -38,12 +38,12 @@ Maps to:
 Asked: Can anyone but group/Registrars do s3:GetObject on
 arn:aws:s3:::district-roster-exports/2026/roster.csv?
 
-- user/jsmith, user/mgarcia, user/dpatel, user/kwong, user/tbrooks, role/TeacherSignIn can. Granted
-  by the resource policy on arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor, which
-  names everyone.
-- user/alee, role/ITAdmin, role/GradebookVendor can. Granted by ITAdminFullS3, Sid FullS3Access,
-  attached directly; the resource policy on arn:aws:s3:::district-roster-exports, Sid
-  ShareRosterWithVendor, which names everyone.
+- user/jsmith, user/mgarcia, user/dpatel, user/kwong, user/tbrooks, role/GradebookVendor,
+  role/TeacherSignIn can. Granted by the resource policy on arn:aws:s3:::district-roster-exports,
+  Sid ShareRosterWithVendor, which names everyone.
+- user/alee, role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly; the
+  resource policy on arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor, which names
+  everyone.
 - Can't tell for principals outside district.json: the resource policy on
   arn:aws:s3:::district-roster-exports, Sid ShareRosterWithVendor, allows s3:GetObject for everyone
   ("*"), and the analyzer doesn't evaluate requests from outside the account file yet.

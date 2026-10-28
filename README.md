@@ -665,7 +665,9 @@ Every check gets one of four results:
 - **FAIL:** a principal gets the access a check forbids, or doesn't get the access a check
   expects. Each principal that gets access is listed with every statement that grants it: the
   policy, its Sid (or its position, such as "statement 0"), and how the principal gets it, such as
-  "through group Teachers" or "attached directly".
+  "through group Teachers" or "attached directly". A statement only counts when its way in works
+  by itself. An identity policy that the principal's boundary blocks isn't listed, even if a
+  bucket policy lets the principal in anyway.
 - **DEPENDS:** only for checks that expect access. The answer depends on a condition key, such as
   `aws:MultiFactorAuthPresent`, and the report lists its values with each answer.
 - **CAN'T TELL:** the analyzer refused, with its reason and what would settle it, such as a

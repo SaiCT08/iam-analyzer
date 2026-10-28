@@ -260,6 +260,10 @@ class EvaluationResult:
     reasons: tuple[MatchedStatement, ...] = field(default_factory=tuple)
     # For IMPLICIT_DENY: each layer that had no matching Allow. Empty otherwise.
     not_allowed_by: tuple[Layer, ...] = field(default_factory=tuple)
+    # For ALLOW: the Allows in `reasons` that grant the request, on a way in that works by
+    # itself (see `evaluator`). An identity policy's Allow that the boundary blocks isn't one, and
+    # neither is any boundary or SCP statement, since those only limit. Empty otherwise.
+    grants: tuple[MatchedStatement, ...] = field(default_factory=tuple)
 
     @property
     def allowed(self) -> bool:

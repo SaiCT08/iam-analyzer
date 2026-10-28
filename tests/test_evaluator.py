@@ -1101,3 +1101,64 @@ def test_a_not_principal_deny_needs_its_condition_keys():
     tls = not_principal(Condition={"Bool": {"aws:SecureTransport": "false"}})
     with pytest.raises(MissingContextError, match="aws:SecureTransport"):
         with_bucket_policy(get_by(KWONG), [BROAD_S3], tls)
+
+
+# --- Which Allows grant an allowed request ---------------------------------------------
+
+GRADEBOOK_ONLY = policy("GradebookOnly", allow("s3:*", "arn:aws:s3:::district-gradebook-app/*",
+                                                sid="GradebookApp"))
+
+
+def granted_by(result):
+    return [(r.policy_name, r.statement.sid) for r in result.grants]
+
+
+def test_an_identity_allow_the_boundary_blocks_doesnt_grant():
+    # The boundary blocks the identity policy's way in, so only the grant to everyone lets the
+    # caller in. AWS doesn't let a boundary limit that grant (star_grant_and_boundary/*).
+    result = with_bucket_policy(get_by(CAMPUS_APP), [BROAD_S3], grant("*", sid="Everyone"),
+                                boundary=GRADEBOOK_ONLY)
+    assert result.decision is Decision.ALLOW
+    assert ("identity", "BroadS3", IDENTITY) in reasons(result)  # it matched...
+    assert granted_by(result) == [(BUCKET, "Everyone")]  # ...but doesn't grant
+
+
+def test_every_way_in_that_works_by_itself_grants():
+    result = with_bucket_policy(get_by(CAMPUS_APP), [BROAD_S3], grant("*", sid="Everyone"))
+    assert granted_by(result) == [("identity", "BroadS3"), (BUCKET, "Everyone")]
+
+
+@pytest.mark.parametrize("boundary, granted", [
+    (None, [("identity", "BroadS3"), (BUCKET, "Role")]),
+    (policy("Bound", allow("s3:*", "*", sid="Bound")), [("identity", "BroadS3"), (BUCKET, "Role")]),
+])
+def test_a_grant_to_the_role_needs_the_boundary(boundary, granted):
+    layers = {"boundary": boundary} if boundary else {}
+    result = with_bucket_policy(get_by(CAMPUS_APP), [BROAD_S3],
+                                grant({"AWS": CAMPUS_APP}, sid="Role"), **layers)
+    assert granted_by(result) == granted
+    assert ("Bound", "Bound") not in granted_by(result)  # a boundary only limits
+
+
+def test_naming_the_account_grants_nothing_itself():
+    result = with_bucket_policy(get_by(KWONG), [BROAD_S3],
+                                grant({"AWS": "111122223333"}, sid="Account"))
+    assert result.decision is Decision.ALLOW
+    assert granted_by(result) == [("identity", "BroadS3")]
+
+
+def test_scps_never_grant():
+    result = check(GET, [BROAD_S3], scps=org_path())
+    assert any(r.layer.policy_type is PolicyType.SCP for r in result.reasons)
+    assert granted_by(result) == [("identity", "BroadS3")]
+
+
+def test_a_trust_policy_is_part_of_every_grant():
+    result = with_trust_policy(assume_by(ALEE), [ASSUME],
+                               trusts({"AWS": "111122223333"}, Sid="Account"))
+    assert granted_by(result) == [("Assume", "Assume"), (ITADMIN, "Account")]
+
+
+def test_denials_have_no_grants():
+    assert check(GET, [policy("p", deny("*", "*"))]).grants == ()
+    assert check(GET, []).grants == ()

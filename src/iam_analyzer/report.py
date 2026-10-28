@@ -48,8 +48,6 @@ LABELS = {
     Result.CANT_TELL: "CAN'T TELL",
     Result.PASS: "PASS",
 }
-# Statements in these layers grant access. Boundaries and SCPs only limit it.
-GRANTING = (PolicyType.IDENTITY, PolicyType.RESOURCE_BASED, PolicyType.TRUST)
 NAMES = {
     PrincipalMatch.EVERYONE: "everyone",
     PrincipalMatch.USER: "the user",
@@ -309,8 +307,7 @@ def _outcome(answer: Answer) -> str:
         return f"can't tell: {_refusal(answer.refusal)}"
     result = answer.result
     if result.allowed:
-        grants = [m for m in result.reasons if m.layer.policy_type in GRANTING]
-        return f"can. Granted by {'; '.join(_statement(m) for m in grants)}."
+        return f"can. Granted by {'; '.join(_statement(m) for m in result.grants)}."
     if result.decision is Decision.EXPLICIT_DENY:
         return f"can't. Denied by {'; '.join(_statement(m) for m in result.reasons)}."
     return f"can't: {'; '.join(_not_allowed(layer) for layer in result.not_allowed_by)}."
@@ -595,6 +592,7 @@ def _answer_json(answer: Answer) -> dict:
         "values": dict(answer.values),
         "decision": None if result is None else result.decision.value,
         "statements": [] if result is None else [_matched_json(m) for m in result.reasons],
+        "grants": [] if result is None else [_matched_json(m) for m in result.grants],
         "not_allowed_by": [] if result is None else [
             _layer_json(layer) for layer in result.not_allowed_by
         ],

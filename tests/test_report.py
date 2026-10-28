@@ -389,3 +389,32 @@ def test_a_finding_about_principals_lists_them():
     assert ("### LOW: A NotPrincipal Deny always denies principals with a boundary - In: the "
             "resource policy on arn:aws:s3:::district-student-records, Sid AllButKwong. - "
             "Affects: user/kwong.") in text
+
+
+def test_a_way_in_the_boundary_blocks_isnt_cited():
+    # Both roles can read through the public bucket policy. Vendor's boundary blocks its identity
+    # policy, so only Admin also gets in that way, and the two don't share a line.
+    public = {"Statement": [{"Sid": "Public", "Effect": "Allow", "Principal": "*",
+                             "Action": "s3:GetObject", "Resource": f"{BUCKET}/*"}]}
+    acct = parse_account({"AccountId": "111122223333", "Policies": {
+        "Broad": {"Statement": [{"Sid": "Broad", "Effect": "Allow", "Action": "s3:*",
+                                 "Resource": "*"}]},
+        "Elsewhere": {"Statement": [{"Effect": "Allow", "Action": "s3:*",
+                                     "Resource": "arn:aws:s3:::district-gradebook-app/*"}]},
+    }, "Roles": {"Admin": {"Policies": ["Broad"]},
+                 "Vendor": {"Policies": ["Broad"], "PermissionsBoundary": "Elsewhere"}},
+        "Resources": {BUCKET: {"Policy": public}}}, name="acct.json")
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"},
+                                 "Checks": [check("a", "only")]}, name="fw.json")
+    graded = build(framework, acct, organization=None)
+    lines = section(to_markdown(graded), "Check a")
+    text = flat("\n".join(lines))
+    assert ("- role/Admin can. Granted by Broad, Sid Broad, attached directly; the resource policy "
+            f"on {BUCKET}, Sid Public, which names everyone.") in text
+    assert (f"- role/Vendor can. Granted by the resource policy on {BUCKET}, Sid Public, which "
+            "names everyone.") in text
+    vendor = next(item for item in to_json(graded)["checks"][0]["items"]
+                  if item["principal"] == "role/Vendor")
+    [answer] = vendor["answers"]
+    assert [s["sid"] for s in answer["statements"]] == ["Broad", "Public"]  # both matched
+    assert [s["sid"] for s in answer["grants"]] == ["Public"]  # one grants

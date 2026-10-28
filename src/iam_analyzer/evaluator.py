@@ -31,7 +31,9 @@ The logic, in three steps:
               Otherwise -> IMPLICIT_DENY (the default is "no")
 
 So boundaries and SCPs never grant anything by themselves; they only limit what identity
-and resource-based policies allow.
+and resource-based policies allow. An allowed result's `grants` are the Allows on a way in that
+works by itself: the identity policies' when the boundary allows too, a resource-based policy's
+grant that needs nothing else, and the trust policy's, which every way into a role needs.
 
 When matching a statement needs a condition key the request context says nothing about,
 there is no answer to give: evaluation raises one MissingContextError that names every such
@@ -239,7 +241,34 @@ def evaluate(
     if not_allowed_by:
         return EvaluationResult(Decision.IMPLICIT_DENY, not_allowed_by=not_allowed_by)
 
-    return EvaluationResult(Decision.ALLOW, tuple(every))
+    grants = _grants(matched, bounded=boundary is not None)
+    return EvaluationResult(Decision.ALLOW, tuple(every), grants=grants)
+
+
+def _grants(
+    matched: list[tuple[Layer, list[MatchedStatement]]], *, bounded: bool
+) -> tuple[MatchedStatement, ...]:
+    """The Allows that grant an allowed request: the ones on a way in that works by itself.
+
+    - An identity policy's Allow grants when the boundary, if there is one, allows the request
+      too. When the boundary doesn't, the request got in some other way.
+    - A resource-based policy's Allow grants when it names the caller's user or everyone, or the
+      caller's role and the boundary allows: AWS says a grant to a role ARN is "limited by an
+      implicit deny in a permissions boundary". Naming the caller's account only delegates to
+      the identity policies, so it grants nothing itself.
+    - A trust policy's Allow is always part of the grant, because every way into a role needs it.
+    Boundaries and SCPs only limit, so none of their statements grant.
+    """
+    found = {layer.policy_type: statements for layer, statements in matched
+             if layer.policy_type is not PolicyType.SCP}
+    boundary_allows = not bounded or bool(found.get(PolicyType.PERMISSIONS_BOUNDARY))
+    grants = list(found.get(PolicyType.IDENTITY, [])) if boundary_allows else []
+    for statement in found.get(PolicyType.RESOURCE_BASED, []):
+        role = statement.principal_match is PrincipalMatch.ROLE
+        if statement.principal_match.direct or (role and boundary_allows):
+            grants.append(statement)
+    grants += found.get(PolicyType.TRUST, [])
+    return tuple(grants)
 
 
 def _not_allowed_by(
