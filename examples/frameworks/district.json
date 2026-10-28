@@ -87,8 +87,8 @@
       "Value": "true",
       "Actions": ["s3:PutObject"],
       "Resources": ["arn:aws:s3:::district-student-records/campus-02/transcript.pdf"],
-      "Fix": "Take ITAdminFullS3 off user alee, so IT staff change records through the ITAdmin role, which needs MFA to assume, and give ITAdminFullS3 a Deny like RequireMfaForChanges.",
-      "Keep": "An MFA Deny like RequireMfaForChanges on every policy that can change student records.",
+      "Fix": "Take ITAdminFullS3 off user alee, so IT staff change records only through the ITAdmin role, whose trust policy requires MFA. MFA conditions belong in users' policies and in trust policies, not in a role's own policies: AWS says a role's credentials carry no MFA information, so an MFA Deny there could lock the role out.",
+      "Keep": "An MFA Deny like RequireMfaForChanges in each user's policy that can change student records, and MFA in the trust policy of each role that can.",
       "MapsTo": ["NIST IA-2(1)", "NIST IA-2(2)"]
     },
     {

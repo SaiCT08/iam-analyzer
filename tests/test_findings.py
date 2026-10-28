@@ -303,6 +303,13 @@ def test_an_mfa_deny_that_skips_access_keys():
     assert types(statement("Allow", Bool={MFA: "true"})) == []  # needs MFA: missing fails, safely
 
 
+def test_the_mfa_deny_fix_keeps_mfa_out_of_roles_own_policies():
+    # A role's credentials carry no MFA information, so BoolIfExists there would deny it everything.
+    from iam_analyzer.findings import MFA_DENY
+    assert MFA_DENY.fix.startswith("In a user's policy, use BoolIfExists")
+    assert "Require MFA in the role's trust policy instead." in MFA_DENY.fix
+
+
 def test_a_for_all_values_allow_without_a_null_check():
     tags = {"ForAllValues:StringEquals": {"aws:TagKeys": ["campus", "grade"]}}
     assert types(statement("Allow", **tags)) == [("for-all-values-allow-without-null",

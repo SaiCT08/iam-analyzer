@@ -72,8 +72,10 @@ when aws:MultiFactorAuthPresent is false or absent?
 - Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
   role/GradebookVendor, role/TeacherSignIn.
 
-Fix: Take ITAdminFullS3 off user alee, so IT staff change records through the ITAdmin role, which
-needs MFA to assume, and give ITAdminFullS3 a Deny like RequireMfaForChanges.
+Fix: Take ITAdminFullS3 off user alee, so IT staff change records only through the ITAdmin role,
+whose trust policy requires MFA. MFA conditions belong in users' policies and in trust policies, not
+in a role's own policies: AWS says a role's credentials carry no MFA information, so an MFA Deny
+there could lock the role out.
 
 Maps to:
 - NIST SP 800-53 Rev. 5 IA-2(1): Multi-factor Authentication to Privileged Accounts.

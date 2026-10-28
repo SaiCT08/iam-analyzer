@@ -214,8 +214,10 @@ MFA_DENY = FindingType(
     why="The Deny uses Bool on aws:MultiFactorAuthPresent. Requests signed with long-term access "
     "keys don't include that key at all, and Bool fails on a missing key, so the Deny doesn't "
     "apply to them.",
-    fix="Use BoolIfExists aws:MultiFactorAuthPresent false, which also applies when the key is "
-    "missing.",
+    fix="In a user's policy, use BoolIfExists aws:MultiFactorAuthPresent false, which also applies "
+    "when the key is missing. Don't put an MFA Deny in a role's own policies: AWS says a role's "
+    "credentials carry no MFA information, so it could lock the role out of everything the Deny "
+    "covers. Require MFA in the role's trust policy instead.",
     docs=(Doc(values_of(MFA_KEY).link,
               "The aws:MultiFactorAuthPresent key is not present when an API or CLI command is "
               "called with long-term credentials, such as user access key pairs. Therefore we "
