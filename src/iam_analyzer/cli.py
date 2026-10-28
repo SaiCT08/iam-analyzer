@@ -24,9 +24,9 @@ import sys
 from collections.abc import Sequence
 
 from iam_analyzer import resources
-from iam_analyzer.account import Account, load_account_file
+from iam_analyzer.account import load_account_file
 from iam_analyzer.context import RequestContext
-from iam_analyzer.errors import AccountError, MissingContextError, MissingResourceError, PolicyError
+from iam_analyzer.errors import MissingContextError, MissingResourceError, PolicyError
 from iam_analyzer.evaluator import evaluate
 from iam_analyzer.loader import load_policy_file
 from iam_analyzer.models import (
@@ -38,7 +38,6 @@ from iam_analyzer.models import (
     PolicyType,
     PrincipalMatch,
     Request,
-    ScpLevel,
     TargetType,
 )
 from iam_analyzer.organization import load_organization_file
@@ -262,18 +261,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         context = RequestContext.of(args.context or (), args.absent or ())
         if args.account:
             account = load_account_file(args.account)
-            policies = account.policies_for(args.principal)
-            boundary = account.boundary_for(args.principal)
-            scps = _scp_levels(account, args.principal, args.org) if args.org else ()
-            principal = account.principal_context(
-                args.principal, session_tags=not args.no_session_tags
+            organization = load_organization_file(args.org) if args.org else None
+            request = account.request(
+                args.principal, args.action, args.resource,
+                context=context, session_tags=not args.no_session_tags,
             )
-            context = principal.merged(context)
-            resource = account.resource_for(args.resource, args.action)
+            result = account.evaluate(args.principal, request, organization=organization)
         else:
             policies = [load_policy_file(path) for path in args.policy]
             boundary = load_policy_file(args.boundary) if args.boundary else None
-            scps = ()
             resource = None
             if args.resource_policy:
                 resource = resources.load_resource_policy_file(
@@ -281,8 +277,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             elif args.no_resource_policy:
                 resource = resources.describe(args.resource, args.action)
-        request = Request(action=args.action, resource=args.resource, context=context)
-        result = evaluate(request, policies, boundary=boundary, scps=scps, resource=resource)
+            request = Request(action=args.action, resource=args.resource, context=context)
+            result = evaluate(request, policies, boundary=boundary, resource=resource)
     except PolicyError as exc:
         print(f"error: {exc}", file=sys.stderr)
         if isinstance(exc, MissingContextError):
@@ -297,14 +293,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(format_result(result, request.context))
     return EXIT_ALLOWED if result.allowed else EXIT_DENIED
 
-
-def _scp_levels(account: Account, principal: str, org_file: str) -> tuple[ScpLevel, ...]:
-    """The SCP levels in the organization file that apply to `principal` in `account`."""
-    if account.account_id is None:
-        raise AccountError(f"{account.name}: needs an 'AccountId' to look up its SCPs")
-    return load_organization_file(org_file).scp_levels_for(
-        account.account_id, service_linked=account.is_service_linked(principal)
-    )
 
 
 if __name__ == "__main__":

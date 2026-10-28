@@ -11,7 +11,8 @@ from iam_analyzer.errors import (
     RequestError,
     UnsupportedPolicyFeature,
 )
-from iam_analyzer.models import Principal, PrincipalType, Resource
+from iam_analyzer.models import Decision, PolicyType, Principal, PrincipalType, Resource
+from iam_analyzer.organization import load_organization_file
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "accounts" / "district.json"
 
@@ -558,3 +559,82 @@ def test_example_teacher_sign_in_role_has_only_its_own_tags():
     context = load_account_file(EXAMPLE).principal_context("role/TeacherSignIn")
     assert context.get("aws:PrincipalTag/campus") == ("campus-01",)
     assert context.get("aws:PrincipalTag/grade") is None
+
+
+# --- Asking about one of the file's principals -----------------------------------------
+
+ORG = Path(__file__).parent.parent / "examples" / "organizations" / "district.json"
+ROSTER = "arn:aws:s3:::district-student-records/2026/roster.csv"
+
+
+def test_a_request_adds_the_callers_keys_to_the_principals():
+    request = load_account_file(EXAMPLE).request(
+        "user/jsmith", "s3:GetObject", ROSTER,
+        context=RequestContext.of([("aws:SourceIp", "203.0.113.5")]),
+    )
+    assert request.context.get("aws:username") == ("jsmith",)
+    assert request.context.get("aws:SourceIp") == ("203.0.113.5",)
+
+
+def test_a_request_cannot_change_what_the_file_says():
+    with pytest.raises(RequestError, match="'aws:username' comes from district.json user/jsmith"):
+        load_account_file(EXAMPLE).request(
+            "user/jsmith", "s3:GetObject", ROSTER,
+            context=RequestContext.of([("aws:username", "alee")]),
+        )
+
+
+def test_a_request_can_rule_out_session_tags():
+    acct = with_role(Tags=[{"Key": "campus", "Value": "campus-01"}])
+    request = acct.request("role/ITAdmin", "s3:GetObject", "*", session_tags=False)
+    assert request.context.get("aws:PrincipalTag/campus") == ("campus-01",)
+
+
+def test_evaluate_uses_the_identity_policies_boundary_and_described_resource():
+    acct = load_account_file(EXAMPLE)
+    notes = "arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"
+    # A bucket policy grant, with no identity policy at all.
+    kwong = acct.evaluate("user/kwong", acct.request("user/kwong", "s3:GetObject", notes),
+                          organization=None)
+    assert kwong.allowed
+    # A group's Allow that the user's boundary doesn't allow.
+    campus_02 = "arn:aws:s3:::district-student-records/campus-02/transcript.pdf"
+    dpatel = acct.evaluate("user/dpatel", acct.request("user/dpatel", "s3:GetObject", campus_02),
+                           organization=None)
+    assert dpatel.decision is Decision.IMPLICIT_DENY
+    assert [layer.policy_type for layer in dpatel.not_allowed_by] == [
+        PolicyType.PERMISSIONS_BOUNDARY, PolicyType.RESOURCE_BASED
+    ]
+
+
+def test_evaluate_applies_the_organizations_scps():
+    acct = load_account_file(EXAMPLE)
+    request = acct.request("user/alee", "ec2:DescribeInstances", "*")
+    assert acct.evaluate("user/alee", request, organization=None).allowed
+    denied = acct.evaluate("user/alee", request, organization=load_organization_file(ORG))
+    assert denied.decision is Decision.IMPLICIT_DENY
+    assert [layer.org_target.name for layer in denied.not_allowed_by] == ["Schools"]
+
+
+def test_evaluate_needs_the_organization_stated():
+    acct = load_account_file(EXAMPLE)
+    with pytest.raises(TypeError, match="organization"):
+        acct.evaluate("user/alee", acct.request("user/alee", "ec2:DescribeInstances", "*"))
+
+
+def test_evaluate_with_an_organization_needs_an_account_id():
+    acct = account(Users={"jsmith": {"Policies": ["Read"]}})
+    with pytest.raises(AccountError, match="acct.json: needs an 'AccountId' to look up its SCPs"):
+        acct.evaluate("user/jsmith", acct.request("user/jsmith", "s3:GetObject", "*"),
+                      organization=load_organization_file(ORG))
+
+
+def test_evaluate_skips_scps_for_a_service_linked_role():
+    acct = account(AccountId="111122223333", Policies={"Describe": {"Statement": [
+        {"Effect": "Allow", "Action": "ec2:Describe*", "Resource": "*"}]}},
+        Roles={"AWSServiceRoleForSupport": {
+            "Policies": ["Describe"], "Path": "/aws-service-role/support.amazonaws.com/"}})
+    request = acct.request("role/AWSServiceRoleForSupport", "ec2:DescribeInstances", "*")
+    result = acct.evaluate("role/AWSServiceRoleForSupport", request,
+                           organization=load_organization_file(ORG))
+    assert result.allowed

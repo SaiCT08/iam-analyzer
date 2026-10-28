@@ -29,6 +29,10 @@ For an S3 object, its bucket is described.
 A role's `AssumeRolePolicyDocument` is its trust policy, which the STS actions on the role, such
 as sts:AssumeRole, need. Bucket and trust policies' Principal elements name ARNs, so a file with
 either needs an `AccountId`.
+
+`Account.request` and `Account.evaluate` ask a question about one of the file's principals with
+everything the file says, so every caller, the CLI and compliance reports alike, gets the same
+AWS rules.
 """
 
 import re
@@ -37,11 +41,12 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from iam_analyzer import _validation, resources
+from iam_analyzer import _validation, evaluator, resources
 from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import AccountError, UnsupportedPolicyFeature
 from iam_analyzer.loader import parse_policy
-from iam_analyzer.models import Policy, PolicyType, Resource
+from iam_analyzer.models import EvaluationResult, Policy, PolicyType, Request, Resource
+from iam_analyzer.organization import Organization
 
 TOP_LEVEL_KEYS = {"AccountId", "Policies", "Groups", "Users", "Roles", "Resources"}
 # The path AWS gives every service-linked role, e.g. "/aws-service-role/support.amazonaws.com/".
@@ -180,6 +185,48 @@ class Account:
         if resources.is_role_arn(governing):
             return self._role_resource(governing)
         return self.resources.get(governing)
+
+    def request(
+        self,
+        principal: str,
+        action: str,
+        resource: str,
+        *,
+        context: RequestContext = RequestContext(),
+        session_tags: bool = True,
+    ) -> Request:
+        """A request by `principal`: the condition keys this file knows about the principal (see
+        `principal_context`), plus `context` for the rest. A key both of them give is refused, so
+        `context` can't change what the file says.
+        """
+        known = self.principal_context(principal, session_tags=session_tags)
+        return Request(action=action, resource=resource, context=known.merged(context))
+
+    def evaluate(
+        self, principal: str, request: Request, *, organization: Organization | None
+    ) -> EvaluationResult:
+        """Evaluate `request` by `principal` with everything this file says about it: its identity
+        policies, its permissions boundary, and the resource the request needs described.
+
+        With `organization`, the SCPs that apply to the principal are evaluated too. They need the
+        file's AccountId, and they never apply to a service-linked role. None says the account
+        isn't in an organization, so no SCPs apply. Callers have to say which, because leaving
+        SCPs out can allow what they would deny.
+        """
+        scps = ()
+        if organization is not None:
+            if self.account_id is None:
+                raise AccountError(f"{self.name}: needs an 'AccountId' to look up its SCPs")
+            scps = organization.scp_levels_for(
+                self.account_id, service_linked=self.is_service_linked(principal)
+            )
+        return evaluator.evaluate(
+            request,
+            self.policies_for(principal),
+            boundary=self.boundary_for(principal),
+            scps=scps,
+            resource=self.resource_for(request.resource, request.action),
+        )
 
     def _role_resource(self, arn: str) -> Resource | None:
         """The role `arn` names, with its trust policy. None when the role is in another account,
