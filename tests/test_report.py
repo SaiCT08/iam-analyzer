@@ -106,6 +106,7 @@ def test_checks_that_need_attention_come_first():
         "## DEPENDS: Check depends (high)",
         "## CAN'T TELL: Check cant (high)",
         "## PASS: Check pass (high)",
+        "## Findings",
         "## Scope and limits",
     ]
 
@@ -276,3 +277,64 @@ def test_the_district_report_matches_its_golden_file():
           --framework examples/frameworks/district.json > tests/golden/district_report.md
     """
     assert to_markdown(district_report()) == GOLDEN.read_text()
+
+
+# --- Findings --------------------------------------------------------------------------
+
+
+def findings_report():
+    acct = parse_account({"AccountId": "111122223333", "Policies": {"Window": {"Statement": [
+        {"Sid": "Late", "Effect": "Deny", "Action": "s3:GetObject", "Resource": f"{BUCKET}/*",
+         "Condition": {"DateGreaterThan": {"aws:CurrentTime": "2027"}}},
+        {"Effect": "Deny", "Action": "s3:PutObject", "Resource": f"{BUCKET}/*",
+         "Condition": {"DateLessThan": {"aws:CurrentTime": "2026"}}},
+    ]}}, "Groups": {"Staff": {"Policies": ["Window"]}}, "Resources": {BUCKET: {}}},
+        name="acct.json")
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"},
+                                 "Checks": [check("a", "only")]}, name="fw.json")
+    return build(framework, acct, organization=None)
+
+
+def test_findings_are_listed_with_their_evidence():
+    text = to_markdown(findings_report())
+    assert "Findings: 1 high, 1 low." in text
+    findings = text.split("## Findings")[1].split("## Scope and limits")[0]
+    assert findings.splitlines()[2:5] == [
+        "### HIGH: A four-digit date is read as epoch seconds",
+        "",
+        "- In: Window, statement 1: an identity policy attached to group/Staff.",
+    ]
+    assert "- Condition: DateLessThan aws:CurrentTime: 2026." in findings
+    assert ("- Evidence: AWS's IAM policy simulator answered ALLOW in "
+            "dates_without_a_time_zone/four_digits") in findings
+    assert "### LOW: A four-digit date is read as epoch seconds" in findings
+    assert "- In: Window, Sid Late: an identity policy attached to group/Staff." in findings
+
+
+def test_a_high_finding_fails_the_report():
+    graded = findings_report()
+    assert all(check.result is Result.PASS for check in graded.checks)
+    assert graded.failed
+
+
+def test_no_findings_says_so():
+    assert "## Findings\n\nNo findings.\n" in markdown(check("a", "only"))
+    assert "Findings: none." in markdown(check("a", "only"))
+
+
+def test_json_lists_the_findings():
+    data = to_json(findings_report())
+    assert data["summary"]["findings"] == {"critical": 0, "high": 1, "medium": 0, "low": 1}
+    high, low = data["findings"]
+    assert high == {
+        "id": "date-number-is-epoch-seconds", "title": "A four-digit date is read as epoch seconds",
+        "severity": "high", "policy": "Window", "policy_type": "identity", "sid": None, "index": 1,
+        "conditions": [{"operator": "DateLessThan", "key": "aws:CurrentTime", "values": ["2026"]}],
+        "uses": [{"policy_type": "identity", "principal": "group/Staff", "resource": None,
+                  "org_target": None}],
+        "condition": {"operator": "DateLessThan", "key": "aws:CurrentTime", "values": ["2026"]},
+        "why": high["why"], "fix": high["fix"],
+        "evidence": {"fixtures": [{"case": "dates_without_a_time_zone/four_digits", "aws": "ALLOW"}],
+                     "docs": []},
+    }
+    assert low["sid"] == "Late"

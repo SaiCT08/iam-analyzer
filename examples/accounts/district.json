@@ -170,6 +170,22 @@
           "Resource": "arn:aws:s3:::district-student-records/${aws:PrincipalTag/campus}/*"
         }
       ]
+    },
+    "SummerSchoolRecords": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadCampus01UntilNextYear",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::district-student-records/campus-01/*",
+          "Condition": {
+            "DateLessThan": {
+              "aws:CurrentTime": "2027"
+            }
+          }
+        }
+      ]
     }
   },
   "Groups": {
@@ -196,6 +212,11 @@
       "Policies": [
         "RegistrarCampusRecords",
         "DenyStudentRecordsDelete"
+      ]
+    },
+    "SummerSchool": {
+      "Policies": [
+        "SummerSchoolRecords"
       ]
     }
   },
@@ -235,7 +256,12 @@
         }
       ]
     },
-    "kwong": {}
+    "kwong": {},
+    "tbrooks": {
+      "Groups": [
+        "SummerSchool"
+      ]
+    }
   },
   "Roles": {
     "ITAdmin": {

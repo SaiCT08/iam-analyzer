@@ -10,7 +10,7 @@ import textwrap
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from iam_analyzer import compliance, condition_keys, resources
+from iam_analyzer import compliance, condition_keys, findings, resources
 from iam_analyzer.account import Account
 from iam_analyzer.compliance import (
     Answer,
@@ -23,8 +23,10 @@ from iam_analyzer.compliance import (
 )
 from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import MissingContextError, MissingResourceError
-from iam_analyzer.framework import Check, CheckType, Framework
+from iam_analyzer.findings import Finding, Use
+from iam_analyzer.framework import Check, CheckType, Framework, Severity
 from iam_analyzer.models import (
+    Condition,
     Decision,
     Layer,
     MatchedStatement,
@@ -56,16 +58,24 @@ NAMES = {
 }
 
 
+# Findings this severe count as failures, as a FAIL does.
+FAILING = (Severity.CRITICAL, Severity.HIGH)
+
+
 @dataclass(frozen=True)
 class Report:
     framework: Framework
     account: Account
     organization: Organization | None  # None: the account isn't in one, so no SCPs apply
     checks: tuple[CheckResult, ...]
+    findings: tuple[Finding, ...] = ()
 
     @property
     def failed(self) -> bool:
-        return any(check.result is Result.FAIL for check in self.checks)
+        """Whether a check failed, or a finding is high or critical."""
+        return any(check.result is Result.FAIL for check in self.checks) or any(
+            finding.severity in FAILING for finding in self.findings
+        )
 
     @property
     def unsettled(self) -> bool:
@@ -75,7 +85,8 @@ class Report:
 
 def build(framework: Framework, account: Account, *, organization: Organization | None) -> Report:
     checks = compliance.run(framework, account, organization=organization)
-    return Report(framework, account, organization, checks)
+    found = findings.scan(account, organization=organization)
+    return Report(framework, account, organization, checks, found)
 
 
 # --- Markdown --------------------------------------------------------------------------
@@ -102,12 +113,76 @@ def to_markdown(report: Report) -> str:
     ]
     lines += [f"| {LABELS[result]} | {sum(c.result is result for c in report.checks)} |"
               for result in Result]
+    lines += ["", f"Findings: {_severities(report.findings)}."]
     order = sorted(range(len(report.checks)), key=lambda i: (
         report.checks[i].result.rank, report.checks[i].check.severity.rank, i))
     for index in order:
         lines += ["", *_check_markdown(report.checks[index], account)]
+    lines += ["", "## Findings", ""]
+    if not report.findings:
+        lines.append("No findings.")
+    for finding in report.findings:
+        lines += [*_finding_markdown(finding), ""]
+    if report.findings:
+        lines.pop()
     lines += ["", "## Scope and limits", "", *_scope(report)]
     return "\n".join(lines) + "\n"
+
+
+def _severities(found: Sequence[Finding]) -> str:
+    """How many findings there are of each severity: "1 high, 1 low", or "none"."""
+    counts = [(severity, sum(f.severity is severity for f in found)) for severity in Severity]
+    return ", ".join(f"{count} {severity.value}" for severity, count in counts if count) or "none"
+
+
+def _finding_markdown(finding: Finding) -> list[str]:
+    found = finding.type
+    lines = [f"### {finding.severity.value.upper()}: {found.title}", "",
+             _bullet(f"In: {_where(finding)}.")]
+    if finding.condition is not None:
+        lines.append(_bullet(f"Condition: {_condition(finding.condition)}."))
+    lines += [_bullet(f"Why: {found.why}"), _bullet(f"Evidence: {_evidence(found)}"),
+              _bullet(f"Fix: {found.fix}")]
+    return lines
+
+
+def _where(finding: Finding) -> str:
+    """The statement, and where its policy is used: "SummerSchoolRecords, Sid Read: an identity
+    policy attached to group/SummerSchool"."""
+    statement = _sid(finding.statement, finding.index)
+    if finding.kind is PolicyType.RESOURCE_BASED:
+        return f"the resource policy on {finding.uses[0].resource}, {statement}"
+    if finding.kind is PolicyType.TRUST:
+        return f"the trust policy of {finding.uses[0].resource}, {statement}"
+    if finding.kind is PolicyType.SCP:
+        targets = " and ".join(_target(use.org_target) for use in finding.uses)
+        return f"{finding.policy.name}, {statement}: an SCP on {targets or 'nothing'}"
+    return f"{finding.policy.name}, {statement}: an identity policy {_attached(finding.uses)}"
+
+
+def _attached(uses: Sequence[Use]) -> str:
+    attached = [use.principal for use in uses if use.policy_type is PolicyType.IDENTITY]
+    bounds = [use.principal for use in uses if use.policy_type is PolicyType.PERMISSIONS_BOUNDARY]
+    parts = [f"attached to {', '.join(attached)}"] if attached else []
+    if bounds:
+        parts.append(f"the permissions boundary of {', '.join(bounds)}")
+    return "; and ".join(parts) or "that isn't attached to anyone"
+
+
+def _condition(condition: Condition) -> str:
+    return f"{condition.name} {condition.key}: {', '.join(condition.values)}"
+
+
+def _evidence(found: findings.FindingType) -> str:
+    parts = []
+    answers: dict[str, list[str]] = {}
+    for fixture in found.fixtures:
+        answers.setdefault(fixture.aws, []).append(fixture.case)
+    if answers:
+        said = "; ".join(f"{aws} in {', '.join(cases)}" for aws, cases in answers.items())
+        parts.append(f"AWS's IAM policy simulator answered {said} ({findings.SIMULATOR_FIXTURES}).")
+    parts += [f'AWS: "{doc.quote}" {doc.link}' for doc in found.docs]
+    return " ".join(parts)
 
 
 def _check_markdown(result: CheckResult, account: Account) -> list[str]:
@@ -394,9 +469,47 @@ def to_json(report: Report) -> dict:
                       "title": report.framework.title},
         "account": {"file": report.account.name, "account_id": report.account.account_id},
         "organization": None if org is None else {"file": org.name},
-        "summary": {"checks": {result.value: sum(c.result is result for c in report.checks)
-                               for result in Result}},
+        "summary": {
+            "checks": {result.value: sum(c.result is result for c in report.checks)
+                       for result in Result},
+            "findings": {severity.value: sum(f.severity is severity for f in report.findings)
+                         for severity in Severity},
+        },
         "checks": [_check_json(result) for result in report.checks],
+        "findings": [_finding_json(finding) for finding in report.findings],
+    }
+
+
+def _finding_json(finding: Finding) -> dict:
+    found = finding.type
+    condition = finding.condition
+    return {
+        "id": found.id,
+        "title": found.title,
+        "severity": finding.severity.value,
+        "policy": finding.policy.name,
+        "policy_type": finding.kind.value,
+        **_statement_ref(finding.statement, finding.index),
+        "uses": [_use_json(use) for use in finding.uses],
+        "condition": None if condition is None else {
+            "operator": condition.name, "key": condition.key, "values": list(condition.values)},
+        "why": found.why,
+        "fix": found.fix,
+        "evidence": {
+            "fixtures": [{"case": f.case, "aws": f.aws} for f in found.fixtures],
+            "docs": [{"link": d.link, "quote": d.quote} for d in found.docs],
+        },
+    }
+
+
+def _use_json(use: Use) -> dict:
+    target = use.org_target
+    return {
+        "policy_type": use.policy_type.value,
+        "principal": use.principal,
+        "resource": use.resource,
+        "org_target": None if target is None else {"type": target.type.value,
+                                                   "name": target.name},
     }
 
 

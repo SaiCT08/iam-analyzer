@@ -878,3 +878,18 @@ def test_report_input_errors(capsys, tmp_path, check, message):
     code, out, err = report(capsys, framework_file(tmp_path, check), "--no-org")
     assert (code, out) == (EXIT_INPUT_ERROR, "")
     assert message in err
+
+
+def test_report_a_high_finding_exits_like_a_fail(capsys, tmp_path):
+    late = {"Effect": "Deny", "Action": "s3:DeleteObject", "Resource": "*",
+            "Condition": {"DateLessThan": {"aws:CurrentTime": "2027"}}}
+    account = account_file(tmp_path, {"Policies": {"Window": {"Statement": [late]}},
+                                      "Users": {"u": {"Policies": ["Window"]}},
+                                      "Resources": {"arn:aws:s3:::district-student-records": {}}})
+    framework = framework_file(tmp_path, report_check("only"))
+    code = main(["report", "--account", account, "--no-org", "--framework", framework])
+    out, _ = capsys.readouterr()
+    # The check alone would exit 3: the Deny needs aws:CurrentTime, which it doesn't give.
+    assert code == EXIT_FAILED
+    assert "## CAN'T TELL: A check (high)" in out
+    assert "### HIGH: A four-digit date is read as epoch seconds" in out

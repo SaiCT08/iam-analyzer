@@ -1,7 +1,7 @@
 # Compliance report: Texas school district student records
 
 - Framework: district.json (district-student-records), 6 checks.
-- Account: district.json (111122223333), 6 users and 3 roles.
+- Account: district.json (111122223333), 7 users and 3 roles.
 - Organization: district.json, whose SCPs are applied.
 
 | Result | Checks |
@@ -10,6 +10,8 @@
 | DEPENDS | 1 |
 | CAN'T TELL | 1 |
 | PASS | 2 |
+
+Findings: 1 low.
 
 ## FAIL: Only counselors can read counseling notes (high)
 
@@ -20,7 +22,7 @@ arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
 - user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
 - user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
 - role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- Can't: user/dpatel, user/rnguyen, role/GradebookVendor, role/TeacherSignIn.
+- Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
 - Not asked: user/kwong.
 
 Fix: Narrow TeacherReadGrades from district-student-records/* to the folders teachers need, and add
@@ -43,8 +45,8 @@ when aws:MultiFactorAuthPresent is false or absent?
     assume it in Sid AccountWithMfa, when Bool aws:MultiFactorAuthPresent is true. AWS's docs
     disagree on whether a role's requests carry MFA after that, so this check asks about them
     without MFA, as for anyone.
-- Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, role/GradebookVendor,
-  role/TeacherSignIn.
+- Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
+  role/GradebookVendor, role/TeacherSignIn.
 
 Fix: Take ITAdminFullS3 off user alee, so IT staff change records through the ITAdmin role, which
 needs MFA to assume, and give ITAdminFullS3 a Deny like RequireMfaForChanges.
@@ -90,8 +92,8 @@ Maps to:
 Asked: Can anyone do s3:DeleteObject or s3:DeleteObjectVersion on
 arn:aws:s3:::district-student-records/campus-02/transcript.pdf?
 
-- Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, role/ITAdmin,
-  role/GradebookVendor, role/TeacherSignIn.
+- Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
+  role/ITAdmin, role/GradebookVendor, role/TeacherSignIn.
 
 Fix: Keep DenyStudentRecordsDelete on every group and role that can write student records, and the
 ProtectStudentRecords SCP on the Schools OU.
@@ -104,8 +106,8 @@ Maps to:
 Asked: Can anyone do sts:AssumeRole on arn:aws:iam::111122223333:role/ITAdmin when
 aws:MultiFactorAuthPresent is false or absent?
 
-- Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, role/ITAdmin,
-  role/GradebookVendor, role/TeacherSignIn.
+- Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
+  role/ITAdmin, role/GradebookVendor, role/TeacherSignIn.
 
 Fix: Keep the Bool aws:MultiFactorAuthPresent true condition in ITAdmin's trust policy.
 
@@ -113,9 +115,22 @@ Maps to:
 - NIST SP 800-53 Rev. 5 IA-2(1): Multi-factor Authentication to Privileged Accounts.
   https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final
 
+## Findings
+
+### LOW: A four-digit date is read as epoch seconds
+
+- In: SummerSchoolRecords, Sid ReadCampus01UntilNextYear: an identity policy attached to
+  group/SummerSchool.
+- Condition: DateLessThan aws:CurrentTime: 2027.
+- Why: AWS reads a number in a date condition as epoch seconds, four digits included, so a value
+  such as 2027 is a moment early on January 1, 1970, not the year.
+- Evidence: AWS's IAM policy simulator answered ALLOW in dates_without_a_time_zone/four_digits
+  (tests/simulator_fixtures).
+- Fix: Write the date in ISO 8601 with a time zone, such as 2027-01-01T00:00:00Z.
+
 ## Scope and limits
 
-- A PASS covers only the 6 users and 3 roles in district.json. Requests from other accounts,
+- A PASS covers only the 7 users and 3 roles in district.json. Requests from other accounts,
   anonymous requests and federated users aren't evaluated; a policy that lets them in makes a check
   CAN'T TELL.
 - Each check covers exactly the requests it lists: its actions, its resources, and the condition

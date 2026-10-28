@@ -647,7 +647,7 @@ arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
 - user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
 - user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
 - role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- Can't: user/dpatel, user/rnguyen, role/GradebookVendor, role/TeacherSignIn.
+- Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
 - Not asked: user/kwong.
 ```
 
@@ -669,9 +669,13 @@ MFA Deny that skips requests made with access keys fails the check, and the repo
 `absent` as the value that gets in. A check takes the worst result of its questions: FAIL, then
 DEPENDS, then CAN'T TELL, then PASS.
 
-Exit codes: `0` when every check passes, `1` when a check fails, `3` when nothing failed but some
-check is DEPENDS or CAN'T TELL, and `2` for input errors. CI can fail on `1`, and decide for
-itself what `3` means.
+Exit codes:
+- `0`: every check passes, and no finding is high or critical;
+- `1`: a check fails, or a finding is high or critical (see [Policy findings](#policy-findings));
+- `3`: nothing failed, but some check is DEPENDS or CAN'T TELL;
+- `2`: input errors.
+
+CI can fail on `1`, and decide for itself what `3` means.
 
 ### Framework files
 
@@ -754,6 +758,28 @@ requests from outside the account yet.
 A `can` check is weaker than the other two. Session policies, resource control policies and VPC
 endpoint policies aren't modeled, and they can only take access away. So a `can` PASS means the
 files allow it, while an `only` or `requires` PASS stays true whatever those policies say.
+
+### Policy findings
+
+Some AWS surprises need no question: they're in the policy text. Every report scans all of the
+account file's policies for them: identity policies and boundaries, bucket policies, trust
+policies, and with `--org`, SCPs. Each finding names the statement and where its policy is used,
+says why it matters and how to fix it, and cites its evidence. That evidence is either answers
+recorded from AWS's IAM policy simulator (in `tests/simulator_fixtures`, and the tests check that
+AWS's recorded answer is the one claimed) or AWS's documentation.
+
+A finding is high when it can let a request through that the policy's author meant to stop, such
+as a Deny that never applies or an Allow that always applies. It's low when it can only stop a
+request the author meant to let through.
+
+| Finding | Fires on | Evidence |
+|---|---|---|
+| A four-digit date is read as epoch seconds | a date condition with a value such as `2027`, which AWS reads as a moment in 1970 | simulator: `dates_without_a_time_zone/four_digits` |
+| A Bool value with a policy variable never matches | `Bool` with a value such as `${aws:MultiFactorAuthPresent}` | simulator: `bool_with_a_variable/*`; AWS's policy variables page |
+
+The district account's `SummerSchoolRecords` policy has the first one. It allows reads "until
+2027", but `DateLessThan` compares against early 1970, so the Allow never applies and `tbrooks`
+can't read anything.
 
 ### Mapping checks to requirements
 
