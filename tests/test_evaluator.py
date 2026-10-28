@@ -160,6 +160,14 @@ def test_via_group_is_carried_into_reasons():
     ]
 
 
+def test_reasons_say_where_each_statement_is_in_its_policy():
+    # Statements without a Sid can still be named: "p statement 2".
+    p = policy("p", allow("s3:PutObject", "*"), allow("s3:GetObject", OBJECT), allow("s3:*", "*"))
+    assert [r.index for r in check(GET, [p]).reasons] == [1, 2]
+    denied = check(GET, [policy("q", allow("s3:*", "*"), deny("s3:Get*", "*"))])
+    assert [r.index for r in denied.reasons] == [1]
+
+
 # --- NotAction / NotResource -----------------------------------------------------------
 
 

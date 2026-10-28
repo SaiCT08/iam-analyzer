@@ -237,7 +237,8 @@ class MatchedStatement:
     """A statement that matched the request, plus the policy and layer it came from.
 
     For a resource-based policy's statement, `principal_match` says how its Principal named the
-    caller.
+    caller. `index` is the statement's position in its policy, counting from 0, so a statement
+    without a Sid can still be named: "FullAWSAccess statement 0".
     """
 
     policy_name: str
@@ -245,6 +246,7 @@ class MatchedStatement:
     via_group: str | None = None
     layer: Layer = Layer(PolicyType.IDENTITY)
     principal_match: PrincipalMatch | None = None
+    index: int | None = None
 
 
 @dataclass(frozen=True)

@@ -370,7 +370,7 @@ def _matching(
                 applies, principal_match = _applies(statement, request)
                 if applies:
                     found.append(MatchedStatement(
-                        policy.name, statement, policy.via_group, layer, principal_match
+                        policy.name, statement, policy.via_group, layer, principal_match, index
                     ))
             except MissingContextError as exc:
                 missing += [(key, _where(policy, index, statement)) for key in exc.keys]
