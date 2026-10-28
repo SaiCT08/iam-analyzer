@@ -185,17 +185,65 @@ def test_principals_outside_the_file_are_cited():
 
 
 def test_a_roles_item_carries_the_mfa_note():
-    text = markdown(check("a", "requires"))
-    lines = section(text, "Check a")
+    lines = section(markdown(check("a", "requires")), "Check a")
+    # The role can read without MFA, but no one can assume it without MFA, so its item passes,
+    # and it gets a line of its own instead of joining the "Can't" list.
     admin = lines.index("- role/Admin can. Granted by Unnamed, statement 0, attached directly.")
-    note = " ".join(line.strip() for line in lines[admin + 1:admin + 5])
+    note = " ".join(line.strip() for line in lines[admin + 1:admin + 7])
     assert note.startswith(
-        "- Note: MFA for a role is checked when it's assumed. role/Admin's trust policy lets "
-        f"someone assume it in Sid AccountWithMfa, when Bool {MFA} is true. AWS says \"The "
-        "temporary credentials returned by AssumeRole do not include MFA information in the "
-        "context\", so the role's own requests never show MFA, and only its trust policy can "
-        "require it.")
-    assert "disagree" not in note
+        f"- PASS: AWS checks {MFA} for a role when it's assumed, and no one can assume role/Admin "
+        f"when {MFA} is false or absent. Its trust policy lets someone assume it in Sid "
+        f"AccountWithMfa, when Bool {MFA} is true. AWS: \"The temporary credentials returned by "
+        "AssumeRole do not include MFA information in the context, so you cannot check individual "
+        "API operations for MFA.\" https://docs.aws.amazon.com/IAM/latest/UserGuide/"
+        "id_credentials_mfa_configure-api-require.html#scenarios")
+    assert not any(line.startswith("- Can't:") and "role/Admin" in line for line in lines)
+
+
+def role_report(trust, **users):
+    """A role that can read, with `trust` as its trust policy, and `users` who may assume it."""
+    acct = parse_account({"AccountId": "111122223333", "Policies": {
+        "Read": {"Statement": [{"Effect": "Allow", "Action": "s3:GetObject",
+                                "Resource": f"{BUCKET}/*"}]},
+        "AssumeAdmin": {"Statement": [{"Sid": "AssumeAdmin", "Effect": "Allow",
+                                       "Action": "sts:AssumeRole", "Resource": f"{ROLES}/Admin"}]},
+    }, "Users": users,
+        "Roles": {"Admin": {"Policies": ["Read"], "AssumeRolePolicyDocument": trust}},
+        "Resources": {BUCKET: {}}}, name="acct.json")
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"},
+                                 "Checks": [check("a", "requires")]}, name="fw.json")
+    return build(framework, acct, organization=None)
+
+
+def test_a_role_someone_can_assume_without_mfa_lists_who():
+    trust = {"Statement": [{"Sid": "Account", "Effect": "Allow",
+                            "Principal": {"AWS": "111122223333"}, "Action": "sts:AssumeRole"}]}
+    graded = role_report(trust, it={"Policies": ["AssumeAdmin"]})
+    lines = section(to_markdown(graded), "Check a")
+    assert has_block(lines, [
+        "- role/Admin can. Granted by Read, statement 0, attached directly.",
+        f"  - FAIL: AWS checks {MFA} for a role when it's assumed, and these can assume",
+        f"    role/Admin when {MFA} is false or absent:",
+        "    - user/it can. Granted by AssumeAdmin, Sid AssumeAdmin, attached directly; the trust "
+        "policy of",
+        f"      {ROLES}/Admin, Sid Account, which names the account.",
+    ])
+    [admin] = [i for i in to_json(graded)["checks"][0]["items"] if i["principal"] == "role/Admin"]
+    assert admin["result"] == "FAIL"
+    assert admin["note"]["assume"]["result"] == "FAIL"
+    assert [i["principal"] for i in admin["note"]["assume"]["items"]
+            if i["result"] == "FAIL"] == ["user/it"]
+
+
+def test_an_outsider_who_can_assume_the_role_is_cant_tell():
+    trust = {"Statement": [{"Sid": "Vendor", "Effect": "Allow",
+                            "Principal": {"AWS": "444455556666"}, "Action": "sts:AssumeRole"}]}
+    text = flat("\n".join(section(to_markdown(role_report(trust)), "Check a")))
+    assert (f"- CAN'T TELL: AWS checks {MFA} for a role when it's assumed, and the analyzer can't "
+            f"tell whether everyone who can assume role/Admin needs {MFA} true: - Can't tell for "
+            f"principals outside acct.json: the trust policy of {ROLES}/Admin, Sid Vendor, allows "
+            "sts:AssumeRole for account 444455556666") in text
+    assert "## CAN'T TELL: Check a (high)" in to_markdown(role_report(trust))
 
 
 def test_scope_says_what_a_pass_covers():

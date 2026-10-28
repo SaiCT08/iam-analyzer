@@ -753,10 +753,32 @@ check gives it a value in `Context`.
 
 `aws:MultiFactorAuthPresent` can be absent for any principal. AWS says it's missing for requests
 made with long-term access keys and for federated users. It also says "The temporary credentials
-returned by `AssumeRole` do not include MFA information in the context". So MFA for a role is
-checked when the role is assumed, and the role's own requests never show it. A role's item in a
-check that requires MFA carries a note saying so, and points to the trust policy statements that
-check MFA. The report still tries `true` for roles too. When it's unsure whether a value can
+returned by `AssumeRole` do not include MFA information in the context". So AWS checks MFA for a
+role when the role is assumed, and the role's own requests never show it.
+
+In a check that requires MFA, a role that's allowed without MFA gets a second question: can anyone
+do `sts:AssumeRole` on the role with MFA false or absent?
+- **No one:** if the trust policy also lets no one outside the account file assume the role, the
+  role's item passes. Its note cites the trust policy's statements and their MFA conditions, and
+  quotes AWS.
+- **Someone in the file:** the item fails, and the note names who can assume the role without MFA,
+  and how.
+- **Otherwise, someone outside the file:** a trust policy that lets someone outside the account
+  file assume the role makes the item CAN'T TELL, as in any check. That covers another account, and
+  the users of a SAML or OIDC provider, for whom AWS "cannot determine whether that provider
+  required MFA".
+
+The item is also CAN'T TELL when the account file doesn't give the role's trust policy, or has no
+`AccountId` to name the role's ARN with.
+
+The second question goes one level deep. A role that can assume the role without MFA counts, even
+if that role needs MFA to be assumed itself. That can only add a false alarm, never hide access.
+
+In the district, ITAdmin passes "Changing student records needs MFA": its trust policy needs MFA,
+and no one outside the file can assume it. The check still fails for alee, who has `ITAdminFullS3`
+directly. Taking that policy off alee, as the check's Fix says, makes the check pass.
+
+The report still tries `true` for a role's own requests too. When it's unsure whether a value can
 happen, it tries it: an impossible value can only add a false alarm, while skipping a possible one
 could hide real access.
 

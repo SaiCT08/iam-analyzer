@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.compliance import Result, run, run_check
 from iam_analyzer.errors import AccountError, FrameworkError, OrganizationError
-from iam_analyzer.framework import parse_framework
+from iam_analyzer.framework import load_framework_file, parse_framework
 from iam_analyzer.models import Decision, PolicyType, Principal, PrincipalType
 from iam_analyzer.organization import load_organization_file, parse_organization
 
@@ -287,11 +288,111 @@ def test_a_roles_item_points_to_its_trust_policy():
                           "Bare": {"Policies": ["Write"]}})
     result = ask(acct, "requires", Actions=["s3:PutObject"])
     admin, sign_in, bare = result.items
-    assert admin.result is Result.FAIL  # the note explains it, and doesn't change it
     assert admin.note.trust_policy.name == "arn:aws:iam::111122223333:role/Admin"
     assert admin.note.statements == (0,)
     assert sign_in.note.statements == (1,)  # a SAML sign-in assumes the role too
     assert bare.note.trust_policy is None
+
+
+# --- The second question: can anyone assume the role without MFA? ---------------------
+
+ADMIN = "arn:aws:iam::111122223333:role/Admin"
+WRITE = policy(statement("Allow", "s3:PutObject"))
+ASSUME_ADMIN = policy(statement("Allow", "sts:AssumeRole", ADMIN))
+NO_MFA_TRUST = {"Statement": [{"Effect": "Allow", "Principal": {"AWS": "111122223333"},
+                               "Action": "sts:AssumeRole"}]}
+
+
+def admin_item(trust, users=None, roles=None, **fields):
+    roles = {"Admin": {"Policies": ["Write"], "AssumeRolePolicyDocument": trust}, **(roles or {})}
+    acct = account({"Write": WRITE, "AssumeAdmin": ASSUME_ADMIN}, users=users, roles=roles)
+    result = ask(acct, "requires", **{"Actions": ["s3:PutObject"], **fields})
+    return result, by_principal(result)["role/Admin"]
+
+
+def test_a_role_only_mfa_can_assume_passes():
+    result, admin = admin_item(ADMIN_TRUST, users={"it": {"Policies": ["AssumeAdmin"]}})
+    # The role's own requests never show MFA, so it can write without it...
+    assert any(answer.allowed for answer in admin.answers)
+    # ...but no one can assume it without MFA, which is where AWS checks MFA for a role.
+    assert admin.result is Result.PASS
+    question = admin.note.assume
+    assert question.check.actions == ("sts:AssumeRole",) and question.check.resources == (ADMIN,)
+    assert [(i.principal, i.result) for i in question.items] == [
+        ("user/it", Result.PASS), ("role/Admin", Result.PASS)]
+    assert [a.values for a in question.items[0].answers] == [((MFA, "false"),), ((MFA, None),)]
+    assert result.result is Result.PASS
+
+
+def test_a_role_someone_can_assume_without_mfa_fails_and_names_them():
+    _, admin = admin_item(NO_MFA_TRUST, users={"it": {"Policies": ["AssumeAdmin"]}, "other": {}})
+    assert admin.result is Result.FAIL
+    failing = [i.principal for i in admin.note.assume.items if i.result is Result.FAIL]
+    assert failing == ["user/it"]
+
+
+def test_someone_outside_who_can_assume_the_role_makes_it_cant_tell():
+    vendor = {"Statement": [{"Effect": "Allow", "Principal": {"AWS": "444455556666"},
+                             "Action": "sts:AssumeRole"}]}
+    _, admin = admin_item(vendor)
+    assert admin.result is Result.CANT_TELL
+    [outside] = admin.note.assume.outside
+    assert outside.principals == (Principal(PrincipalType.AWS, "444455556666"),)
+
+
+def test_a_role_that_saml_users_assume_is_cant_tell():
+    # No one can sts:AssumeRole it, but SAML users can, and AWS "cannot determine whether that
+    # provider required MFA".
+    _, admin = admin_item(SAML_TRUST)
+    assert [i.result for i in admin.note.assume.items] == [Result.PASS]
+    [outside] = admin.note.assume.outside
+    assert outside.action == "sts:AssumeRoleWithSAML"
+    assert admin.result is Result.CANT_TELL
+
+
+def test_a_role_without_a_trust_policy_is_cant_tell():
+    acct = account({"Write": WRITE}, roles={"Bare": {"Policies": ["Write"]}})
+    [bare] = ask(acct, "requires", Actions=["s3:PutObject"]).items
+    assert bare.result is Result.CANT_TELL
+    assert bare.note.assume.items[0].answers[0].refusal.kind == "MissingResourceError"
+
+
+def test_a_role_denied_without_mfa_isnt_asked_again():
+    _, admin = admin_item(ADMIN_TRUST, Actions=["s3:DeleteObject"])
+    assert admin.result is Result.PASS
+    assert not admin.note.asked
+
+
+def test_the_second_question_goes_one_level_deep():
+    # Hop can assume Admin, whose trust policy doesn't check MFA. Hop needs MFA to be assumed
+    # itself, but the second question about Admin doesn't ask about Hop's own trust policy.
+    hop = {"Policies": ["AssumeAdmin"], "AssumeRolePolicyDocument": ADMIN_TRUST}
+    _, admin = admin_item(NO_MFA_TRUST, roles={"Hop": hop})
+    hop_item = next(i for i in admin.note.assume.items if i.principal == "role/Hop")
+    assert hop_item.result is Result.FAIL and hop_item.note is None
+    assert admin.result is Result.FAIL
+
+
+def test_the_second_question_is_asked_once_per_role():
+    acct = account({"Write": WRITE}, roles={"Admin": {"Policies": ["Write"],
+                                                     "AssumeRolePolicyDocument": ADMIN_TRUST}})
+    first, second = ask(acct, "requires", Actions=["s3:PutObject"],
+                        Resources=[OBJECT, f"{BUCKET}/campus-01/x.pdf"]).items
+    assert first.note.assume is second.note.assume
+
+
+def test_following_the_district_fix_passes_the_mfa_check():
+    document = json.loads((EXAMPLES / "accounts" / "district.json").read_text())
+    acct = parse_account(document, name="district.json")
+    org = load_organization_file(EXAMPLES / "organizations" / "district.json")
+    framework = load_framework_file(EXAMPLES / "frameworks" / "district.json")
+    mfa = next(c for c in framework.checks if c.id == "record-changes-need-mfa")
+    assert run_check(mfa, acct, organization=org).result is Result.FAIL  # alee, directly
+    document["Users"]["alee"]["Policies"] = []  # the check's Fix
+    fixed = run_check(mfa, parse_account(document, name="district.json"), organization=org)
+    assert fixed.result is Result.PASS
+    admin = by_principal(fixed)["role/ITAdmin"]
+    assert admin.result is Result.PASS and admin.note.assume.result is Result.PASS
 
 
 def test_only_mfa_checks_have_the_note():

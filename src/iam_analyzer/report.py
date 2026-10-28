@@ -443,10 +443,16 @@ def _given(context: RequestContext) -> str:
     return "; ".join(parts)
 
 
-def _items_markdown(result: CheckResult, account: Account) -> list[str]:
+def _items_markdown(
+    result: CheckResult, account: Account, depth: int = 0, inner: bool = False
+) -> list[str]:
+    """A check's items. `inner` is for a role's second question, which only shows the items that
+    didn't pass, and its outsiders."""
     check = result.check
-    # A principal whose every item passed is listed once, by name.
-    unpassed = {item.principal for item in result.items if item.result is not Result.PASS}
+    # A principal whose every item passed is listed once, by name, unless an item has a note to
+    # show: a role that passes only because no one can assume it without MFA.
+    unpassed = {item.principal for item in result.items
+                if item.result is not Result.PASS or _shows_note(item)}
     lines: list[str] = []
     passed: list[str] = []
     refused: dict[str, list[str]] = {}  # message: the items that got only that refusal
@@ -459,21 +465,23 @@ def _items_markdown(result: CheckResult, account: Account) -> list[str]:
         label = _label(item, check)
         reasons = {_refusal(answer.refusal) for answer in item.answers if answer.refusal}
         texts = {_outcome(answer) for answer in item.answers}
-        if item.result is Result.PASS:
+        if item.result is Result.PASS and not _shows_note(item):
             passed.append(label)
         elif item.result is Result.CANT_TELL and len(reasons) == 1 and all(
-                answer.refusal for answer in item.answers):
+                answer.refusal for answer in item.answers) and not _shows_note(item):
             refused.setdefault(reasons.pop(), []).append(label)
-        elif len(texts) == 1 and (item.note is None or item.result is Result.PASS):
+        elif len(texts) == 1 and not _shows_note(item):
             alike.setdefault(texts.pop(), []).append(label)
         else:
-            lines += _item_markdown(item, label)
+            lines += _item_markdown(item, label, account, depth)
     # Items that say the same thing share a line, in the order they were asked.
-    lines[:0] = [_bullet(f"{', '.join(labels)} {text}") for text, labels in alike.items()]
+    lines[:0] = [_bullet(f"{', '.join(labels)} {text}", depth) for text, labels in alike.items()]
     for message, labels in refused.items():
         who = "everyone asked" if len(labels) == len(result.items) else ", ".join(labels)
-        lines.append(_bullet(f"Can't tell for {who}: {message}"))
-    lines += [_bullet(_outside_markdown(outside, account)) for outside in result.outside]
+        lines.append(_bullet(f"Can't tell for {who}: {message}", depth))
+    lines += [_bullet(_outside_markdown(outside, account), depth) for outside in result.outside]
+    if inner:
+        return lines
     if passed:
         lines.append(_bullet(("Can: " if check.type is CheckType.CAN else "Can't: ")
                              + ", ".join(passed) + "."))
@@ -484,6 +492,12 @@ def _items_markdown(result: CheckResult, account: Account) -> list[str]:
     return lines
 
 
+def _shows_note(item: Item) -> bool:
+    """Whether the item's role note is printed: when the item didn't pass, or when it passed only
+    because of the second question."""
+    return item.note is not None and (item.result is not Result.PASS or item.note.asked)
+
+
 def _label(item: Item, check: Check) -> str:
     """The item's principal, plus whichever of its action and resource the check has several of."""
     parts = [item.action] if len(check.actions) > 1 else []
@@ -492,21 +506,21 @@ def _label(item: Item, check: Check) -> str:
     return f"{item.principal} ({' '.join(parts)})" if parts else item.principal
 
 
-def _item_markdown(item: Item, label: str) -> list[str]:
+def _item_markdown(item: Item, label: str, account: Account, depth: int = 0) -> list[str]:
     """One item: a line when all its answers read the same, or a line per group of values."""
     groups: dict[str, list[Answer]] = {}
     for answer in item.answers:
         groups.setdefault(_outcome(answer), []).append(answer)
     if len(groups) == 1:
         [text] = groups
-        lines = [_bullet(f"{label} {text}")]
+        lines = [_bullet(f"{label} {text}", depth)]
     else:
         keys = item.turns_on or tuple(key for key, _ in item.answers[0].values)
-        lines = [_bullet(f"{label}, depending on {', '.join(keys)}:")]
-        lines += [_bullet(f"{_values(answers, keys)}: {text}", depth=1)
+        lines = [_bullet(f"{label}, depending on {', '.join(keys)}:", depth)]
+        lines += [_bullet(f"{_values(answers, keys)}: {text}", depth + 1)
                   for text, answers in groups.items()]
-    if item.note is not None and item.result is not Result.PASS:
-        lines.append(_bullet(f"Note: {_note(item.note)}", depth=1))
+    if _shows_note(item):
+        lines += _note_markdown(item.note, account, depth + 1)
     return lines
 
 
@@ -601,25 +615,49 @@ def _target(target: OrgTarget) -> str:
     return f"account {target.name}"
 
 
-def _note(note: RoleMfaNote) -> str:
-    """Where AWS checks MFA for a role, and what the role's trust policy says."""
+def _note_markdown(note: RoleMfaNote, account: Account, depth: int) -> list[str]:
+    """Where AWS checks MFA for a role, and, when the role was allowed without it, the answer to
+    the second question: can anyone assume the role without it?"""
+    known = condition_keys.values_of(note.key)
+    checked = f"AWS checks {known.key} for a role when it's assumed"
+    aws = f'AWS: "{known.role_quote}" {known.role_link}'
+    if not note.asked:
+        return [_bullet(f"Note: {checked}, not on its own requests. {_trust(note)} {aws}", depth)]
+    role = note.role
+    if note.refusal is not None:
+        return [_bullet(f"CAN'T TELL: {checked}, and {_sentence(note.refusal.message)}", depth)]
+    question = note.assume
+    when = " or ".join(_value(v) for v in known.values if v != question.check.value)
+    if question.result is Result.PASS:
+        return [_bullet(f"PASS: {checked}, and no one can assume {role} when {known.key} is "
+                        f"{when}. {_trust(note)} {aws}", depth)]
+    if question.result is Result.FAIL:
+        lead = f"FAIL: {checked}, and these can assume {role} when {known.key} is {when}:"
+    else:
+        lead = (f"CAN'T TELL: {checked}, and the analyzer can't tell whether everyone who can "
+                f"assume {role} needs {known.key} {question.check.value}:")
+    return [_bullet(lead, depth), *_items_markdown(question, account, depth + 1, inner=True)]
+
+
+def _trust(note: RoleMfaNote) -> str:
+    """What the role's trust policy says about the key, statement by statement."""
     role = note.role
     if note.trust_policy is None:
-        trust = f"The account file doesn't give {role}'s trust policy."
-    elif not note.statements:
-        trust = f"{role}'s trust policy lets no one assume it."
-    else:
-        ways = []
-        for index in note.statements:
-            statement = note.trust_policy.statements[index]
-            checks = [f"{c.name} {c.key} is {', '.join(c.values)}" for c in statement.conditions
-                      if c.key.casefold() == compliance.MFA_KEY.casefold()]
-            when = f"when {' and '.join(checks)}" if checks else "without checking MFA"
-            ways.append(f"in {_sid(statement, index)}, {when}")
-        trust = f"{role}'s trust policy lets someone assume it {'; and '.join(ways)}."
-    return (f"MFA for a role is checked when it's assumed. {trust} AWS says \"The temporary "
-            "credentials returned by AssumeRole do not include MFA information in the context\", "
-            "so the role's own requests never show MFA, and only its trust policy can require it.")
+        return f"The account file doesn't give {role}'s trust policy."
+    if not note.statements:
+        return f"{role}'s trust policy lets no one assume it."
+    ways = []
+    for index in note.statements:
+        statement = note.trust_policy.statements[index]
+        checks = [f"{c.name} {c.key} is {', '.join(c.values)}" for c in statement.conditions
+                  if c.key.casefold() == note.key.casefold()]
+        when = f"when {' and '.join(checks)}" if checks else f"without checking {note.key}"
+        ways.append(f"in {_sid(statement, index)}, {when}")
+    return f"Its trust policy lets someone assume it {'; and '.join(ways)}."
+
+
+def _sentence(text: str) -> str:
+    return text.rstrip(".") + "."
 
 
 def _outside_markdown(outside: Outside, account: Account) -> str:
@@ -664,8 +702,10 @@ def _scope(report: Report) -> list[str]:
                 "policies, which can only take access away, so a PASS of a \"can\" check means "
                 "the files allow it; S3 Block Public Access; and ACLs, which described buckets "
                 "have disabled."),
-        _bullet("A role's requests are asked about as they are; the analyzer doesn't follow how "
-                "a session was created."),
+        _bullet("A role's requests are asked about as they are. The one exception is a check "
+                "that requires MFA: AWS checks MFA for a role when it's assumed, so a role allowed "
+                "without MFA is asked who can assume it without MFA. That second question goes "
+                "one level deep."),
     ]
 
 
@@ -789,9 +829,13 @@ def _item_json(item: Item) -> dict:
         "answers": [_answer_json(answer) for answer in item.answers],
         "note": None if note is None else {
             "role": note.role,
+            "key": note.key,
             "trust_policy": None if note.trust_policy is None else note.trust_policy.name,
             "statements": [_statement_ref(note.trust_policy.statements[i], i)
                            for i in note.statements],
+            "assume": None if note.assume is None else _check_json(note.assume),
+            "refusal": None if note.refusal is None else {
+                "kind": note.refusal.kind, "message": note.refusal.message},
         },
     }
 

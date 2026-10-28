@@ -19,12 +19,19 @@ TELL, until the check gives it a value.
 A refusal is never a PASS, and neither is a principal the engine can't ask about. When a resource
 or trust policy allows the action for someone outside the account file, such as "*" or another
 account, the check gets a CAN'T TELL entry that cites the statement.
+
+A "requires" check on a key AWS checks when a role is assumed, such as aws:MultiFactorAuthPresent
+(`condition_keys`), treats roles differently. A role's own requests never show MFA, so a role
+allowed to do something without MFA is asked a second question: can anyone assume the role
+without MFA? If no one can, and the trust policy lets no one outside the account file assume it,
+the role's item PASSes. If someone can, it FAILs and names them; otherwise it's CAN'T TELL. The
+second question goes one level deep: it doesn't ask it again about the roles it asks.
 """
 
 import itertools
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from iam_analyzer import condition_keys, resources
@@ -52,7 +59,6 @@ from iam_analyzer.models import (
 )
 from iam_analyzer.organization import Organization
 
-MFA_KEY = "aws:MultiFactorAuthPresent"
 _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 
 
@@ -95,14 +101,32 @@ class Answer:
 
 @dataclass(frozen=True)
 class RoleMfaNote:
-    """For a role in a check that requires MFA: where AWS checks MFA for a role, the trust policy
-    statements that let someone assume it, with sts:AssumeRole or as a SAML or OIDC user.
-    `statements` are their indexes in the trust policy, which is None when the account file
-    doesn't give it."""
+    """For a role in a "requires" check on a key AWS checks when a role is assumed, such as
+    aws:MultiFactorAuthPresent. `statements` are the indexes of the trust policy's Allows that let
+    someone assume the role, with sts:AssumeRole or as a SAML or OIDC user. The trust policy is
+    None when the account file doesn't give it.
+
+    When the role is allowed without the key, `assume` is the second question the check asked
+    about it: can anyone assume the role without the key? Its result is the role item's result.
+    `refusal` says why it couldn't be asked, which makes the item CAN'T TELL.
+    """
 
     role: str
+    key: str
     trust_policy: Policy | None
     statements: tuple[int, ...] = ()
+    assume: "CheckResult | None" = None
+    refusal: Refusal | None = None
+
+    @property
+    def asked(self) -> bool:
+        """Whether the role was allowed without the key, so the second question was asked."""
+        return self.assume is not None or self.refusal is not None
+
+    @property
+    def result(self) -> "Result":
+        """What the second question means for the role's item."""
+        return self.assume.result if self.assume is not None else Result.CANT_TELL
 
 
 @dataclass(frozen=True)
@@ -172,16 +196,22 @@ def run_check(
             f"role/{name}" for name in account.roles
         ]
         asked, not_asked = [p for p in everyone if p not in named], tuple(named)
+    assumed: dict[str, CheckResult | None] = {}  # each role's second question, asked once
     items = tuple(
-        _item(check, account, organization, principal, action, resource, where)
+        _item(check, account, organization, principal, action, resource, where, assumed)
         for principal in asked
         for action in check.actions
         for resource in check.resources
     )
-    outside = () if check.type is CheckType.CAN else tuple(_outside(check, account))
+    outside = () if check.type is CheckType.CAN else tuple(
+        _outside(check.actions, check.resources, account)
+    )
+    return CheckResult(check, _worst(items, outside), items, outside, not_asked)
+
+
+def _worst(items: tuple["Item", ...], outside: tuple["Outside", ...]) -> Result:
     results = [item.result for item in items] + [Result.CANT_TELL] * bool(outside)
-    result = min(results, key=lambda r: r.rank, default=Result.PASS)
-    return CheckResult(check, result, items, outside, not_asked)
+    return min(results, key=lambda r: r.rank, default=Result.PASS)
 
 
 def _members(names: tuple[str, ...], account: Account, where: str) -> list[str]:
@@ -210,14 +240,75 @@ def _item(
     action: str,
     resource: str,
     where: str,
+    assumed: dict[str, "CheckResult | None"] | None = None,
 ) -> Item:
+    """One question and its answers. With `assumed`, a role in a "requires" check on a key AWS
+    checks when a role is assumed gets a note, and the second question when it's allowed without
+    the key. Without it, as inside the second question, no role is asked a second question."""
     answers = _answers(check, account, organization, principal, action, resource, where)
+    result = _grade(check.type, answers)
     note = None
-    if (check.type is CheckType.REQUIRES and check.key.casefold() == MFA_KEY.casefold()
-            and principal.startswith("role/")):
-        note = _role_mfa_note(account, principal)
-    return Item(principal, action, resource, _grade(check.type, answers), answers,
-                _turns_on(answers), note)
+    if assumed is not None and principal.startswith("role/") and _checked_when_assumed(check):
+        note = _role_mfa_note(account, principal, check.key)
+        if result is Result.FAIL:  # allowed without the key, so it hangs on who can assume it
+            if principal not in assumed:
+                assumed[principal] = _assume_question(check, account, organization, principal,
+                                                      where)
+            second = assumed[principal]
+            refusal = None if second is not None else Refusal(
+                "AccountError",
+                f"{account.name} has no AccountId, so the analyzer can't name {principal}'s ARN "
+                "to ask who can assume it",
+            )
+            note = replace(note, assume=second, refusal=refusal)
+            result = note.result
+    return Item(principal, action, resource, result, answers, _turns_on(answers), note)
+
+
+def _checked_when_assumed(check: Check) -> bool:
+    return check.type is CheckType.REQUIRES and condition_keys.values_of(
+        check.key).checked_when_assumed
+
+
+def _assume_question(
+    check: Check,
+    account: Account,
+    organization: Organization | None,
+    role: str,
+    where: str,
+) -> "CheckResult | None":
+    """The second question about a role: can anyone in the account file do sts:AssumeRole on it
+    with the check's key set to its other values, such as MFA false or absent? A trust policy that
+    lets someone outside the file assume the role, by sts:AssumeRole or as a SAML or OIDC user,
+    makes it CAN'T TELL: AWS says that for SAML and OIDC users it "cannot determine whether that
+    provider required MFA". None when the account file has no AccountId to name the role's ARN.
+    """
+    if account.account_id is None:
+        return None
+    name = role.partition("/")[2]
+    arn = f"arn:aws:iam::{account.account_id}:role{account.roles[name].path}{name}"
+    question = Check(
+        id=f"{check.id}:assume:{name}",
+        title=f"No one can assume {role} unless {check.key} is {check.value}",
+        severity=check.severity,
+        type=CheckType.REQUIRES,
+        actions=("sts:AssumeRole",),
+        resources=(arn,),
+        fix=f"Require {check.key} {check.value} in every statement of {role}'s trust policy that "
+        "lets someone assume it.",
+        key=check.key,
+        value=check.value,
+    )
+    everyone = [f"user/{user}" for user in account.users] + [
+        f"role/{other}" for other in account.roles
+    ]
+    items = tuple(
+        _item(question, account, organization, principal, "sts:AssumeRole", arn,
+              f"{where} (who can assume {role})")
+        for principal in everyone
+    )
+    outside = tuple(_outside(resources.ASSUME_ACTIONS, (arn,), account))
+    return CheckResult(question, _worst(items, outside), items, outside)
 
 
 def _answers(
@@ -324,24 +415,26 @@ def _turns_on(answers: tuple[Answer, ...]) -> tuple[str, ...]:
     return tuple(found)
 
 
-def _role_mfa_note(account: Account, principal: str) -> RoleMfaNote:
+def _role_mfa_note(account: Account, principal: str, key: str) -> RoleMfaNote:
     trust_policy = account.roles[principal.partition("/")[2]].trust_policy
     if trust_policy is None:
-        return RoleMfaNote(principal, None)
+        return RoleMfaNote(principal, key, None)
     assumes = tuple(
         index for index, statement in enumerate(trust_policy.statements)
         if statement.effect is Effect.ALLOW
         and any(_covers_action(statement, action) for action in resources.ASSUME_ACTIONS)
     )
-    return RoleMfaNote(principal, trust_policy, assumes)
+    return RoleMfaNote(principal, key, trust_policy, assumes)
 
 
-def _outside(check: Check, account: Account) -> Iterator[Outside]:
-    """The resource and trust policy statements that allow the check's requests for someone outside
-    the account file. Their conditions aren't read, so a condition that limits them to the account
-    still counts: the check can't PASS on a guess."""
-    for action in check.actions:
-        for resource in check.resources:
+def _outside(
+    actions: tuple[str, ...], requested: tuple[str, ...], account: Account
+) -> Iterator[Outside]:
+    """The resource and trust policy statements that allow `actions` on the `requested` resources
+    for someone outside the account file. Their conditions aren't read, so a condition that limits
+    them to the account still counts: the check can't PASS on a guess."""
+    for action in actions:
+        for resource in requested:
             try:
                 described = account.resource_for(resource, action)
             except PolicyError:
