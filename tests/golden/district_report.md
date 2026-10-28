@@ -64,12 +64,10 @@ Asked: Can anyone do s3:PutObject on arn:aws:s3:::district-student-records/campu
 when aws:MultiFactorAuthPresent is false or absent?
 
 - user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-  - PASS: AWS checks aws:MultiFactorAuthPresent for a role when it's assumed, and no one can assume
-    role/ITAdmin when aws:MultiFactorAuthPresent is false or absent. Its trust policy lets someone
-    assume it in Sid AccountWithMfa, when Bool aws:MultiFactorAuthPresent is true. AWS: "The
-    temporary credentials returned by AssumeRole do not include MFA information in the context, so
-    you cannot check individual API operations for MFA."
+- role/ITAdmin passes: its own policies allow the request, but AWS checks MFA for a role when it's
+  assumed, and no one can assume it without MFA (trust policy Sid AccountWithMfa).
+  - AWS: "The temporary credentials returned by AssumeRole do not include MFA information in the
+    context, so you cannot check individual API operations for MFA."
     https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html#scenarios
 - Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
   role/GradebookVendor, role/TeacherSignIn.

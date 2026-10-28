@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.compliance import Result
 from iam_analyzer.framework import load_framework_file, parse_framework
@@ -184,35 +186,71 @@ def test_principals_outside_the_file_are_cited():
             'everyone ("*")') in text
 
 
-def test_a_roles_item_carries_the_mfa_note():
+PASSES = ("passes: its own policies allow the request, but AWS checks MFA for a role when it's "
+          "assumed, and no one can assume it without MFA")
+AWS_ON_ROLES = ('- AWS: "The temporary credentials returned by AssumeRole do not include MFA '
+                "information in the context, so you cannot check individual API operations for "
+                'MFA." https://docs.aws.amazon.com/IAM/latest/UserGuide/'
+                "id_credentials_mfa_configure-api-require.html#scenarios")
+
+
+def test_a_role_that_passes_leads_with_its_result():
     lines = section(markdown(check("a", "requires")), "Check a")
-    # The role can read without MFA, but no one can assume it without MFA, so its item passes,
-    # and it gets a line of its own instead of joining the "Can't" list.
-    admin = lines.index("- role/Admin can. Granted by Unnamed, statement 0, attached directly.")
-    note = " ".join(line.strip() for line in lines[admin + 1:admin + 7])
-    assert note.startswith(
-        f"- PASS: AWS checks {MFA} for a role when it's assumed, and no one can assume role/Admin "
-        f"when {MFA} is false or absent. Its trust policy lets someone assume it in Sid "
-        f"AccountWithMfa, when Bool {MFA} is true. AWS: \"The temporary credentials returned by "
-        "AssumeRole do not include MFA information in the context, so you cannot check individual "
-        "API operations for MFA.\" https://docs.aws.amazon.com/IAM/latest/UserGuide/"
-        "id_credentials_mfa_configure-api-require.html#scenarios")
+    # The role can read without MFA, but no one can assume it without MFA, so its item passes.
+    # Its line says so first, with AWS's words under it, and it doesn't join the "Can't" list.
+    admin = next(i for i, line in enumerate(lines) if line.startswith("- role/Admin"))
+    quote = next(i for i, line in enumerate(lines) if line.startswith("  - AWS: "))
+    end = next(i for i in range(quote, len(lines)) if lines[i].startswith("- "))
+    assert flat("\n".join(lines[admin:quote])) == (
+        f"- role/Admin {PASSES} (trust policy Sid AccountWithMfa).")
+    assert flat("\n".join(lines[quote:end])) == AWS_ON_ROLES
+    assert not any("role/Admin can" in line for line in lines)
     assert not any(line.startswith("- Can't:") and "role/Admin" in line for line in lines)
 
 
-def role_report(trust, **users):
-    """A role that can read, with `trust` as its trust policy, and `users` who may assume it."""
+def role_report(trust, policies=("Read",), bucket_policy=None, **users):
+    """A role with `policies`, and `trust` as its trust policy, `users` who may assume it, and
+    `bucket_policy` on the bucket."""
     acct = parse_account({"AccountId": "111122223333", "Policies": {
         "Read": {"Statement": [{"Effect": "Allow", "Action": "s3:GetObject",
                                 "Resource": f"{BUCKET}/*"}]},
         "AssumeAdmin": {"Statement": [{"Sid": "AssumeAdmin", "Effect": "Allow",
                                        "Action": "sts:AssumeRole", "Resource": f"{ROLES}/Admin"}]},
     }, "Users": users,
-        "Roles": {"Admin": {"Policies": ["Read"], "AssumeRolePolicyDocument": trust}},
-        "Resources": {BUCKET: {}}}, name="acct.json")
+        "Roles": {"Admin": {"Policies": list(policies), "AssumeRolePolicyDocument": trust}},
+        "Resources": {BUCKET: {} if bucket_policy is None else {"Policy": bucket_policy}}},
+        name="acct.json")
     framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"},
                                  "Checks": [check("a", "requires")]}, name="fw.json")
     return build(framework, acct, organization=None)
+
+
+MFA_ALLOW = ADMIN_TRUST["Statement"][0]
+ACCOUNT_ALLOW = {"Sid": "Account", "Effect": "Allow", "Principal": {"AWS": "111122223333"},
+                 "Action": "sts:AssumeRole"}
+
+
+@pytest.mark.parametrize("statements, where", [
+    ([MFA_ALLOW], "trust policy Sid AccountWithMfa"),
+    ([ACCOUNT_ALLOW], "trust policy Sid Account doesn't check MFA"),
+    ([MFA_ALLOW, ACCOUNT_ALLOW], "trust policy Sid AccountWithMfa; Sid Account doesn't check MFA"),
+    ([{**ACCOUNT_ALLOW, "Action": "sts:TagSession"}], "its trust policy lets no one assume it"),
+], ids=["checks-mfa", "doesnt-check-mfa", "both", "lets-no-one-assume"])
+def test_a_passing_roles_line_says_where_its_trust_policy_checks_mfa(statements, where):
+    # No one in the file may assume the role, so it passes whatever its trust policy says, and
+    # its line says what that is.
+    text = flat(to_markdown(role_report({"Statement": statements})))
+    assert f"- role/Admin {PASSES} ({where})." in text
+
+
+def test_a_passing_role_that_a_bucket_policy_names_says_which_policy_allows_it():
+    bucket = {"Statement": [{"Sid": "AdminReads", "Effect": "Allow",
+                             "Principal": {"AWS": f"{ROLES}/Admin"}, "Action": "s3:GetObject",
+                             "Resource": f"{BUCKET}/*"}]}
+    text = flat(to_markdown(role_report(ADMIN_TRUST, policies=(), bucket_policy=bucket)))
+    assert (f"- role/Admin passes: the resource policy on {BUCKET} allows the request, but AWS "
+            "checks MFA for a role when it's assumed, and no one can assume it without MFA (trust "
+            "policy Sid AccountWithMfa).") in text
 
 
 def test_a_role_someone_can_assume_without_mfa_lists_who():

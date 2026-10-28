@@ -35,7 +35,8 @@ class KeyValues:
     """Every value a key can have in a request. None means the request doesn't include it.
 
     `role_quote` and `role_link` are for a key AWS checks when a role is assumed, not on the
-    role's own requests: AWS's words saying so, and where they are. None for other keys.
+    role's own requests: AWS's words saying so, and where they are. `role_term` is what the key
+    checks, in a word a report can use: "MFA". All three are None for other keys.
     """
 
     key: str  # spelled as AWS documents it
@@ -44,6 +45,7 @@ class KeyValues:
     link: str
     role_quote: str | None = None
     role_link: str | None = None
+    role_term: str | None = None
 
     @property
     def checked_when_assumed(self) -> bool:
@@ -61,6 +63,7 @@ KNOWN = (
         role_quote="The temporary credentials returned by AssumeRole do not include MFA "
         "information in the context, so you cannot check individual API operations for MFA.",
         role_link=f"{MFA_PAGE}#scenarios",
+        role_term="MFA",
     ),
     KeyValues(
         "aws:SecureTransport",

@@ -507,7 +507,10 @@ def _label(item: Item, check: Check) -> str:
 
 
 def _item_markdown(item: Item, label: str, account: Account, depth: int = 0) -> list[str]:
-    """One item: a line when all its answers read the same, or a line per group of values."""
+    """One item: a line when all its answers read the same, or a line per group of values. A role
+    that passes only because no one can assume it without the check's key says so first."""
+    if item.result is Result.PASS and item.note is not None and item.note.asked:
+        return _role_pass_markdown(item, label, depth)
     groups: dict[str, list[Answer]] = {}
     for answer in item.answers:
         groups.setdefault(_outcome(answer), []).append(answer)
@@ -580,9 +583,15 @@ def _statement(matched: MatchedStatement) -> str:
         return f"{name}, the permissions boundary"
     if layer.policy_type is PolicyType.SCP:
         return f"{name}, an SCP on {_target(layer.org_target)}"
-    kind = "trust policy of" if layer.policy_type is PolicyType.TRUST else "resource policy on"
     names = f", which names {NAMES[matched.principal_match]}" if matched.principal_match else ""
-    return f"the {kind} {layer.resource}, {_sid(matched.statement, matched.index)}{names}"
+    return f"{_policy_on(layer)}, {_sid(matched.statement, matched.index)}{names}"
+
+
+def _policy_on(layer: Layer) -> str:
+    """A resource's policy, such as "the resource policy on arn:aws:s3:::district-roster-exports"
+    or "the trust policy of arn:aws:iam::111122223333:role/ITAdmin"."""
+    kind = "trust policy of" if layer.policy_type is PolicyType.TRUST else "resource policy on"
+    return f"the {kind} {layer.resource}"
 
 
 def _name(policy_name: str, statement: Statement, index: int | None) -> str:
@@ -615,9 +624,53 @@ def _target(target: OrgTarget) -> str:
     return f"account {target.name}"
 
 
+def _role_pass_markdown(item: Item, label: str, depth: int) -> list[str]:
+    """A role allowed without the key that passes because no one can assume it without the key:
+    the result and why on its line, and AWS's words under it."""
+    known = condition_keys.values_of(item.note.key)
+    term = known.role_term
+    return [
+        _bullet(f"{label} passes: {_allowed_by(item)}, but AWS checks {term} for a role when it's "
+                f"assumed, and no one can assume it without {term} ({_checks(item.note)}).",
+                depth),
+        _bullet(f'AWS: "{known.role_quote}" {known.role_link}', depth + 1),
+    ]
+
+
+def _allowed_by(item: Item) -> str:
+    """What lets the role make the request: its own policies, or a resource's policy naming it."""
+    layers = list(dict.fromkeys(grant.layer for answer in item.answers if answer.allowed
+                                for grant in answer.result.grants))
+    if any(layer.policy_type is PolicyType.IDENTITY for layer in layers):
+        return "its own policies allow the request"
+    verb = "allows" if len(layers) == 1 else "allow"
+    return f"{_and([_policy_on(layer) for layer in layers])} {verb} the request"
+
+
+def _checks(note: RoleMfaNote) -> str:
+    """Which statements in the role's trust policy check the key, such as "trust policy Sid
+    AccountWithMfa", and which of the others that let someone assume the role don't."""
+    if not note.statements:
+        return "its trust policy lets no one assume it"
+    checking: list[str] = []
+    others: list[str] = []
+    for index in note.statements:
+        statement = note.trust_policy.statements[index]
+        if any(c.key.casefold() == note.key.casefold() for c in statement.conditions):
+            checking.append(_sid(statement, index))
+        else:
+            others.append(_sid(statement, index))
+    parts = [_and(checking)] if checking else []
+    if others:
+        verb = "doesn't" if len(others) == 1 else "don't"
+        parts.append(f"{_and(others)} {verb} check {condition_keys.values_of(note.key).role_term}")
+    return f"trust policy {'; '.join(parts)}"
+
+
 def _note_markdown(note: RoleMfaNote, account: Account, depth: int) -> list[str]:
-    """Where AWS checks MFA for a role, and, when the role was allowed without it, the answer to
-    the second question: can anyone assume the role without it?"""
+    """Where AWS checks the key for a role, and, when the role was allowed without it and didn't
+    pass, the answer to the second question: who can assume the role without it, or why the
+    analyzer can't tell. A role that passes leads with that instead (`_role_pass_markdown`)."""
     known = condition_keys.values_of(note.key)
     checked = f"AWS checks {known.key} for a role when it's assumed"
     aws = f'AWS: "{known.role_quote}" {known.role_link}'
@@ -628,9 +681,6 @@ def _note_markdown(note: RoleMfaNote, account: Account, depth: int) -> list[str]
         return [_bullet(f"CAN'T TELL: {checked}, and {_sentence(note.refusal.message)}", depth)]
     question = note.assume
     when = " or ".join(_value(v) for v in known.values if v != question.check.value)
-    if question.result is Result.PASS:
-        return [_bullet(f"PASS: {checked}, and no one can assume {role} when {known.key} is "
-                        f"{when}. {_trust(note)} {aws}", depth)]
     if question.result is Result.FAIL:
         lead = f"FAIL: {checked}, and these can assume {role} when {known.key} is {when}:"
     else:
@@ -662,13 +712,10 @@ def _sentence(text: str) -> str:
 
 def _outside_markdown(outside: Outside, account: Account) -> str:
     statement = outside.policy.statements[outside.index]
-    kind = "trust policy of" if outside.layer.policy_type is PolicyType.TRUST else (
-        "resource policy on")
     whom = ", ".join(_principal(p) for p in outside.principals)
-    return (f"Can't tell for principals outside {account.name}: the {kind} "
-            f"{outside.layer.resource}, {_sid(statement, outside.index)}, allows "
-            f"{outside.action} for {whom}, and the analyzer doesn't evaluate requests from "
-            "outside the account file yet.")
+    return (f"Can't tell for principals outside {account.name}: {_policy_on(outside.layer)}, "
+            f"{_sid(statement, outside.index)}, allows {outside.action} for {whom}, and the "
+            "analyzer doesn't evaluate requests from outside the account file yet.")
 
 
 def _principal(principal: Principal) -> str:

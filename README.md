@@ -759,8 +759,8 @@ role when the role is assumed, and the role's own requests never show it.
 In a check that requires MFA, a role that's allowed without MFA gets a second question: can anyone
 do `sts:AssumeRole` on the role with MFA false or absent?
 - **No one:** if the trust policy also lets no one outside the account file assume the role, the
-  role's item passes. Its note cites the trust policy's statements and their MFA conditions, and
-  quotes AWS.
+  role's item passes. Its line leads with that and says why, naming the trust policy statements
+  that check MFA, and AWS's quote goes under it.
 - **Someone in the file:** the item fails, and the note names who can assume the role without MFA,
   and how.
 - **Otherwise, someone outside the file:** a trust policy that lets someone outside the account
@@ -774,9 +774,20 @@ The item is also CAN'T TELL when the account file doesn't give the role's trust 
 The second question goes one level deep. A role that can assume the role without MFA counts, even
 if that role needs MFA to be assumed itself. That can only add a false alarm, never hide access.
 
-In the district, ITAdmin passes "Changing student records needs MFA": its trust policy needs MFA,
-and no one outside the file can assume it. The check still fails for alee, who has `ITAdminFullS3`
-directly. Taking that policy off alee, as the check's Fix says, makes the check pass.
+In the district, ITAdmin passes "Changing student records needs MFA":
+
+```
+- role/ITAdmin passes: its own policies allow the request, but AWS checks MFA for a role when it's
+  assumed, and no one can assume it without MFA (trust policy Sid AccountWithMfa).
+  - AWS: "The temporary credentials returned by AssumeRole do not include MFA information in the
+    context, so you cannot check individual API operations for MFA."
+    https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html#scenarios
+```
+
+When a bucket policy names the role and its own policies don't allow the request, the line says
+"the resource policy on ... allows the request" instead. The check still fails for alee, who has
+`ITAdminFullS3` directly. Taking that policy off alee, as the check's Fix says, makes the check
+pass.
 
 The report still tries `true` for a role's own requests too. When it's unsure whether a value can
 happen, it tries it: an impossible value can only add a false alarm, while skipping a possible one
