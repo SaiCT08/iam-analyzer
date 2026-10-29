@@ -41,6 +41,7 @@ from iam_analyzer.framework import load_framework_file
 from iam_analyzer.loader import load_policy_file
 from iam_analyzer.models import (
     Condition,
+    Decision,
     EvaluationResult,
     Layer,
     MatchedStatement,
@@ -208,9 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def format_result(result: EvaluationResult, context: RequestContext = RequestContext()) -> str:
-    """The decision, then each statement behind it, and for an explicit Deny, the Allows it
-    overrides. `context` is the request's context, used to show the values each condition was
-    checked against."""
+    """The decision, then each statement behind it. For an explicit Deny, also the Allows it
+    overrides, and what the request would get without it. `context` is the request's context,
+    used to show the values each condition was checked against."""
     lines = [result.decision.value]
     lines += [f"  {_not_allowed_message(layer)}" for layer in result.not_allowed_by]
     lines += _statement_lines(result.reasons, context)
@@ -218,7 +219,22 @@ def format_result(result: EvaluationResult, context: RequestContext = RequestCon
         lines.append("  The Deny overrides:" if len(result.reasons) == 1 else
                      "  The Denies override:")
         lines += _statement_lines(result.overridden, context)
+    if result.without_denies is not None:
+        lines += _without_denies_lines(result)
     return "\n".join(lines)
+
+
+def _without_denies_lines(result: EvaluationResult) -> list[str]:
+    """What an explicitly denied request would get if no Deny applied."""
+    without = result.without_denies
+    deny = "this Deny" if len(result.reasons) == 1 else "these Denies"
+    if without.decision is None:
+        return [f"  Without {deny}, the analyzer can't tell whether the request would be allowed: "
+                f"{without.refusal}."]
+    if without.decision is Decision.ALLOW:
+        return [f"  Without {deny}, the request would be allowed."]
+    return [f"  Without {deny}, the request would still be denied:",
+            *(f"    {_not_allowed_message(layer)}" for layer in without.not_allowed_by)]
 
 
 def _statement_lines(statements: Sequence[MatchedStatement], context: RequestContext) -> list[str]:

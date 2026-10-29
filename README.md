@@ -81,7 +81,12 @@ Output:
 ```
 EXPLICIT_DENY
   Deny   deny_student_records_delete.json  Sid=NoDeleteStudentRecords
+  Without this Deny, the request would still be denied:
+    No identity policy allows this; access is denied by default.
 ```
+
+An explicit Deny ends with what the request would get without it. Here neither policy allows
+deleting the roster, so the request would still be denied without the Deny.
 
 `--action` names one action, as a real AWS request does. A wildcard such as `s3:*` is an input
 error.
@@ -140,6 +145,9 @@ iam-analyzer check \
 ```
 EXPLICIT_DENY
   Deny   DenyStudentRecordsDelete (via group Teachers)  Sid=NoDeleteStudentRecords
+  Without this Deny, the request would still be denied:
+    No identity policy allows this; access is denied by default.
+    The resource-based policy on arn:aws:s3:::district-student-records does not allow this either.
 ```
 
 A user gets their own policies plus the policies of every group they're in. As in AWS, roles can't
@@ -294,13 +302,19 @@ EXPLICIT_DENY
          ArnNotEquals aws:PrincipalArn: arn:aws:iam::111122223333:role/ITAdmin (request: arn:aws:iam::111122223333:user/alee)
   The Deny overrides:
   Allow  ITAdminFullS3  Sid=FullS3Access
+  Without this Deny, the request would be allowed.
 ```
 
 Below the Deny is the Allow it overrides: `ITAdminFullS3` gives alee every S3 action. An explicit
 Deny lists each Allow it overrides that would grant the request: an identity policy's Allow when
 the boundary allows too, a bucket policy's grant that needs nothing else, and a trust policy's
-Allow. A boundary's or an SCP's Allow never counts, since those only limit. Whether every other
-layer, such as each SCP level, would let the request through without the Deny isn't checked.
+Allow. A boundary's or an SCP's Allow never counts, since those only limit.
+
+The last line says what the request would get with every Deny taken out, checked layer by layer
+as for any request: here, alee could change the bucket policy. When another layer would still stop
+it, the output names that layer instead: the identity policies in the first example, or an SCP
+level with no Allow. When the analyzer would refuse to answer without the Deny, as where AWS's
+docs disagree, it says it can't tell, and why.
 
 The analyzer reads the caller from `aws:PrincipalArn`. With `--account`, the file fills it in,
 which needs the file's `AccountId`. With `--policy`, give it with `--context`, and give the bucket
@@ -455,6 +469,7 @@ EXPLICIT_DENY
   Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges
   The Deny overrides:
   Allow  ITAdminFullS3  Sid=FullS3Access
+  Without this Deny, the request would be allowed.
 ```
 
 `FullAWSAccess` and `SchoolServicesOnly` allow the request at their levels, but they aren't
@@ -600,6 +615,7 @@ EXPLICIT_DENY
          BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)
   The Deny overrides:
   Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords
+  Without this Deny, the request would be allowed.
 ```
 
 The indented line shows each condition, with the value the request had. AWS leaves
@@ -697,8 +713,10 @@ When a Deny is why someone can't, and it overrides an Allow that would grant the
 names that Allow: "The Deny overrides ITAdminFullS3, Sid FullS3Access, attached directly." Such a
 principal gets a line of its own even when the check passes, so a passing check shows which Denies
 it relies on. In the district, "No one can delete student records" passes, and its lines show the
-Denies overriding alee's and ITAdmin's `ITAdminFullS3`. The JSON lists those Allows as
-`overridden`, next to `grants`.
+Denies overriding alee's and ITAdmin's `ITAdminFullS3`. The line then says what the request would
+get without the Denies: "Without these Denies, the request would be allowed", or the layer that
+would still stop it, or that the analyzer can't tell. The JSON lists those Allows as `overridden`,
+next to `grants`, and that answer as `without_denies`.
 
 Exit codes:
 - `0`: every check passes, and no finding is high or critical;

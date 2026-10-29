@@ -85,6 +85,7 @@ def test_conditional_deny(capsys, tmp_path):
         "         Bool aws:SecureTransport: false (request: false)",
         "  The Deny overrides:",
         "  Allow  teacher_read_grades.json  Sid=ReadStudentRecords",
+        "  Without this Deny, the request would be allowed.",
     ]
     code, _, _ = run(capsys, *args, "--context", "aws:SecureTransport=true")
     assert code == EXIT_ALLOWED
@@ -195,6 +196,7 @@ def test_boundary_deny_is_explicit(capsys):
         # The boundary's own Allow covers the bucket, so the identity policy's Allow is overridden.
         "  The Deny overrides:",
         "  Allow  it_admin_full_s3.json  Sid=FullS3Access",
+        "  Without this Deny, the request would be allowed.",
     ]
 
 
@@ -235,6 +237,7 @@ def test_scp_deny_overrides_identity_allow(capsys):
         "  Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges",
         "  The Deny overrides:",
         "  Allow  ITAdminFullS3  Sid=FullS3Access",
+        "  Without this Deny, the request would be allowed.",
     ]
 
 
@@ -326,11 +329,44 @@ def test_an_explicit_deny_lists_the_allows_it_overrides(capsys):
         # FullAWSAccess and SchoolServicesOnly allow it too, but SCPs only limit.
         "  The Denies override:",
         "  Allow  ITAdminFullS3  Sid=FullS3Access",
+        "  Without these Denies, the request would be allowed.",
     ]
-    # A teacher has no Allow for deleting, so the Denies override nothing.
+    # A teacher has no Allow for deleting, so the Denies override nothing, and without them the
+    # request would still be denied.
     code, out, _ = run(capsys, *args, "--principal", "user/jsmith")
     assert code == EXIT_DENIED
     assert "override" not in out
+    assert out.splitlines()[-3:] == [
+        "  Without these Denies, the request would still be denied:",
+        "    No identity policy allows this; access is denied by default.",
+        "    The resource-based policy on arn:aws:s3:::district-student-records does not allow "
+        "this either.",
+    ]
+
+
+def test_without_the_deny_the_analyzer_can_say_it_cant_tell(capsys, tmp_path):
+    # The trust policy names the user directly, and the user's boundary doesn't allow
+    # sts:AssumeRole. AWS's docs disagree on what that gives, so only the Deny is settled.
+    path = account_file(tmp_path, {
+        "AccountId": "111122223333",
+        "Policies": {
+            "NoAssume": {"Statement": [{"Sid": "NoAssume", "Effect": "Deny",
+                                        "Action": "sts:AssumeRole", "Resource": "*"}]},
+            "S3Only": {"Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]},
+        },
+        "Users": {"it": {"Policies": ["NoAssume"], "PermissionsBoundary": "S3Only"}},
+        "Roles": {"Admin": {"AssumeRolePolicyDocument": {"Statement": [{
+            "Sid": "Direct", "Effect": "Allow",
+            "Principal": {"AWS": "arn:aws:iam::111122223333:user/it"},
+            "Action": "sts:AssumeRole"}]}}},
+    })
+    code, out, _ = run(capsys, "--account", path, "--principal", "user/it",
+                       "--action", "sts:AssumeRole",
+                       "--resource", "arn:aws:iam::111122223333:role/Admin")
+    assert code == EXIT_DENIED
+    assert out.splitlines()[-1].startswith(
+        "  Without this Deny, the analyzer can't tell whether the request would be allowed: the "
+        "trust policy names the caller directly, and the caller's permissions boundary")
 
 
 def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
@@ -350,7 +386,8 @@ def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
                        "--resource", "arn:aws:iam::111122223333:user/alee")
     assert code == EXIT_DENIED
     assert out.splitlines() == ["EXPLICIT_DENY", "  Deny   NoSelfDelete  Sid=(no Sid)",
-                                "  The Deny overrides:", "  Allow  AdminAll  Sid=(no Sid)"]
+                                "  The Deny overrides:", "  Allow  AdminAll  Sid=(no Sid)",
+                                "  Without this Deny, the request would be allowed."]
 
 
 def test_a_role_has_no_user_name(capsys, tmp_path):
@@ -563,6 +600,7 @@ def test_registrar_changes_need_mfa(capsys):
         "         BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)",
         "  The Deny overrides:",
         "  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords",
+        "  Without this Deny, the request would be allowed.",
     ]
 
     code, out, _ = run(capsys, *args, "--context", "aws:MultiFactorAuthPresent=true")
@@ -711,6 +749,7 @@ def test_a_bucket_policy_deny_shows_its_condition(capsys):
         "(request: arn:aws:iam::111122223333:user/alee)",
         "  The Deny overrides:",
         "  Allow  ITAdminFullS3  Sid=FullS3Access",
+        "  Without this Deny, the request would be allowed.",
     ]
 
 

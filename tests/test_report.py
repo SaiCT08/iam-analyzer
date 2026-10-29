@@ -5,7 +5,7 @@ import pytest
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.compliance import Result
 from iam_analyzer.framework import load_framework_file, parse_framework
-from iam_analyzer.organization import load_organization_file
+from iam_analyzer.organization import load_organization_file, parse_organization
 from iam_analyzer.report import WIDTH, build, to_json, to_markdown
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -152,7 +152,9 @@ def test_a_prohibition_lists_the_values_that_allow_it():
         f"- user/clerk, depending on {MFA}:",
         "  - false: can't. Denied by SkipsAccessKeys, statement 1, attached directly. The Deny "
         "overrides",
-        "    SkipsAccessKeys, statement 0, attached directly.",
+        "    SkipsAccessKeys, statement 0, attached directly. Without this Deny, the request would "
+        "be",
+        "    allowed.",
         "  - absent: can. Granted by SkipsAccessKeys, statement 0, attached directly.",
     ])
     assert "- Not asked: role/Admin." in lines
@@ -167,10 +169,11 @@ def test_a_passing_check_shows_whom_each_deny_keeps_out():
     assert has_block(lines, [
         "- user/registrar can't. Denied by Write, Sid NeedsMfa, attached directly. The Deny "
         "overrides Write,",
-        "  Sid Write, attached directly.",
+        "  Sid Write, attached directly. Without this Deny, the request would be allowed.",
         "- user/clerk can't. Denied by SkipsAccessKeys, statement 1, attached directly. The Deny "
         "overrides",
-        "  SkipsAccessKeys, statement 0, attached directly.",
+        "  SkipsAccessKeys, statement 0, attached directly. Without this Deny, the request would "
+        "be allowed.",
         "- Can't: user/teacher, user/reader, role/Admin.",
     ])
     [registrar] = [i for i in to_json(graded)["checks"][0]["items"]
@@ -178,6 +181,72 @@ def test_a_passing_check_shows_whom_each_deny_keeps_out():
     [overridden] = registrar["answers"][0]["overridden"]
     assert (overridden["policy"], overridden["sid"], overridden["effect"]) == (
         "Write", "Write", "Allow")
+    assert registrar["answers"][0]["without_denies"] == {
+        "decision": "ALLOW", "not_allowed_by": [], "refusal": None}
+    # The teacher has no Allow and no Deny for writing: an implicit deny has nothing to undo.
+    [teacher] = [i for i in to_json(graded)["checks"][0]["items"]
+                 if i["principal"] == "user/teacher"]
+    assert teacher["answers"][0]["without_denies"] is None
+
+
+EC2_ONLY_OU = {
+    "ManagementAccountId": "999988887777",
+    "ServiceControlPolicies": {
+        "FullAWSAccess": {"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]},
+        "Ec2Only": {"Statement": [{"Effect": "Allow", "Action": "ec2:*", "Resource": "*"}]},
+    },
+    "Root": {"ServiceControlPolicies": ["FullAWSAccess"], "OrganizationalUnits": {"Schools": {
+        "ServiceControlPolicies": ["Ec2Only"],
+        "Accounts": {"111122223333": {"ServiceControlPolicies": ["FullAWSAccess"]}}}},
+        "Accounts": {"999988887777": {"ServiceControlPolicies": ["FullAWSAccess"]}}},
+}
+
+
+def test_a_deny_line_names_a_layer_that_would_still_block_the_request():
+    # The OU's SCPs don't allow S3, so without the registrar's MFA Deny, the request would still
+    # be denied. The Deny overrides the registrar's Allow all the same.
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"}, "Checks": [
+        check("a", "only", Actions=["s3:PutObject"], Context={MFA: "false"})]}, name="fw.json")
+    graded = build(framework, account(),
+                   organization=parse_organization(EC2_ONLY_OU, name="org.json"))
+    text = flat("\n".join(section(to_markdown(graded), "Check a")))
+    assert ("- user/registrar can't. Denied by Write, Sid NeedsMfa, attached directly. The Deny "
+            "overrides Write, Sid Write, attached directly. Without this Deny, the request would "
+            "still be denied: no SCP on OU Schools allows it.") in text
+    [registrar] = [i for i in to_json(graded)["checks"][0]["items"]
+                   if i["principal"] == "user/registrar"]
+    without = registrar["answers"][0]["without_denies"]
+    assert (without["decision"], without["refusal"]) == ("IMPLICIT_DENY", None)
+    blocked = [(layer["type"], layer["org_target"]["name"]) for layer in without["not_allowed_by"]]
+    assert blocked == [("SCP", "Schools")]
+
+
+def test_a_deny_line_says_when_the_analyzer_cant_tell_what_it_would_be_without_it():
+    # The trust policy names the user directly, and the user's boundary doesn't allow
+    # sts:AssumeRole: AWS's docs disagree on what that gives.
+    acct = parse_account({"AccountId": "111122223333", "Policies": {
+        "NoAssume": {"Statement": [{"Sid": "NoAssume", "Effect": "Deny",
+                                    "Action": "sts:AssumeRole", "Resource": "*"}]},
+        "S3Only": {"Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]},
+    }, "Users": {"it": {"Policies": ["NoAssume"], "PermissionsBoundary": "S3Only"}},
+        "Roles": {"Admin": {"AssumeRolePolicyDocument": {"Statement": [{
+            "Sid": "Direct", "Effect": "Allow",
+            "Principal": {"AWS": "arn:aws:iam::111122223333:user/it"},
+            "Action": "sts:AssumeRole"}]}}}}, name="acct.json")
+    framework = parse_framework({"Framework": {"Id": "fw", "Title": "F"}, "Checks": [
+        check("a", "only", Actions=["sts:AssumeRole"], Resources=[f"{ROLES}/Admin"])]},
+        name="fw.json")
+    graded = build(framework, acct, organization=None)
+    text = flat("\n".join(section(to_markdown(graded), "Check a")))
+    assert ("- user/it can't. Denied by NoAssume, Sid NoAssume, attached directly. The Deny "
+            f"overrides the trust policy of {ROLES}/Admin, Sid Direct, which names the user. "
+            "Without this Deny, the analyzer can't tell whether the request would be allowed: the "
+            "trust policy names the caller directly, and the caller's permissions boundary doesn't "
+            "allow this:") in text
+    [it] = [i for i in to_json(graded)["checks"][0]["items"] if i["principal"] == "user/it"]
+    without = it["answers"][0]["without_denies"]
+    assert without["decision"] is None and without["not_allowed_by"] == []
+    assert without["refusal"].startswith("the trust policy names the caller directly")
 
 
 def test_a_principal_whose_every_item_says_the_same_is_named_once():

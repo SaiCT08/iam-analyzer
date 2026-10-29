@@ -35,7 +35,9 @@ and resource-based policies allow. An allowed result's `grants` are the Allows o
 works by itself: the identity policies' when the boundary allows too, a resource-based policy's
 grant that needs nothing else, and the trust policy's, which every way into a role needs. An
 explicit Deny's result lists the Allows it overrode by the same rules, as `overridden`, so a
-boundary's or an SCP's Allow, which only limits, is never one of them.
+boundary's or an SCP's Allow, which only limits, is never one of them. Its `without_denies` is
+the decision with every Deny left out: allowed, still denied by the layers it names, or unknown
+when that decision is one the analyzer refuses.
 
 When matching a statement needs a condition key the request context says nothing about,
 there is no answer to give: evaluation raises one MissingContextError that names every such
@@ -82,6 +84,7 @@ from iam_analyzer.models import (
     Resource,
     ScpLevel,
     Statement,
+    WithoutDenies,
 )
 
 # The principal's account, which a request on an IAM or STS resource needs, so that a request on
@@ -231,24 +234,40 @@ def evaluate(
         raise _missing_context(missing)
     every = [m for _, found in matched for m in found]
 
+    bounded = boundary is not None
     denies = tuple(m for m in every if m.statement.effect is Effect.DENY)
-    if denies:
-        # `_grants` reads every statement it gets as an Allow, so it gets only the Allows.
-        allows = [(layer, [m for m in found if m.statement.effect is Effect.ALLOW])
-                  for layer, found in matched]
-        overridden = _grants(allows, bounded=boundary is not None)
-        return EvaluationResult(Decision.EXPLICIT_DENY, denies, overridden=overridden)
+    if not denies:
+        return _allow_or_implicit_deny(matched, resource_layer, bounded=bounded)
 
-    # No Deny matched, so every matched statement is an Allow.
+    # The functions below read every statement they get as an Allow, so they get only the Allows.
+    allows = [(layer, [m for m in found if m.statement.effect is Effect.ALLOW])
+              for layer, found in matched]
+    try:
+        without = _allow_or_implicit_deny(allows, resource_layer, bounded=bounded)
+        without_denies = WithoutDenies(without.decision, without.not_allowed_by)
+    except UnsupportedPolicyFeature as exc:  # AWS's docs disagree on what it would get
+        without_denies = WithoutDenies(None, refusal=str(exc))
+    overridden = _grants(allows, bounded=bounded)
+    return EvaluationResult(Decision.EXPLICIT_DENY, denies, overridden=overridden,
+                            without_denies=without_denies)
+
+
+def _allow_or_implicit_deny(
+    matched: list[tuple[Layer, list[MatchedStatement]]],
+    resource_layer: Layer | None,
+    *,
+    bounded: bool,
+) -> EvaluationResult:
+    """The decision when no Deny applies, so every statement in `matched` is an Allow: ALLOW,
+    or IMPLICIT_DENY naming the layers with no Allow."""
+    every = [m for _, found in matched for m in found]
     grant = principals.strongest(m.principal_match for m in every if m.layer == resource_layer)
     if resource_layer is not None and resource_layer.policy_type is PolicyType.TRUST:
         _check_trust_boundary(matched, grant)
     not_allowed_by = _not_allowed_by(matched, grant, resource_layer)
     if not_allowed_by:
         return EvaluationResult(Decision.IMPLICIT_DENY, not_allowed_by=not_allowed_by)
-
-    grants = _grants(matched, bounded=boundary is not None)
-    return EvaluationResult(Decision.ALLOW, tuple(every), grants=grants)
+    return EvaluationResult(Decision.ALLOW, tuple(every), grants=_grants(matched, bounded=bounded))
 
 
 def _grants(

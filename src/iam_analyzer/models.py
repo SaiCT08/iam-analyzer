@@ -253,6 +253,17 @@ class MatchedStatement:
 
 
 @dataclass(frozen=True)
+class WithoutDenies:
+    """What an explicitly denied request would get if no Deny applied: ALLOW, or IMPLICIT_DENY
+    with the layers that still wouldn't allow it. `decision` is None when the analyzer can't
+    tell, and `refusal` says why."""
+
+    decision: Decision | None
+    not_allowed_by: tuple[Layer, ...] = ()
+    refusal: str | None = None
+
+
+@dataclass(frozen=True)
 class EvaluationResult:
     decision: Decision
     # Statements that determined the decision: the matching Denies for EXPLICIT_DENY,
@@ -266,9 +277,11 @@ class EvaluationResult:
     grants: tuple[MatchedStatement, ...] = field(default_factory=tuple)
     # For EXPLICIT_DENY: the Allows the Deny overrode that would grant the request, by the same
     # rules as `grants`, so no boundary or SCP statement, and no identity policy's Allow that the
-    # boundary blocks. Whether each other layer, such as every SCP level, would allow the request
-    # without the Deny isn't checked. Empty otherwise.
+    # boundary blocks. Empty otherwise.
     overridden: tuple[MatchedStatement, ...] = field(default_factory=tuple)
+    # For EXPLICIT_DENY: what the request would get if no Deny applied, which says whether the
+    # other layers, such as every SCP level, would let it through. None otherwise.
+    without_denies: WithoutDenies | None = None
 
     @property
     def allowed(self) -> bool:

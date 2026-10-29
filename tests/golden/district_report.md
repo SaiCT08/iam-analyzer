@@ -66,7 +66,7 @@ when aws:MultiFactorAuthPresent is false or absent?
 - user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
 - user/rnguyen can't. Denied by RegistrarCampusRecords, Sid RequireMfaForChanges, through group
   Registrars. The Deny overrides RegistrarCampusRecords, Sid ManageOwnCampusRecords, through group
-  Registrars.
+  Registrars. Without this Deny, the request would be allowed.
 - role/ITAdmin passes: its own policies allow the request, but AWS checks MFA for a role when it's
   assumed, and no one can assume it without MFA (trust policy Sid AccountWithMfa).
   - AWS: "The temporary credentials returned by AssumeRole do not include MFA information in the
@@ -96,7 +96,7 @@ arn:aws:s3:::district-student-records/campus-02/transcript.pdf?
     Registrars.
   - false, absent: can't. Denied by RegistrarCampusRecords, Sid RequireMfaForChanges, through group
     Registrars. The Deny overrides RegistrarCampusRecords, Sid ManageOwnCampusRecords, through group
-    Registrars.
+    Registrars. Without this Deny, the request would be allowed.
 
 Fix: Registrars change records with MFA, by design. If they can't even with MFA, check
 RegistrarCampusRecords and each registrar's campus tag.
@@ -124,10 +124,12 @@ arn:aws:s3:::district-student-records/campus-02/transcript.pdf?
 
 - user/alee can't. Denied by DenyStudentRecordsDelete, Sid NoDeleteStudentRecords, through group
   ITStaff; ProtectStudentRecords, Sid NoDeletesOrPolicyChanges, an SCP on OU Schools. The Denies
-  override ITAdminFullS3, Sid FullS3Access, attached directly.
+  override ITAdminFullS3, Sid FullS3Access, attached directly. Without these Denies, the request
+  would be allowed.
 - role/ITAdmin can't. Denied by DenyStudentRecordsDelete, Sid NoDeleteStudentRecords, attached
   directly; ProtectStudentRecords, Sid NoDeletesOrPolicyChanges, an SCP on OU Schools. The Denies
-  override ITAdminFullS3, Sid FullS3Access, attached directly.
+  override ITAdminFullS3, Sid FullS3Access, attached directly. Without these Denies, the request
+  would be allowed.
 - Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
   role/GradebookVendor, role/TeacherSignIn.
 

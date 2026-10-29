@@ -1,17 +1,29 @@
+import dataclasses
+import itertools
 import json
 from pathlib import Path
 
 import pytest
 
+from iam_analyzer import evaluator
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.context import RequestContext
 from iam_analyzer.errors import (
     AccountError,
+    PolicyError,
     PolicyParseError,
     RequestError,
     UnsupportedPolicyFeature,
 )
-from iam_analyzer.models import Decision, PolicyType, Principal, PrincipalType, Resource
+from iam_analyzer.models import (
+    Decision,
+    Effect,
+    PolicyType,
+    Principal,
+    PrincipalType,
+    Resource,
+    WithoutDenies,
+)
 from iam_analyzer.organization import load_organization_file
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "accounts" / "district.json"
@@ -628,6 +640,64 @@ def test_a_deny_on_deleting_a_transcript_overrides_alees_s3_access_but_no_scp():
     ]
     # FullAWSAccess allows it at the root and the account, but an SCP only limits.
     assert "FullAWSAccess" not in {m.policy_name for m in result.overridden}
+    # Every SCP level allows it, so the Denies are all that stop alee.
+    assert result.without_denies.decision is Decision.ALLOW
+
+
+def allows_only(policy):
+    """`policy` with its Deny statements taken out."""
+    if policy is None:
+        return None
+    statements = tuple(s for s in policy.statements if s.effect is Effect.ALLOW)
+    return dataclasses.replace(policy, statements=statements)
+
+
+RECORDS = "arn:aws:s3:::district-student-records"
+DISTRICT_REQUESTS = [
+    ("s3:DeleteObject", f"{RECORDS}/campus-02/transcript.pdf"),
+    ("s3:PutObject", f"{RECORDS}/campus-02/transcript.pdf"),
+    ("s3:GetObject", f"{RECORDS}/counseling/2026/notes.pdf"),
+    ("s3:PutBucketPolicy", RECORDS),
+    ("s3:DeleteBucket", "arn:aws:s3:::district-gradebook-app"),
+    ("s3:GetObject", "arn:aws:s3:::district-roster-exports/2026/roster.csv"),
+    ("sts:AssumeRole", "arn:aws:iam::111122223333:role/ITAdmin"),
+]
+
+
+def test_without_denies_is_what_the_request_gets_with_every_deny_taken_out():
+    """Every explicit Deny the district's principals get, checked against evaluating the same
+    request again with every Deny statement taken out of every layer."""
+    acct = load_account_file(EXAMPLE)
+    org = load_organization_file(ORG)
+    principals = [f"user/{name}" for name in acct.users] + [f"role/{name}" for name in acct.roles]
+    denied = 0
+    for principal in principals:
+        for (action, resource), mfa in itertools.product(DISTRICT_REQUESTS, ("true", "false")):
+            context = RequestContext.of([("aws:MultiFactorAuthPresent", mfa)])
+            request = acct.request(principal, action, resource, context=context)
+            try:
+                result = acct.evaluate(principal, request, organization=org)
+            except PolicyError:  # refused, such as for a key the request doesn't give
+                continue
+            if result.decision is not Decision.EXPLICIT_DENY:
+                continue
+            denied += 1
+            described = acct.resource_for(resource, action)
+            scps = org.scp_levels_for(acct.account_id,
+                                      service_linked=acct.is_service_linked(principal))
+            try:
+                without = evaluator.evaluate(
+                    request, [allows_only(p) for p in acct.policies_for(principal)],
+                    boundary=allows_only(acct.boundary_for(principal)),
+                    scps=[dataclasses.replace(level, policies=tuple(
+                        allows_only(p) for p in level.policies)) for level in scps],
+                    resource=dataclasses.replace(described, policy=allows_only(described.policy)),
+                )
+                expected = WithoutDenies(without.decision, without.not_allowed_by)
+            except UnsupportedPolicyFeature as exc:
+                expected = WithoutDenies(None, refusal=str(exc))
+            assert result.without_denies == expected, (principal, action, resource, mfa)
+    assert denied >= 20  # the district has plenty of Denies to check
 
 
 def test_evaluate_needs_the_organization_stated():

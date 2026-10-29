@@ -25,6 +25,7 @@ from iam_analyzer.models import (
     Resource,
     ScpLevel,
     TargetType,
+    WithoutDenies,
 )
 from iam_analyzer.organization import parse_organization
 
@@ -1219,3 +1220,49 @@ def test_boundary_and_scp_allows_are_never_overridden():
 def test_only_explicit_denies_override():
     assert check(GET, [BROAD_S3]).overridden == ()
     assert check(GET, []).overridden == ()
+
+
+# --- What an explicitly denied request would get without its Denies ---------------------
+
+
+def test_without_the_deny_the_request_would_be_allowed():
+    result = check(GET, [BROAD_S3, NO_GETS])
+    assert result.without_denies == WithoutDenies(Decision.ALLOW)
+    # Then the Allows the Deny overrides are the ones that would grant the request.
+    assert result.overridden == check(GET, [BROAD_S3]).grants
+
+
+@pytest.mark.parametrize("layers, overridden, blocked", [
+    ({"scps": org_path(ou=(NO_S3,))}, [("identity", "BroadS3")], (scp(SCHOOLS),)),
+    ({"boundary": GRADEBOOK_ONLY}, [], (BOUNDARY,)),
+], ids=["an SCP level", "the boundary"])
+def test_without_the_deny_another_layer_would_still_block_it(layers, overridden, blocked):
+    # An SCP never grants, so with an OU whose SCPs don't allow S3, the Deny still overrides the
+    # identity policy's Allow, and the OU would still block the request. A boundary that doesn't
+    # allow it blocks that Allow's way in too, so the Deny overrides nothing.
+    result = check(GET, [BROAD_S3, NO_GETS], **layers)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert overridden_by(result) == overridden
+    assert result.without_denies == WithoutDenies(Decision.IMPLICIT_DENY, blocked)
+
+
+def test_without_the_deny_no_identity_policy_would_allow_it():
+    assert check(GET, [NO_GETS]).without_denies == WithoutDenies(Decision.IMPLICIT_DENY,
+                                                                 (IDENTITY,))
+
+
+def test_without_the_deny_the_analyzer_cant_tell_where_awss_docs_disagree():
+    # The trust policy names alee directly, and alee's boundary doesn't allow sts:AssumeRole:
+    # without the Deny, evaluation would be refused (see the refusal test above).
+    no_assume = policy("NoAssume", deny("sts:AssumeRole", "*", sid="NoAssume"))
+    result = with_trust_policy(assume_by(ALEE), [no_assume], trusts({"AWS": ALEE}),
+                               boundary=NO_S3)
+    assert result.decision is Decision.EXPLICIT_DENY  # the Deny settles the answer itself
+    assert result.without_denies.decision is None
+    assert result.without_denies.refusal.startswith(
+        "the trust policy names the caller directly, and the caller's permissions boundary")
+
+
+def test_only_explicit_denies_say_what_they_would_get_without_denies():
+    assert check(GET, [BROAD_S3]).without_denies is None
+    assert check(GET, []).without_denies is None

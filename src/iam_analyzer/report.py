@@ -31,6 +31,7 @@ from iam_analyzer.models import (
     Condition,
     Decision,
     Effect,
+    EvaluationResult,
     Layer,
     MatchedStatement,
     OrgTarget,
@@ -40,6 +41,7 @@ from iam_analyzer.models import (
     PrincipalType,
     Statement,
     TargetType,
+    WithoutDenies,
 )
 from iam_analyzer.organization import Organization
 
@@ -562,8 +564,24 @@ def _outcome(answer: Answer) -> str:
         if result.overridden:
             verb = "The Deny overrides" if len(result.reasons) == 1 else "The Denies override"
             text += f" {verb} {'; '.join(_statement(m) for m in result.overridden)}."
+        if result.without_denies is not None:
+            text += f" {_without_denies(result)}"
         return text
     return f"can't: {'; '.join(_not_allowed(layer) for layer in result.not_allowed_by)}."
+
+
+def _without_denies(result: EvaluationResult) -> str:
+    """What an explicitly denied request would get if no Deny applied, such as "Without these
+    Denies, the request would be allowed."."""
+    without = result.without_denies
+    deny = "this Deny" if len(result.reasons) == 1 else "these Denies"
+    if without.decision is None:
+        return (f"Without {deny}, the analyzer can't tell whether the request would be allowed: "
+                f"{_sentence(without.refusal)}")
+    if without.decision is Decision.ALLOW:
+        return f"Without {deny}, the request would be allowed."
+    blocked = "; ".join(_not_allowed(layer) for layer in without.not_allowed_by)
+    return f"Without {deny}, the request would still be denied: {blocked}."
 
 
 def _refusal(refusal: Refusal) -> str:
@@ -923,6 +941,8 @@ def _answer_json(answer: Answer) -> dict:
         "statements": [] if result is None else [_matched_json(m) for m in result.reasons],
         "grants": [] if result is None else [_matched_json(m) for m in result.grants],
         "overridden": [] if result is None else [_matched_json(m) for m in result.overridden],
+        "without_denies": None if result is None or result.without_denies is None else
+        _without_denies_json(result.without_denies),
         "not_allowed_by": [] if result is None else [
             _layer_json(layer) for layer in result.not_allowed_by
         ],
@@ -930,6 +950,14 @@ def _answer_json(answer: Answer) -> dict:
             "kind": refusal.kind, "message": refusal.message, "keys": list(refusal.keys),
             "resource": refusal.resource,
         },
+    }
+
+
+def _without_denies_json(without: WithoutDenies) -> dict:
+    return {
+        "decision": None if without.decision is None else without.decision.value,
+        "not_allowed_by": [_layer_json(layer) for layer in without.not_allowed_by],
+        "refusal": without.refusal,
     }
 
 
