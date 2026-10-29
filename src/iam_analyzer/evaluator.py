@@ -33,7 +33,9 @@ The logic, in three steps:
 So boundaries and SCPs never grant anything by themselves; they only limit what identity
 and resource-based policies allow. An allowed result's `grants` are the Allows on a way in that
 works by itself: the identity policies' when the boundary allows too, a resource-based policy's
-grant that needs nothing else, and the trust policy's, which every way into a role needs.
+grant that needs nothing else, and the trust policy's, which every way into a role needs. An
+explicit Deny's result lists the Allows it overrode by the same rules, as `overridden`, so a
+boundary's or an SCP's Allow, which only limits, is never one of them.
 
 When matching a statement needs a condition key the request context says nothing about,
 there is no answer to give: evaluation raises one MissingContextError that names every such
@@ -231,7 +233,11 @@ def evaluate(
 
     denies = tuple(m for m in every if m.statement.effect is Effect.DENY)
     if denies:
-        return EvaluationResult(Decision.EXPLICIT_DENY, denies)
+        # `_grants` reads every statement it gets as an Allow, so it gets only the Allows.
+        allows = [(layer, [m for m in found if m.statement.effect is Effect.ALLOW])
+                  for layer, found in matched]
+        overridden = _grants(allows, bounded=boundary is not None)
+        return EvaluationResult(Decision.EXPLICIT_DENY, denies, overridden=overridden)
 
     # No Deny matched, so every matched statement is an Allow.
     grant = principals.strongest(m.principal_match for m in every if m.layer == resource_layer)
@@ -248,7 +254,9 @@ def evaluate(
 def _grants(
     matched: list[tuple[Layer, list[MatchedStatement]]], *, bounded: bool
 ) -> tuple[MatchedStatement, ...]:
-    """The Allows that grant an allowed request: the ones on a way in that works by itself.
+    """The Allows that grant an allowed request, or that a Deny overrode: the ones on a way in
+    that works by itself. `matched` must hold only Allows. A Deny in it would count as a grant,
+    and a Deny in the boundary as the boundary allowing.
 
     - An identity policy's Allow grants when the boundary, if there is one, allows the request
       too. When the boundary doesn't, the request got in some other way.

@@ -617,6 +617,19 @@ def test_evaluate_applies_the_organizations_scps():
     assert [layer.org_target.name for layer in denied.not_allowed_by] == ["Schools"]
 
 
+def test_a_deny_on_deleting_a_transcript_overrides_alees_s3_access_but_no_scp():
+    acct = load_account_file(EXAMPLE)
+    transcript = "arn:aws:s3:::district-student-records/campus-02/transcript.pdf"
+    request = acct.request("user/alee", "s3:DeleteObject", transcript)
+    result = acct.evaluate("user/alee", request, organization=load_organization_file(ORG))
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert [(m.policy_name, m.statement.sid) for m in result.overridden] == [
+        ("ITAdminFullS3", "FullS3Access")
+    ]
+    # FullAWSAccess allows it at the root and the account, but an SCP only limits.
+    assert "FullAWSAccess" not in {m.policy_name for m in result.overridden}
+
+
 def test_evaluate_needs_the_organization_stated():
     acct = load_account_file(EXAMPLE)
     with pytest.raises(TypeError, match="organization"):

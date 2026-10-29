@@ -208,15 +208,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def format_result(result: EvaluationResult, context: RequestContext = RequestContext()) -> str:
-    """The decision, then each statement behind it. `context` is the request's context, used to
-    show the values each condition was checked against."""
+    """The decision, then each statement behind it, and for an explicit Deny, the Allows it
+    overrides. `context` is the request's context, used to show the values each condition was
+    checked against."""
     lines = [result.decision.value]
     lines += [f"  {_not_allowed_message(layer)}" for layer in result.not_allowed_by]
-    for reason in result.reasons:
-        sid = reason.statement.sid or "(no Sid)"
-        lines.append(f"  {reason.statement.effect.value:<6} {_source(reason)}  Sid={sid}")
-        lines += [f"         {_condition(c, context)}" for c in reason.statement.conditions]
+    lines += _statement_lines(result.reasons, context)
+    if result.overridden:
+        lines.append("  The Deny overrides:" if len(result.reasons) == 1 else
+                     "  The Denies override:")
+        lines += _statement_lines(result.overridden, context)
     return "\n".join(lines)
+
+
+def _statement_lines(statements: Sequence[MatchedStatement], context: RequestContext) -> list[str]:
+    lines = []
+    for matched in statements:
+        sid = matched.statement.sid or "(no Sid)"
+        lines.append(f"  {matched.statement.effect.value:<6} {_source(matched)}  Sid={sid}")
+        lines += [f"         {_condition(c, context)}" for c in matched.statement.conditions]
+    return lines
 
 
 def _condition(condition: Condition, context: RequestContext) -> str:

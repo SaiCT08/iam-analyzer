@@ -64,13 +64,16 @@ Asked: Can anyone do s3:PutObject on arn:aws:s3:::district-student-records/campu
 when aws:MultiFactorAuthPresent is false or absent?
 
 - user/alee can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
+- user/rnguyen can't. Denied by RegistrarCampusRecords, Sid RequireMfaForChanges, through group
+  Registrars. The Deny overrides RegistrarCampusRecords, Sid ManageOwnCampusRecords, through group
+  Registrars.
 - role/ITAdmin passes: its own policies allow the request, but AWS checks MFA for a role when it's
   assumed, and no one can assume it without MFA (trust policy Sid AccountWithMfa).
   - AWS: "The temporary credentials returned by AssumeRole do not include MFA information in the
     context, so you cannot check individual API operations for MFA."
     https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html#scenarios
-- Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
-  role/GradebookVendor, role/TeacherSignIn.
+- Can't: user/jsmith, user/mgarcia, user/dpatel, user/kwong, user/tbrooks, role/GradebookVendor,
+  role/TeacherSignIn.
 
 Fix: Take ITAdminFullS3 off user alee, so IT staff change records only through the ITAdmin role,
 whose trust policy requires MFA. MFA conditions belong in users' policies and in trust policies, not
@@ -92,6 +95,7 @@ arn:aws:s3:::district-student-records/campus-02/transcript.pdf?
   - true: can. Granted by RegistrarCampusRecords, Sid ManageOwnCampusRecords, through group
     Registrars.
   - false, absent: can't. Denied by RegistrarCampusRecords, Sid RequireMfaForChanges, through group
+    Registrars. The Deny overrides RegistrarCampusRecords, Sid ManageOwnCampusRecords, through group
     Registrars.
 
 Fix: Registrars change records with MFA, by design. If they can't even with MFA, check
@@ -118,8 +122,14 @@ Maps to:
 Asked: Can anyone do s3:DeleteObject or s3:DeleteObjectVersion on
 arn:aws:s3:::district-student-records/campus-02/transcript.pdf?
 
-- Can't: user/jsmith, user/mgarcia, user/alee, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
-  role/ITAdmin, role/GradebookVendor, role/TeacherSignIn.
+- user/alee can't. Denied by DenyStudentRecordsDelete, Sid NoDeleteStudentRecords, through group
+  ITStaff; ProtectStudentRecords, Sid NoDeletesOrPolicyChanges, an SCP on OU Schools. The Denies
+  override ITAdminFullS3, Sid FullS3Access, attached directly.
+- role/ITAdmin can't. Denied by DenyStudentRecordsDelete, Sid NoDeleteStudentRecords, attached
+  directly; ProtectStudentRecords, Sid NoDeletesOrPolicyChanges, an SCP on OU Schools. The Denies
+  override ITAdminFullS3, Sid FullS3Access, attached directly.
+- Can't: user/jsmith, user/mgarcia, user/dpatel, user/rnguyen, user/kwong, user/tbrooks,
+  role/GradebookVendor, role/TeacherSignIn.
 
 Keep: DenyStudentRecordsDelete on every group and role that can write student records, and the
 ProtectStudentRecords SCP on the Schools OU.

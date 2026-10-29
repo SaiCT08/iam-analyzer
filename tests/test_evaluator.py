@@ -1162,3 +1162,60 @@ def test_a_trust_policy_is_part_of_every_grant():
 def test_denials_have_no_grants():
     assert check(GET, [policy("p", deny("*", "*"))]).grants == ()
     assert check(GET, []).grants == ()
+
+
+# --- Which Allows an explicit Deny overrides -------------------------------------------
+
+NO_GETS = policy("NoGets", deny("s3:GetObject", "*", sid="NoGets"))
+
+
+def overridden_by(result):
+    return [(r.policy_name, r.statement.sid) for r in result.overridden]
+
+
+def test_a_deny_lists_the_allows_it_overrides_and_never_itself():
+    # The identity policies match with an Allow and a Deny. `_grants` counts every statement it
+    # gets as an Allow, so it must get only the Allows, or the Deny would be listed too.
+    result = check(GET, [BROAD_S3, NO_GETS])
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert overridden_by(result) == [("identity", "BroadS3")]
+
+
+def test_a_deny_with_no_matching_grant_lists_nothing():
+    assert check(GET, [NO_GETS]).overridden == ()
+    assert check(GET, [policy("Put", allow("s3:PutObject", OBJECT)), NO_GETS]).overridden == ()
+
+
+def test_an_identity_allow_the_boundary_blocks_isnt_overridden():
+    result = check(GET, [BROAD_S3, NO_GETS], boundary=GRADEBOOK_ONLY)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert result.overridden == ()
+
+
+def test_a_deny_in_the_boundary_doesnt_count_as_the_boundary_allowing():
+    # The boundary's only matching statement is its Deny. Read as an Allow, it would make the
+    # identity policy's Allow look like it gets through the boundary.
+    result = check(GET, [BROAD_S3], boundary=policy("Bound", deny("s3:GetObject", "*")))
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert result.overridden == ()
+
+
+def test_a_deny_overrides_bucket_policy_and_trust_policy_grants():
+    result = with_bucket_policy(get_by(KWONG), [NO_GETS], grant({"AWS": KWONG}, sid="Kwong"))
+    assert overridden_by(result) == [(BUCKET, "Kwong")]
+    no_assume = policy("NoAssume", deny("sts:AssumeRole", "*", sid="NoAssume"))
+    result = with_trust_policy(assume_by(ALEE), [ASSUME, no_assume],
+                               trusts({"AWS": "111122223333"}, Sid="Account"))
+    assert overridden_by(result) == [("Assume", "Assume"), (ITADMIN, "Account")]
+
+
+def test_boundary_and_scp_allows_are_never_overridden():
+    # Both allow the request, but they only limit, so only the identity policy's Allow counts.
+    result = check(GET, [BROAD_S3, NO_GETS], boundary=policy("Bound", allow("s3:*", "*")),
+                   scps=org_path())
+    assert overridden_by(result) == [("identity", "BroadS3")]
+
+
+def test_only_explicit_denies_override():
+    assert check(GET, [BROAD_S3]).overridden == ()
+    assert check(GET, []).overridden == ()

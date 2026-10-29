@@ -264,6 +264,11 @@ class EvaluationResult:
     # itself (see `evaluator`). An identity policy's Allow that the boundary blocks isn't one, and
     # neither is any boundary or SCP statement, since those only limit. Empty otherwise.
     grants: tuple[MatchedStatement, ...] = field(default_factory=tuple)
+    # For EXPLICIT_DENY: the Allows the Deny overrode that would grant the request, by the same
+    # rules as `grants`, so no boundary or SCP statement, and no identity policy's Allow that the
+    # boundary blocks. Whether each other layer, such as every SCP level, would allow the request
+    # without the Deny isn't checked. Empty otherwise.
+    overridden: tuple[MatchedStatement, ...] = field(default_factory=tuple)
 
     @property
     def allowed(self) -> bool:

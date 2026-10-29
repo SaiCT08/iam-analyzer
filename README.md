@@ -292,7 +292,15 @@ iam-analyzer check \
 EXPLICIT_DENY
   Deny   arn:aws:s3:::district-student-records (resource-based policy, names everyone)  Sid=OnlyITAdminChangesThePolicy
          ArnNotEquals aws:PrincipalArn: arn:aws:iam::111122223333:role/ITAdmin (request: arn:aws:iam::111122223333:user/alee)
+  The Deny overrides:
+  Allow  ITAdminFullS3  Sid=FullS3Access
 ```
+
+Below the Deny is the Allow it overrides: `ITAdminFullS3` gives alee every S3 action. An explicit
+Deny lists each Allow it overrides that would grant the request: an identity policy's Allow when
+the boundary allows too, a bucket policy's grant that needs nothing else, and a trust policy's
+Allow. A boundary's or an SCP's Allow never counts, since those only limit. Whether every other
+layer, such as each SCP level, would let the request through without the Deny isn't checked.
 
 The analyzer reads the caller from `aws:PrincipalArn`. With `--account`, the file fills it in,
 which needs the file's `AccountId`. With `--policy`, give it with `--context`, and give the bucket
@@ -445,7 +453,12 @@ iam-analyzer check \
 ```
 EXPLICIT_DENY
   Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges
+  The Deny overrides:
+  Allow  ITAdminFullS3  Sid=FullS3Access
 ```
+
+`FullAWSAccess` and `SchoolServicesOnly` allow the request at their levels, but they aren't
+listed: an SCP only limits.
 
 The rules follow AWS:
 - Every level must allow the request: the root, each OU on the way down, and the account itself.
@@ -585,6 +598,8 @@ iam-analyzer check \
 EXPLICIT_DENY
   Deny   RegistrarCampusRecords (via group Registrars)  Sid=RequireMfaForChanges
          BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)
+  The Deny overrides:
+  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords
 ```
 
 The indented line shows each condition, with the value the request had. AWS leaves
@@ -677,6 +692,13 @@ In a check that forbids access, any value that allows the request is a FAIL, nev
 MFA Deny that skips requests made with access keys fails the check, and the report lists
 `absent` as the value that gets in. A check takes the worst result of its questions: FAIL, then
 DEPENDS, then CAN'T TELL, then PASS.
+
+When a Deny is why someone can't, and it overrides an Allow that would grant the request, the line
+names that Allow: "The Deny overrides ITAdminFullS3, Sid FullS3Access, attached directly." Such a
+principal gets a line of its own even when the check passes, so a passing check shows which Denies
+it relies on. In the district, "No one can delete student records" passes, and its lines show the
+Denies overriding alee's and ITAdmin's `ITAdminFullS3`. The JSON lists those Allows as
+`overridden`, next to `grants`.
 
 Exit codes:
 - `0`: every check passes, and no finding is high or critical;

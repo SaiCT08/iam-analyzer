@@ -83,6 +83,8 @@ def test_conditional_deny(capsys, tmp_path):
         "EXPLICIT_DENY",
         "  Deny   https_only.json  Sid=HttpsOnly",
         "         Bool aws:SecureTransport: false (request: false)",
+        "  The Deny overrides:",
+        "  Allow  teacher_read_grades.json  Sid=ReadStudentRecords",
     ]
     code, _, _ = run(capsys, *args, "--context", "aws:SecureTransport=true")
     assert code == EXIT_ALLOWED
@@ -190,6 +192,9 @@ def test_boundary_deny_is_explicit(capsys):
     assert out.splitlines() == [
         "EXPLICIT_DENY",
         "  Deny   gradebook_vendor_boundary.json (permissions boundary)  Sid=NoBucketDeletion",
+        # The boundary's own Allow covers the bucket, so the identity policy's Allow is overridden.
+        "  The Deny overrides:",
+        "  Allow  it_admin_full_s3.json  Sid=FullS3Access",
     ]
 
 
@@ -228,6 +233,8 @@ def test_scp_deny_overrides_identity_allow(capsys):
     assert out.splitlines() == [
         "EXPLICIT_DENY",
         "  Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges",
+        "  The Deny overrides:",
+        "  Allow  ITAdminFullS3  Sid=FullS3Access",
     ]
 
 
@@ -307,6 +314,25 @@ def test_aws_username_is_replaced_by_the_callers_name(capsys, tmp_path):
     assert code == EXIT_DENIED
 
 
+def test_an_explicit_deny_lists_the_allows_it_overrides(capsys):
+    args = ["--account", ACCOUNT, "--org", ORG, "--action", "s3:DeleteObject",
+            "--resource", "arn:aws:s3:::district-student-records/campus-02/transcript.pdf"]
+    code, out, _ = run(capsys, *args, "--principal", "user/alee")
+    assert code == EXIT_DENIED
+    assert out.splitlines() == [
+        "EXPLICIT_DENY",
+        "  Deny   DenyStudentRecordsDelete (via group ITStaff)  Sid=NoDeleteStudentRecords",
+        "  Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges",
+        # FullAWSAccess and SchoolServicesOnly allow it too, but SCPs only limit.
+        "  The Denies override:",
+        "  Allow  ITAdminFullS3  Sid=FullS3Access",
+    ]
+    # A teacher has no Allow for deleting, so the Denies override nothing.
+    code, out, _ = run(capsys, *args, "--principal", "user/jsmith")
+    assert code == EXIT_DENIED
+    assert "override" not in out
+
+
 def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
     # Matched as literal text, this Deny would never apply and the request would be allowed.
     path = account_file(tmp_path, {
@@ -323,7 +349,8 @@ def test_deny_with_a_policy_variable_applies_to_the_caller(capsys, tmp_path):
                        "--action", "iam:DeleteUser",
                        "--resource", "arn:aws:iam::111122223333:user/alee")
     assert code == EXIT_DENIED
-    assert out.splitlines() == ["EXPLICIT_DENY", "  Deny   NoSelfDelete  Sid=(no Sid)"]
+    assert out.splitlines() == ["EXPLICIT_DENY", "  Deny   NoSelfDelete  Sid=(no Sid)",
+                                "  The Deny overrides:", "  Allow  AdminAll  Sid=(no Sid)"]
 
 
 def test_a_role_has_no_user_name(capsys, tmp_path):
@@ -534,6 +561,8 @@ def test_registrar_changes_need_mfa(capsys):
         "EXPLICIT_DENY",
         "  Deny   RegistrarCampusRecords (via group Registrars)  Sid=RequireMfaForChanges",
         "         BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)",
+        "  The Deny overrides:",
+        "  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords",
     ]
 
     code, out, _ = run(capsys, *args, "--context", "aws:MultiFactorAuthPresent=true")
@@ -680,6 +709,8 @@ def test_a_bucket_policy_deny_shows_its_condition(capsys):
         "Sid=OnlyITAdminChangesThePolicy",
         "         ArnNotEquals aws:PrincipalArn: arn:aws:iam::111122223333:role/ITAdmin "
         "(request: arn:aws:iam::111122223333:user/alee)",
+        "  The Deny overrides:",
+        "  Allow  ITAdminFullS3  Sid=FullS3Access",
     ]
 
 

@@ -449,14 +449,14 @@ def _items_markdown(
     """A check's items. `inner` is for a role's second question, which only shows the items that
     didn't pass, and its outsiders."""
     check = result.check
-    # A principal whose every item passed is listed once, by name, unless an item has a note to
-    # show: a role that passes only because no one can assume it without MFA.
+    # A principal whose every item passed is listed once, by name, unless an item has more to
+    # say (`_says_more`).
     unpassed = {item.principal for item in result.items
-                if item.result is not Result.PASS or _shows_note(item)}
+                if item.result is not Result.PASS or _says_more(item, inner)}
     lines: list[str] = []
     passed: list[str] = []
     refused: dict[str, list[str]] = {}  # message: the items that got only that refusal
-    alike: dict[str, list[str]] = {}  # what an item says: the items that say just that
+    alike: dict[str, list[Item]] = {}  # what an item says: the items that say just that
     for item in result.items:
         if item.principal not in unpassed:
             if item.principal not in passed:
@@ -465,17 +465,18 @@ def _items_markdown(
         label = _label(item, check)
         reasons = {_refusal(answer.refusal) for answer in item.answers if answer.refusal}
         texts = {_outcome(answer) for answer in item.answers}
-        if item.result is Result.PASS and not _shows_note(item):
+        if item.result is Result.PASS and not _says_more(item, inner):
             passed.append(label)
         elif item.result is Result.CANT_TELL and len(reasons) == 1 and all(
                 answer.refusal for answer in item.answers) and not _shows_note(item):
             refused.setdefault(reasons.pop(), []).append(label)
         elif len(texts) == 1 and not _shows_note(item):
-            alike.setdefault(texts.pop(), []).append(label)
+            alike.setdefault(texts.pop(), []).append(item)
         else:
             lines += _item_markdown(item, label, account, depth)
     # Items that say the same thing share a line, in the order they were asked.
-    lines[:0] = [_bullet(f"{', '.join(labels)} {text}", depth) for text, labels in alike.items()]
+    lines[:0] = [_bullet(f"{', '.join(_alike_labels(items, result))} {text}", depth)
+                 for text, items in alike.items()]
     for message, labels in refused.items():
         who = "everyone asked" if len(labels) == len(result.items) else ", ".join(labels)
         lines.append(_bullet(f"Can't tell for {who}: {message}", depth))
@@ -490,6 +491,26 @@ def _items_markdown(
     if not result.items and not result.outside:
         lines.append(_bullet("No one else to ask."))
     return lines
+
+
+def _alike_labels(items: list[Item], result: CheckResult) -> list[str]:
+    """The labels of items that say the same thing. A principal whose every item says it is
+    named once, as a principal whose every item passed is."""
+    labels: list[str] = []
+    for item in items:
+        mine = sum(other.principal == item.principal for other in result.items)
+        whole = sum(other.principal == item.principal for other in items) == mine
+        label = item.principal if whole else _label(item, result.check)
+        if label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _says_more(item: Item, inner: bool) -> bool:
+    """Whether an item that passed still gets a line of its own: it has a role note to show, or,
+    outside a role's second question, a Deny that the check relies on overrides an Allow."""
+    return _shows_note(item) or (not inner and any(
+        answer.result is not None and answer.result.overridden for answer in item.answers))
 
 
 def _shows_note(item: Item) -> bool:
@@ -528,14 +549,20 @@ def _item_markdown(item: Item, label: str, account: Account, depth: int = 0) -> 
 
 
 def _outcome(answer: Answer) -> str:
-    """What one answer says, such as "can. Granted by Read, Sid R, attached directly."."""
+    """What one answer says, such as "can. Granted by Read, Sid R, attached directly.", or "can't.
+    Denied by NoDeletes, Sid D, attached directly. The Deny overrides Read, Sid R, attached
+    directly."."""
     if answer.refusal is not None:
         return f"can't tell: {_refusal(answer.refusal)}"
     result = answer.result
     if result.allowed:
         return f"can. Granted by {'; '.join(_statement(m) for m in result.grants)}."
     if result.decision is Decision.EXPLICIT_DENY:
-        return f"can't. Denied by {'; '.join(_statement(m) for m in result.reasons)}."
+        text = f"can't. Denied by {'; '.join(_statement(m) for m in result.reasons)}."
+        if result.overridden:
+            verb = "The Deny overrides" if len(result.reasons) == 1 else "The Denies override"
+            text += f" {verb} {'; '.join(_statement(m) for m in result.overridden)}."
+        return text
     return f"can't: {'; '.join(_not_allowed(layer) for layer in result.not_allowed_by)}."
 
 
@@ -895,6 +922,7 @@ def _answer_json(answer: Answer) -> dict:
         "decision": None if result is None else result.decision.value,
         "statements": [] if result is None else [_matched_json(m) for m in result.reasons],
         "grants": [] if result is None else [_matched_json(m) for m in result.grants],
+        "overridden": [] if result is None else [_matched_json(m) for m in result.overridden],
         "not_allowed_by": [] if result is None else [
             _layer_json(layer) for layer in result.not_allowed_by
         ],

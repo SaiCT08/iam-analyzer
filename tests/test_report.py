@@ -150,10 +150,42 @@ def test_a_prohibition_lists_the_values_that_allow_it():
             "or absent?") in flat("\n".join(lines))
     assert has_block(lines, [
         f"- user/clerk, depending on {MFA}:",
-        "  - false: can't. Denied by SkipsAccessKeys, statement 1, attached directly.",
+        "  - false: can't. Denied by SkipsAccessKeys, statement 1, attached directly. The Deny "
+        "overrides",
+        "    SkipsAccessKeys, statement 0, attached directly.",
         "  - absent: can. Granted by SkipsAccessKeys, statement 0, attached directly.",
     ])
     assert "- Not asked: role/Admin." in lines
+
+
+def test_a_passing_check_shows_whom_each_deny_keeps_out():
+    graded = report(check("a", "only", Actions=["s3:PutObject"], Context={MFA: "false"}))
+    lines = section(to_markdown(graded), "Check a")
+    assert lines[0] == "## PASS: Check a (high)"
+    # Without MFA, each writer's Deny overrides their Allow, so the check relies on it. Their
+    # lines say so. The others have no Allow to override, and stay in the "Can't" list.
+    assert has_block(lines, [
+        "- user/registrar can't. Denied by Write, Sid NeedsMfa, attached directly. The Deny "
+        "overrides Write,",
+        "  Sid Write, attached directly.",
+        "- user/clerk can't. Denied by SkipsAccessKeys, statement 1, attached directly. The Deny "
+        "overrides",
+        "  SkipsAccessKeys, statement 0, attached directly.",
+        "- Can't: user/teacher, user/reader, role/Admin.",
+    ])
+    [registrar] = [i for i in to_json(graded)["checks"][0]["items"]
+                   if i["principal"] == "user/registrar"]
+    [overridden] = registrar["answers"][0]["overridden"]
+    assert (overridden["policy"], overridden["sid"], overridden["effect"]) == (
+        "Write", "Write", "Allow")
+
+
+def test_a_principal_whose_every_item_says_the_same_is_named_once():
+    other = f"{BUCKET}/campus-01/transcript.pdf"
+    lines = section(markdown(check("a", "only", Resources=[OBJECT, other])), "Check a")
+    assert "- user/teacher can. Granted by Read, Sid Read, through group Teachers." in lines
+    assert "- user/reader, role/Admin can. Granted by Unnamed, statement 0, attached directly." in (
+        lines)
 
 
 def test_refusals_are_grouped_and_say_what_would_settle_them():
@@ -216,6 +248,8 @@ def role_report(trust, policies=("Read",), bucket_policy=None, **users):
                                 "Resource": f"{BUCKET}/*"}]},
         "AssumeAdmin": {"Statement": [{"Sid": "AssumeAdmin", "Effect": "Allow",
                                        "Action": "sts:AssumeRole", "Resource": f"{ROLES}/Admin"}]},
+        "NoAssume": {"Statement": [{"Sid": "NoAssume", "Effect": "Deny",
+                                    "Action": "sts:AssumeRole", "Resource": "*"}]},
     }, "Users": users,
         "Roles": {"Admin": {"Policies": list(policies), "AssumeRolePolicyDocument": trust}},
         "Resources": {BUCKET: {} if bucket_policy is None else {"Policy": bucket_policy}}},
@@ -271,6 +305,19 @@ def test_a_role_someone_can_assume_without_mfa_lists_who():
     assert admin["note"]["assume"]["result"] == "FAIL"
     assert [i["principal"] for i in admin["note"]["assume"]["items"]
             if i["result"] == "FAIL"] == ["user/it"]
+
+
+def test_who_can_assume_a_role_leaves_out_whom_a_deny_stops():
+    trust = {"Statement": [ACCOUNT_ALLOW]}
+    graded = role_report(trust, it={"Policies": ["AssumeAdmin"]},
+                         blocked={"Policies": ["AssumeAdmin", "NoAssume"]})
+    lines = section(to_markdown(graded), "Check a")
+    start = next(i for i, line in enumerate(lines) if line.startswith("  - FAIL: "))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("- "))
+    note = "\n".join(lines[start:end])
+    assert "- user/it can." in note
+    # Its Deny overrides AssumeAdmin, but the note lists only who can assume the role.
+    assert "user/blocked" not in note
 
 
 def test_an_outsider_who_can_assume_the_role_is_cant_tell():
