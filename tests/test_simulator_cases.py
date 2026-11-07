@@ -22,7 +22,8 @@ READ = {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::d
 GET = {"action": "s3:GetObject", "resource": "arn:aws:s3:::district-student-records/2026/roster.csv"}
 KWONG = "arn:aws:iam::111122223333:user/kwong"
 CAMPUS_APP = "arn:aws:iam::111122223333:role/district/CampusApp"
-# Built when the tests run, so that this file itself passes the safety scan.
+# Built when the tests run, so that this file itself passes the safety scan. OTHER_ACCOUNT is
+# made up on purpose: the scan must catch an account ID that isn't one of AWS's examples.
 OTHER_ACCOUNT = "9876543210" + "98"
 ACCESS_KEY_ID = "AKIA" + "IOSFODNN7EXAMPLE"  # AWS's documented example
 
@@ -168,7 +169,8 @@ def test_only_example_account_ids_are_sent():
 
 
 def test_the_safety_scan():
-    # A request ID is a UUID, and its last group can be 12 digits by chance.
+    # A request ID is a UUID, and its last group can be 12 digits by chance. This one is made up,
+    # and its last group is 12 digits on purpose.
     assert safety_problems('"RequestId": "1cdb5b0a-4c15-11e5-b121-987654321098"') == []
     assert safety_problems("arn:aws:iam::111122223333:user/jsmith") == []
     assert safety_problems(f"arn:aws:iam::{OTHER_ACCOUNT}:user/jsmith") == [

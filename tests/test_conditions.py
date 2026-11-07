@@ -70,7 +70,7 @@ TAGS_AND_ARN = {
         "aws:PrincipalTag/role": ["audit", "security"],
     },
     "ArnLike": {"aws:PrincipalArn": [
-        "arn:aws:iam::222222222222:user/Ana", "arn:aws:iam::222222222222:user/Mary"]},
+        "arn:aws:iam::111122223333:user/Ana", "arn:aws:iam::111122223333:user/Mary"]},
 }
 TAGS_AND_NOT_ARN = {
     "StringEquals": TAGS_AND_ARN["StringEquals"],
@@ -80,7 +80,7 @@ SAME_TEAM = {"StringNotEquals": {"s3:ExistingObjectTag/Team": "${aws:PrincipalTa
 
 
 def user(name):
-    return f"arn:aws:iam::222222222222:user/{name}"
+    return f"arn:aws:iam::111122223333:user/{name}"
 
 
 def tags(department=None, role=None, arn=None):
@@ -128,7 +128,7 @@ def tags(department=None, role=None, arn=None):
         (OFFICE_IP, {"aws:SourceIp": "2001:db8:1234:5678::1"}, True),
         # Operators, ArnEquals.
         (SNS_TOPIC, {"aws:SourceArn": "arn:aws:sns:us-west-2:123456789012:TOPIC-ID"}, True),
-        (SNS_TOPIC, {"aws:SourceArn": "arn:aws:sns:us-west-2:777788889999:TOPIC-ID"}, False),
+        (SNS_TOPIC, {"aws:SourceArn": "arn:aws:sns:us-west-2:444455556666:TOPIC-ID"}, False),
         (SNS_TOPIC, {"aws:SourceArn": None}, False),
         # Operators, ForAllValues:ArnLike.
         (DISTRIBUTIONS, {"logs:LogGeneratingResourceArns":
@@ -140,7 +140,7 @@ def tags(department=None, role=None, arn=None):
             DISTRIBUTION.format("123456789012", "costcenter"),
             DISTRIBUTION.format("123456789012", "admin")]}, True),
         (DISTRIBUTIONS, {"logs:LogGeneratingResourceArns":
-                         DISTRIBUTION.format("777788889999", "costcenter")}, False),
+                         DISTRIBUTION.format("444455556666", "costcenter")}, False),
         (DISTRIBUTIONS, {"logs:LogGeneratingResourceArns": None}, True),
         # Operators, IfExists and Null.
         (INSTANCE_TYPE, {"ec2:InstanceType": "t1.micro"}, True),

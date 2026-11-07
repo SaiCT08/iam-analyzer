@@ -288,7 +288,8 @@ def test_example_account_boundaries():
 
 def test_account_id_is_optional():
     assert account().account_id is None
-    # A string keeps the leading zero that some account IDs have.
+    # A string keeps the leading zero that some account IDs have. None of AWS's example IDs
+    # starts with 0, so this one is made up on purpose.
     assert account(AccountId="012345678901").account_id == "012345678901"
 
 

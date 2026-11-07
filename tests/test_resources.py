@@ -150,7 +150,7 @@ def test_describe_says_the_resource_has_no_resource_based_policy():
     "resource, expected",
     [
         ("arn:aws:iam::111122223333:user/jsmith", "111122223333"),
-        ("arn:aws:sqs:us-east-1:012345678901:alerts", "012345678901"),
+        ("arn:aws:sqs:us-east-1:444455556666:alerts", "444455556666"),
         (BUCKET, None),  # S3 ARNs name no account
         ("arn:aws:iam::aws:policy/ReadOnlyAccess", None),
         ("*", None),
