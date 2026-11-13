@@ -1,6 +1,6 @@
 # Review: policy evaluation vs AWS documentation
 
-Reviewed on 2026-10-21 against commit `ef215af` ("Add service control policy (SCP) support"). Line
+Reviewed on 2026-10-21 against commit `e10119a` ("Add service control policy (SCP) support"). Line
 numbers refer to that commit.
 
 ## Scope and method
