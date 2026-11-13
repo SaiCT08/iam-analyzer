@@ -143,7 +143,7 @@ iam-analyzer report --account examples/accounts/district.json \
   thing and the simulator does another, and the analyzer follows the documentation. In 7, the
   analyzer refuses a case that AWS answered, because AWS's documentation doesn't settle it. See
   [the simulator check](docs/simulator-check.md).
-- **Tests.** 1,526 tests, including an offline replay of every simulator fixture, golden copies
+- **Tests.** 1,527 tests, including an offline replay of every simulator fixture, golden copies
   of both example reports, and a run of every `check` example in this README. They run on Python
   3.11, 3.12 and 3.13 on every push and pull request, without AWS access.
 - **Where AWS's docs disagree.** The simulator check and a review of AWS's documentation turned up
@@ -441,7 +441,7 @@ EXPLICIT_DENY
   Deny   arn:aws:s3:::anycompany-prod-customer-data (resource-based policy, names everyone)  Sid=OnlyTheDataTeam
          ArnNotLike aws:PrincipalArn: arn:aws:iam::111122223333:user/data/*, arn:aws:iam::111122223333:role/DataPipeline (request: arn:aws:iam::111122223333:role/OnCallAdmin)
   The Deny overrides:
-  Allow  AdministratorAccess  Sid=(no Sid)
+  Allow  AdministratorAccess  statement 0
   Without this Deny, the request would be allowed.
 ```
 
@@ -642,7 +642,7 @@ iam-analyzer check \
 EXPLICIT_DENY
   Deny   ProtectAuditLogging (SCP on the root)  Sid=NoAuditLoggingChanges
   The Deny overrides:
-  Allow  AdministratorAccess  Sid=(no Sid)
+  Allow  AdministratorAccess  statement 0
   Without this Deny, the request would be allowed.
 ```
 

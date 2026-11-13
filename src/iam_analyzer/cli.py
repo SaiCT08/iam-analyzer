@@ -240,10 +240,17 @@ def _without_denies_lines(result: EvaluationResult) -> list[str]:
 def _statement_lines(statements: Sequence[MatchedStatement], context: RequestContext) -> list[str]:
     lines = []
     for matched in statements:
-        sid = matched.statement.sid or "(no Sid)"
-        lines.append(f"  {matched.statement.effect.value:<6} {_source(matched)}  Sid={sid}")
+        lines.append(f"  {matched.statement.effect.value:<6} {_source(matched)}  {_sid(matched)}")
         lines += [f"         {_condition(c, context)}" for c in matched.statement.conditions]
     return lines
+
+
+def _sid(matched: MatchedStatement) -> str:
+    """The statement's Sid, or its position in its policy when it has none, as reports name it:
+    "Sid=Read" or "statement 0"."""
+    if matched.statement.sid:
+        return f"Sid={matched.statement.sid}"
+    return f"statement {matched.index}" if matched.index is not None else "(no Sid)"
 
 
 def _condition(condition: Condition, context: RequestContext) -> str:
