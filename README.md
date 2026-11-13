@@ -1,13 +1,97 @@
 # iam-analyzer
 
-An AWS IAM effective-permissions analyzer, written in Python. Given a set of policies, it answers
-"can this principal perform this action on this resource?" using AWS's policy evaluation logic, and
-explains *which statements* produced the answer. It's general-purpose and works with any AWS account.
-Texas school districts (TEA/FERPA) are the first showcase use case, so the examples use district
-policies. Compliance reports grade an account against a framework's checks, and a framework is a
-data file, so new ones need no code (see [Compliance reports](#compliance-reports)).
+[![Tests](https://github.com/SaiCT08/iam-analyzer/actions/workflows/tests.yml/badge.svg)](https://github.com/SaiCT08/iam-analyzer/actions/workflows/tests.yml)
 
-It works entirely on local policy JSON files. No AWS account or credentials are needed.
+iam-analyzer answers "can this principal do this action on this resource?" for an AWS account, the
+way AWS's policy evaluation logic would, and names the statements behind the answer. It reads the
+account's policies from local JSON files: identity policies, permissions boundaries, SCPs, S3 bucket
+policies and role trust policies, with their conditions and policy variables. It never calls AWS and
+needs no credentials. Where AWS's documentation doesn't settle a case, it refuses and says why,
+instead of guessing.
+
+`iam-analyzer report` grades an account against a compliance framework's checks: PASS, FAIL,
+DEPENDS or CAN'T TELL, each with the statements behind it and a fix. It also flags policies that AWS
+evaluates differently from how they read. A framework is a data file, so adding one needs no code.
+The examples are a Texas school district's student records, with checks mapped to FERPA and NIST SP
+800-53, but nothing in the engine is specific to districts.
+
+**Demo video:** link coming soon.
+
+## A report
+
+Part of the district report ([the whole report](tests/golden/district_report.md)):
+
+```
+| Result | Checks |
+|---|---|
+| FAIL | 3 |
+| DEPENDS | 1 |
+| CAN'T TELL | 1 |
+| PASS | 2 |
+
+Findings: 1 high, 1 low.
+
+## FAIL: Only counselors can read counseling notes (high)
+
+Asked: Can anyone but user/kwong do s3:GetObject on
+arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
+
+- user/jsmith can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Teachers.
+- user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
+- user/alee, role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
+- Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
+- Not asked: user/kwong.
+
+Fix: Narrow TeacherReadGrades from district-student-records/* to the folders teachers need, and add
+a bucket policy Deny on counseling/* for everyone but counselors, using aws:PrincipalArn as
+OnlyITAdminChangesThePolicy does.
+```
+
+## Install and run
+
+It needs Python 3.11 or later, and nothing else to run.
+
+```sh
+git clone https://github.com/SaiCT08/iam-analyzer.git
+cd iam-analyzer
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Ask one question:
+
+```sh
+iam-analyzer check --account examples/accounts/district.json --principal user/jsmith \
+  --action s3:DeleteObject --resource arn:aws:s3:::district-student-records/2026/roster.csv
+```
+
+Grade the example district against its framework, and save the report as JSON too:
+
+```sh
+iam-analyzer report --account examples/accounts/district.json \
+  --org examples/organizations/district.json --framework examples/frameworks/district.json \
+  --json report.json
+```
+
+Run the tests with `pytest`. [Usage](#usage) and [Compliance reports](#compliance-reports) cover
+every option.
+
+## How it's checked
+
+- **Against AWS's own evaluator.** In 121 cases, the analyzer and AWS's IAM policy simulator
+  (`iam:SimulateCustomPolicy`) were given the same policies and request, and AWS's raw answers are
+  saved as fixtures that the tests replay offline. 105 agree. In 9, AWS's documentation says one
+  thing and the simulator does another, and the analyzer follows the documentation. In 7, the
+  analyzer refuses a case that AWS answered, because AWS's documentation doesn't settle it. See
+  [the simulator check](docs/simulator-check.md).
+- **Tests.** 1,468 tests, including an offline replay of every simulator fixture and a golden copy
+  of the district report. They run on every push and pull request, without AWS access.
+- **Where AWS's docs disagree.** The simulator check and a review of AWS's documentation turned up
+  15 places where the documentation contradicts itself or doesn't match what the simulator did:
+  [AWS doc findings](docs/aws-doc-findings.md).
+- **Why it does what it does.** Every judgment call and every refusal, with its evidence:
+  [design decisions](docs/design-decisions.md).
 
 ## Status
 
@@ -56,14 +140,6 @@ Not supported yet (see [every refusal](docs/design-decisions.md#every-refusal)):
 - Resource-based policies other than S3 bucket policies and role trust policies. Another service's
   resource can only be described as having none.
 - Cross-account requests, KMS keys, and requests by SAML or OIDC users are refused.
-
-## Setup
-
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
 
 ## Usage
 
@@ -675,20 +751,8 @@ The Markdown report goes to the screen, and `--json` writes the same report as J
 the SCPs, and `--no-org` says the account isn't in an AWS organization. One of them is required:
 leaving SCPs out without saying so could allow what they deny.
 
-Part of the district report ([the whole report](tests/golden/district_report.md)):
-
-```
-## FAIL: Only counselors can read counseling notes (high)
-
-Asked: Can anyone but user/kwong do s3:GetObject on
-arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
-
-- user/jsmith can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Teachers.
-- user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
-- user/alee, role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
-- Not asked: user/kwong.
-```
+[A report](#a-report), at the top of this page, is part of the district report, and
+[the whole report](tests/golden/district_report.md) is in the tests.
 
 ### Results
 
@@ -935,3 +999,9 @@ analyzer itself doesn't need boto3. See `simulator_check/__init__.py`.
 `tests/golden/district_report.md` is the district report, exactly as `iam-analyzer report` prints
 it, and `tests/test_report.py` checks that the report still matches it. After an intended change
 to the report, regenerate it with the command in that test's docstring and review the diff.
+
+## Copyright
+
+Copyright 2026 Sai Thupakula. All rights reserved.
+
+The code is published for viewing only.
