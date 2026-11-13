@@ -145,7 +145,7 @@ def _arn(text: str) -> list[str]:
     fields = text.split(":", 5)
     if len(fields) != 6:
         raise ValueError(
-            "expected an ARN with six fields, such as arn:aws:iam::111122223333:role/ITAdmin"
+            "expected an ARN with six fields, such as arn:aws:iam::111122223333:role/ExampleRole"
         )
     return fields
 

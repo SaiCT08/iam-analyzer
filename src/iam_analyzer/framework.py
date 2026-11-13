@@ -349,7 +349,7 @@ def _id(fields: dict, where: str) -> str:
     value = fields.get("Id")
     if not (isinstance(value, str) and _ID.fullmatch(value)):
         raise FrameworkError(
-            f"{where}: 'Id' must be letters, digits and hyphens, such as \"counseling-notes\", "
+            f"{where}: 'Id' must be letters, digits and hyphens, such as \"no-public-buckets\", "
             f"got {value!r}"
         )
     return value

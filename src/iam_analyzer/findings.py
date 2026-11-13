@@ -289,7 +289,7 @@ NO_VALUE = FindingType(
     why="The variable's key is never in these principals' requests, such as aws:username for a "
     "role, and it has no default, so the pattern or value it's in matches nothing: a Resource "
     "covers nothing, a NotResource excludes nothing, StringEquals fails and StringNotEquals holds.",
-    fix="Give the variable a default, as in ${aws:PrincipalTag/campus, 'none'}, or attach the "
+    fix="Give the variable a default, as in ${aws:PrincipalTag/team, 'none'}, or attach the "
     "policy only to principals that have the key.",
     fixtures=(
         Fixture("variables_without_a_value/allow_control", "IMPLICIT_DENY"),
@@ -306,8 +306,7 @@ NOT_PRINCIPAL = FindingType(
     why="Which principals NotPrincipal leaves out depends on the service, which may check the "
     "account, then the role, then the session, so it can deny more than it seems to. The "
     "analyzer refuses a request the statement applies to.",
-    fix='Use "Principal": "*" with an ArnNotEquals aws:PrincipalArn condition instead, as the '
-    "district's OnlyITAdminChangesThePolicy statement does.",
+    fix='Use "Principal": "*" with an ArnNotEquals aws:PrincipalArn condition instead.',
     docs=(Doc(NOT_PRINCIPAL_PAGE,
               "We recommend using the aws:PrincipalArn context key with ARN condition operators "
               "instead."),),

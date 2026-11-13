@@ -84,7 +84,7 @@ def governing_arn(resource: str, action: str) -> str | None:
     if action.casefold() in _ROLE_ACTIONS and not _role_or_self(arn, action):
         raise RequestError(
             f"{action} is a request on a role, so the resource must be the role's ARN, such as "
-            f"arn:aws:iam::111122223333:role/ITAdmin; got {resource!r}"
+            f"arn:aws:iam::111122223333:role/ExampleRole; got {resource!r}"
         )
     if resource == "*":
         return None

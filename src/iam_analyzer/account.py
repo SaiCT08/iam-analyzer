@@ -367,7 +367,7 @@ def _resource(text: str, raw: Any, account_id: str | None, where: str) -> Resour
     if arn is None or "*" in text or "?" in text:
         raise AccountError(
             f"{where}: must be the full ARN of one resource, such as "
-            "arn:aws:s3:::district-student-records"
+            "arn:aws:s3:::amzn-s3-demo-bucket"
         )
     if arn.service in resources.EXEMPT_SERVICES:
         raise AccountError(

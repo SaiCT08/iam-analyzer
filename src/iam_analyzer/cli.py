@@ -172,7 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         type=_key_value,
         metavar="KEY=VALUE",
-        help="a condition key's value in the request, e.g. aws:username=jsmith (repeat for more "
+        help="a condition key's value in the request, e.g. aws:SourceIp=203.0.113.5 (repeat for more "
         "keys, or for more values of one key)",
     )
     check.add_argument(
