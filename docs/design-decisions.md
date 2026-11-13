@@ -435,8 +435,15 @@ So AWS checks MFA for a role when the role is assumed.
 - **Judgment call: the second question goes one level deep.** A role that can assume the role without
   MFA counts, even if it needs MFA to be assumed itself. That can only add a false alarm.
 - **MFA conditions belong in users' policies and in trust policies,** not in a role's own policies,
-  where a Deny on missing MFA could lock the role out. The district framework's advice and the
+  where a Deny on missing MFA could lock the role out. The example frameworks' advice and the
   findings' fixes say so.
+- **AnyCompany's "Only on-call engineers can assume the on-call admin role" names the role itself.**
+  AWS's role-use page says "To allow users to assume the current role again within a role session,
+  specify the role ARN or AWS account ARN as a principal in the role trust policy", so a role whose
+  trust policy names its account can assume itself. With `true` tried for the role's own requests,
+  OnCallAdmin would get in through `OnCallWithMfa`, and the check would keep failing on that false
+  alarm after every mistake in the example is fixed. A role assuming itself again isn't a new way
+  in, so the check leaves it out.
 
 ### Policy findings
 - **Severity:** high when the surprise can let in a request the policy's author meant to stop, such as
@@ -461,7 +468,19 @@ A requirement is only a framework, an ID, a short title and a link. The title is
 characters on one line, so it can't hold pasted framework text, and each ID is checked against its
 source before it's added:
 - FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy;
-- NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables.
+- NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables: AC-3, AC-6,
+  AC-6(1), AC-6(5), AC-22, AU-9, CP-9, IA-2(1) and IA-2(2);
+- SOC 2 criteria CC6.1, CC6.3 and CC7.2, checked against AICPA's TSP Section 100, the 2017 Trust
+  Services Criteria with the revised points of focus of 2022.
+
+- **Judgment call: SOC 2 titles are this project's labels.** AICPA gives its criteria no titles, and
+  their text isn't copied, so each title is a short label written here: "Logical access controls
+  and authentication" (CC6.1), "Role-based access and least privilege" (CC6.3) and "Monitoring
+  systems for anomalies" (CC7.2). The link is AICPA's download page for the criteria.
+- **Why each fits:** CC6.1 covers logical access, and its points of focus cover authenticating
+  users, multifactor authentication included, so it takes the access and MFA checks. CC6.3 covers
+  access by role and least privilege, including who can change an access policy. CC7.2 covers
+  monitoring, which turning off audit logging would blind.
 
 CIS recommendations aren't mapped, since their IDs change between benchmark versions and their text
 is licensed. TEA requirements wait until one is checked.

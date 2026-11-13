@@ -12,14 +12,16 @@ instead of guessing.
 `iam-analyzer report` grades an account against a compliance framework's checks: PASS, FAIL,
 DEPENDS or CAN'T TELL, each with the statements behind it and a fix. It also flags policies that AWS
 evaluates differently from how they read. A framework is a data file, so adding one needs no code.
-The examples are a Texas school district's student records, with checks mapped to FERPA and NIST SP
-800-53, but nothing in the engine is specific to districts.
+The main example is AnyCompany, a made-up software company with production and development
+accounts, whose checks map to NIST SP 800-53 and SOC 2. A second example, a Texas school district's
+student records mapped to FERPA, shows the same engine on a different kind of organization. Nothing
+in the engine is specific to either.
 
 **Demo video:** link coming soon.
 
 ## A report
 
-Part of the district report ([the whole report](tests/golden/district_report.md)):
+Part of AnyCompany's report ([the whole report](tests/golden/anycompany_report.md)):
 
 ```
 | Result | Checks |
@@ -27,24 +29,25 @@ Part of the district report ([the whole report](tests/golden/district_report.md)
 | FAIL | 3 |
 | DEPENDS | 1 |
 | CAN'T TELL | 1 |
-| PASS | 2 |
+| PASS | 3 |
 
-Findings: 1 high, 1 low.
+Findings: 1 high, 1 medium.
 
-## FAIL: Only counselors can read counseling notes (high)
+## FAIL: Only the on-call admin role can read database backups (high)
 
-Asked: Can anyone but user/kwong do s3:GetObject on
-arn:aws:s3:::district-student-records/counseling/2026/notes.pdf?
+Asked: Can anyone but role/OnCallAdmin do s3:GetObject on
+arn:aws:s3:::anycompany-prod-db-backups/2026-11-12/app.sql.gz?
 
-- user/jsmith can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Teachers.
-- user/mgarcia can. Granted by TeacherReadGrades, Sid ReadStudentRecords, through group Substitutes.
-- user/alee, role/ITAdmin can. Granted by ITAdminFullS3, Sid FullS3Access, attached directly.
-- Can't: user/dpatel, user/rnguyen, user/tbrooks, role/GradebookVendor, role/TeacherSignIn.
-- Not asked: user/kwong.
+- user/jsouza, user/nwolf can. Granted by SupportAccess, Sid ReadSupportBuckets, through group
+  Support.
+- role/VendorMonitoring can. Granted by VendorReadOnly, Sid ReadMetricsAndLogs, attached directly.
+- Can't: user/mrivera, user/psantos, user/ssarkar, user/mjackson, role/CIDeploy, role/DataPipeline.
+- Not asked: role/OnCallAdmin.
 
-Fix: Narrow TeacherReadGrades from district-student-records/* to the folders teachers need, and add
-a bucket policy Deny on counseling/* for everyone but counselors, using aws:PrincipalArn as
-OnlyITAdminChangesThePolicy does.
+Fix: Narrow SupportAccess from anycompany-prod-* to the buckets support needs,
+anycompany-prod-app-logs and anycompany-prod-support-uploads, and VendorReadOnly's S3 actions from
+"*" to anycompany-prod-app-logs. A bucket policy Deny like the customer data bucket's
+OnlyTheDataTeam would also stop grants added later.
 ```
 
 ## Install and run
@@ -59,23 +62,78 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Ask one question:
+Ask one question: can a support engineer read AnyCompany's database backups?
 
 ```sh
-iam-analyzer check --account examples/accounts/district.json --principal user/jsmith \
-  --action s3:DeleteObject --resource arn:aws:s3:::district-student-records/2026/roster.csv
+iam-analyzer check --account examples/accounts/anycompany-production.json --principal user/jsouza \
+  --action s3:GetObject --resource arn:aws:s3:::anycompany-prod-db-backups/2026-11-12/app.sql.gz
 ```
 
-Grade the example district against its framework, and save the report as JSON too:
+```
+ALLOW
+  Allow  SupportAccess (via group Support)  Sid=ReadSupportBuckets
+```
+
+Grade AnyCompany against its framework, and save the report as JSON too:
 
 ```sh
-iam-analyzer report --account examples/accounts/district.json \
-  --org examples/organizations/district.json --framework examples/frameworks/district.json \
+iam-analyzer report --account examples/accounts/anycompany-production.json \
+  --org examples/organizations/anycompany.json --framework examples/frameworks/anycompany.json \
   --json report.json
 ```
 
 Run the tests with `pytest`. [Usage](#usage) and [Compliance reports](#compliance-reports) cover
 every option.
+
+## The examples
+
+**AnyCompany** is a made-up small software company. Its project-tracking app runs on ECS Fargate
+behind a load balancer, with an RDS database. The company hasn't moved to single sign-on, so each
+person still has an IAM user, with a console password and access keys for the CLI.
+
+- **Organization**
+  ([`examples/organizations/anycompany.json`](examples/organizations/anycompany.json)):
+  - production and development accounts, each in its own OU;
+  - an SCP on the root that keeps audit logging on in every member account;
+  - an allow list of the services production uses.
+- **Production account**
+  ([`examples/accounts/anycompany-production.json`](examples/accounts/anycompany-production.json)):
+  - engineering, data and support teams;
+  - an on-call admin role that needs MFA;
+  - a CI deploy role, assumed from the development account;
+  - a data pipeline role;
+  - a role for a monitoring vendor in another account.
+- **Framework** ([`examples/frameworks/anycompany.json`](examples/frameworks/anycompany.json)):
+  eight checks mapped to NIST SP 800-53 and SOC 2.
+
+On purpose, it has four mistakes of the kind security reviews find in real accounts:
+
+| Mistake | What catches it |
+|---|---|
+| Support's `SupportAccess` reads `anycompany-prod-*`, meant for app logs and uploads, which covers every production bucket. | FAIL: "Only the on-call admin role can read database backups". Customer data is safe only because its bucket policy's `OnlyTheDataTeam` Deny stops the read. |
+| The vendor's `VendorReadOnly` reads every bucket, and its trust policy has no external ID. | The same FAIL, and a medium finding: "Another account can assume the role without an external ID". |
+| The data team's MFA Deny uses `Bool`, so requests made with access keys, which carry no MFA key, skip it. | FAIL: "Reading customer data needs MFA", and a high finding: "An MFA Deny skips requests made with access keys". |
+| `OnCallAdmin`'s trust policy also trusts the CI deploy role, with no MFA, "for migrations". | FAIL: "Only on-call engineers can assume the on-call admin role". CAN'T TELL: "Assuming the on-call admin role needs MFA", since the role CI uses is in the development account, outside the file. |
+
+The last mistake matters more than it looks. "Only the on-call admin role can change the customer
+data bucket's policy" passes, and that policy's `OnlyTheDataTeam` is what keeps customer data from
+support, the vendor and the admin role. But the CI deploy role can become that admin, so whoever
+controls the pipeline could remove the Deny.
+
+**The district** is a Texas school district's student records, the project's first example:
+- [`examples/accounts/district.json`](examples/accounts/district.json),
+  [`examples/organizations/district.json`](examples/organizations/district.json) and
+  [`examples/frameworks/district.json`](examples/frameworks/district.json), with checks mapped to
+  FERPA and NIST SP 800-53;
+- its report has 3 FAIL, 1 DEPENDS, 1 CAN'T TELL and 2 PASS, plus a high and a low finding
+  ([the whole report](tests/golden/district_report.md));
+- it also shows two things AnyCompany doesn't: a role whose trust policy rules out session tags, and
+  a role that passes an MFA check because no one can assume it without MFA.
+
+```sh
+iam-analyzer report --account examples/accounts/district.json \
+  --org examples/organizations/district.json --framework examples/frameworks/district.json
+```
 
 ## How it's checked
 
@@ -85,9 +143,9 @@ every option.
   thing and the simulator does another, and the analyzer follows the documentation. In 7, the
   analyzer refuses a case that AWS answered, because AWS's documentation doesn't settle it. See
   [the simulator check](docs/simulator-check.md).
-- **Tests.** 1,468 tests, including an offline replay of every simulator fixture and a golden copy
-  of the district report. They run on Python 3.11, 3.12 and 3.13 on every push and pull request,
-  without AWS access.
+- **Tests.** 1,526 tests, including an offline replay of every simulator fixture, golden copies
+  of both example reports, and a run of every `check` example in this README. They run on Python
+  3.11, 3.12 and 3.13 on every push and pull request, without AWS access.
 - **Where AWS's docs disagree.** The simulator check and a review of AWS's documentation turned up
   15 places where the documentation contradicts itself or doesn't match what the simulator did:
   [AWS doc findings](docs/aws-doc-findings.md).
@@ -146,24 +204,25 @@ Not supported yet (see [every refusal](docs/design-decisions.md#every-refusal)):
 
 ```sh
 iam-analyzer check \
-  --policy examples/policies/teacher_read_grades.json \
-  --policy examples/policies/deny_student_records_delete.json \
+  --policy examples/policies/support_access.json \
+  --policy examples/policies/support_read_only.json \
   --no-resource-policy \
   --action s3:DeleteObject \
-  --resource arn:aws:s3:::district-student-records/2026/roster.csv
+  --resource arn:aws:s3:::anycompany-prod-app-logs/2026/11/12/api.log
 ```
 
 Output:
 
 ```
 EXPLICIT_DENY
-  Deny   deny_student_records_delete.json  Sid=NoDeleteStudentRecords
+  Deny   support_read_only.json  Sid=SupportIsReadOnly
   Without this Deny, the request would still be denied:
     No identity policy allows this; access is denied by default.
 ```
 
-An explicit Deny ends with what the request would get without it. Here neither policy allows
-deleting the roster, so the request would still be denied without the Deny.
+An explicit Deny ends with what the request would get without it. Here AnyCompany's support team
+may only read, so its other policy doesn't allow deleting a log either, and the request would still
+be denied without the Deny.
 
 `--action` names one action, as a real AWS request does. A wildcard such as `s3:*` is an input
 error.
@@ -174,16 +233,16 @@ and asks.
 
 ### Permissions boundaries
 
-`--boundary FILE` adds a permissions boundary. Here a gradebook vendor's role has full S3 access,
-but its boundary only covers the gradebook app's own bucket, so it can't read student records:
+`--boundary FILE` adds a permissions boundary. Here a data contractor gets the data team's policy,
+which reads customer data, but their boundary only covers the analytics bucket, so they can't:
 
 ```sh
 iam-analyzer check \
-  --policy examples/policies/it_admin_full_s3.json \
-  --boundary examples/policies/gradebook_vendor_boundary.json \
+  --policy examples/policies/customer_data_access.json \
+  --boundary examples/policies/contractor_boundary.json \
   --no-resource-policy \
   --action s3:GetObject \
-  --resource arn:aws:s3:::district-student-records/2026/roster.csv
+  --resource arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv
 ```
 
 ```
@@ -197,15 +256,16 @@ marked `(permissions boundary)`.
 ### Asking about a user or role
 
 An account file defines policies once, by name, and attaches them to users, groups and roles. See
-[`examples/accounts/district.json`](examples/accounts/district.json) for a full example.
+[`examples/accounts/anycompany-production.json`](examples/accounts/anycompany-production.json) for a
+full example.
 
 ```json
 {
-  "Policies":  { "TeacherReadGrades": { "Statement": [ ... ] } },
-  "Groups":    { "Teachers": { "Policies": ["TeacherReadGrades"] } },
-  "Users":     { "jsmith": { "Groups": ["Teachers"], "Policies": [] } },
-  "Roles":     { "ITAdmin": { "Policies": ["..."], "PermissionsBoundary": "..." } },
-  "Resources": { "arn:aws:s3:::district-student-records": {} }
+  "Policies":  { "SupportAccess": { "Statement": [ ... ] } },
+  "Groups":    { "Support": { "Policies": ["SupportAccess", "SupportReadOnly"] } },
+  "Users":     { "jsouza": { "Groups": ["Support"], "Policies": [] } },
+  "Roles":     { "OnCallAdmin": { "Policies": ["AdministratorAccess"] } },
+  "Resources": { "arn:aws:s3:::anycompany-prod-app-logs": {} }
 }
 ```
 
@@ -213,18 +273,17 @@ Name the principal as `user/NAME` or `role/NAME`:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/jsmith \
+  --account examples/accounts/anycompany-production.json \
+  --principal user/jsouza \
   --action s3:DeleteObject \
-  --resource arn:aws:s3:::district-student-records/2026/roster.csv
+  --resource arn:aws:s3:::anycompany-prod-app-logs/2026/11/12/api.log
 ```
 
 ```
 EXPLICIT_DENY
-  Deny   DenyStudentRecordsDelete (via group Teachers)  Sid=NoDeleteStudentRecords
+  Deny   SupportReadOnly (via group Support)  Sid=SupportIsReadOnly
   Without this Deny, the request would still be denied:
     No identity policy allows this; access is denied by default.
-    The resource-based policy on arn:aws:s3:::district-student-records does not allow this either.
 ```
 
 A user gets their own policies plus the policies of every group they're in. As in AWS, roles can't
@@ -232,11 +291,12 @@ belong to groups.
 
 Users and roles can name one policy as their `PermissionsBoundary`. The boundary limits every policy
 they have, including the ones that come from their groups. As in AWS, groups can't have a boundary.
-In the example account, student teacher `dpatel` is in the Teachers group, but a boundary limits
-them to campus-01 records.
+In the example account, data contractor `mjackson` is in the Data group, but a boundary limits them
+to the analytics bucket.
 
-Users and roles can also have a `Path`, as in AWS, and the default is `/`. AWS creates
-service-linked roles for its own services under `/aws-service-role/`, for example
+Users and roles can also have a `Path`, as in AWS, and the default is `/`. AnyCompany's data
+analysts have the path `/data/`, which the customer data bucket's policy uses to tell them apart.
+AWS creates service-linked roles for its own services under `/aws-service-role/`, for example
 `/aws-service-role/support.amazonaws.com/`. SCPs never apply to those roles, so give a
 service-linked role its real path. A role's name alone doesn't make it service-linked.
 
@@ -245,7 +305,7 @@ Users and roles can have `Tags` too, in AWS's own shape. Policies read them as
 IAM, groups can't be tagged.
 
 ```json
-"rnguyen": { "Groups": ["Registrars"], "Tags": [{ "Key": "campus", "Value": "campus-02" }] }
+"psantos": { "Groups": ["Engineering"], "Tags": [{ "Key": "team", "Value": "search" }] }
 ```
 
 ### Resources
@@ -262,8 +322,8 @@ account and has no resource-based policy, and `Policy` gives a bucket its bucket
 
 ```json
 "Resources": {
-  "arn:aws:s3:::district-student-records": { "Policy": { "Statement": [ ... ] } },
-  "arn:aws:s3:::district-staff-files": {}
+  "arn:aws:s3:::anycompany-prod-customer-data": { "Policy": { "Statement": [ ... ] } },
+  "arn:aws:s3:::anycompany-prod-app-logs": {}
 }
 ```
 
@@ -279,18 +339,19 @@ setting (`aws s3api get-bucket-ownership-controls`) rather than assume the defau
 create-bucket page also says the AWS CLI creates buckets with ACLs enabled when the setting isn't
 given.
 
-Without a description, the check stops:
+Without a description, the check stops. Support's wildcard covers the support uploads bucket, but
+the example account doesn't describe it:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/jsmith \
+  --account examples/accounts/anycompany-production.json \
+  --principal user/jsouza \
   --action s3:GetObject \
-  --resource arn:aws:s3:::district-lesson-plans/week1.pdf
+  --resource arn:aws:s3:::anycompany-prod-support-uploads/ticket-4821/screenshot.png
 ```
 
 ```
-error: nothing describes arn:aws:s3:::district-lesson-plans: it can have a resource-based policy, and the analyzer can't tell whether it has one, or which account it is in
+error: nothing describes arn:aws:s3:::anycompany-prod-support-uploads: it can have a resource-based policy, and the analyzer can't tell whether it has one, or which account it is in
 hint: describe it in the account file's Resources, as {} if it has no resource-based policy
 ```
 
@@ -345,71 +406,77 @@ Naming the account "delegates authority to the account", in AWS's words: the acc
 identity policies decide, as if the bucket policy said nothing. Every SCP level must still allow,
 whatever the bucket policy says.
 
-The example account's `district-student-records` bucket policy lets counselor `kwong` read
-counseling notes, although `kwong` has no identity policies at all:
+The example account's `anycompany-prod-customer-data` bucket policy lets the `DataPipeline` role
+read customer data, although the role's own policy only writes to the analytics bucket:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/kwong \
+  --account examples/accounts/anycompany-production.json \
+  --principal role/DataPipeline \
   --action s3:GetObject \
-  --resource arn:aws:s3:::district-student-records/counseling/2026/notes.pdf
+  --resource arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv
 ```
 
 ```
 ALLOW
-  Allow  arn:aws:s3:::district-student-records (resource-based policy, names the user)  Sid=CounselorsReadCounselingNotes
+  Allow  arn:aws:s3:::anycompany-prod-customer-data (resource-based policy, names the role)  Sid=PipelineReadsCustomerData
 ```
 
-The same bucket policy stops everyone but the IT admin role from changing the bucket's policy. It
-uses AWS's recommended pattern, a Deny for `"*"` with an `ArnNotEquals` condition on
-`aws:PrincipalArn`:
+A grant to a role still needs the role's boundary to allow it, and `DataPipeline` has none.
+
+The same bucket policy stops everyone but the data team from reading customer data. It uses AWS's
+recommended pattern, a Deny for `"*"` with a condition on `aws:PrincipalArn`. Here it's
+`ArnNotLike`, so `user/data/*` covers every user with the data team's path:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/alee \
-  --action s3:PutBucketPolicy \
-  --resource arn:aws:s3:::district-student-records
+  --account examples/accounts/anycompany-production.json \
+  --principal role/OnCallAdmin \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv
 ```
 
 ```
 EXPLICIT_DENY
-  Deny   arn:aws:s3:::district-student-records (resource-based policy, names everyone)  Sid=OnlyITAdminChangesThePolicy
-         ArnNotEquals aws:PrincipalArn: arn:aws:iam::111122223333:role/ITAdmin (request: arn:aws:iam::111122223333:user/alee)
+  Deny   arn:aws:s3:::anycompany-prod-customer-data (resource-based policy, names everyone)  Sid=OnlyTheDataTeam
+         ArnNotLike aws:PrincipalArn: arn:aws:iam::111122223333:user/data/*, arn:aws:iam::111122223333:role/DataPipeline (request: arn:aws:iam::111122223333:role/OnCallAdmin)
   The Deny overrides:
-  Allow  ITAdminFullS3  Sid=FullS3Access
+  Allow  AdministratorAccess  Sid=(no Sid)
   Without this Deny, the request would be allowed.
 ```
 
-Below the Deny is the Allow it overrides: `ITAdminFullS3` gives alee every S3 action. An explicit
-Deny lists each Allow it overrides that would grant the request: an identity policy's Allow when
-the boundary allows too, a bucket policy's grant that needs nothing else, and a trust policy's
-Allow. A boundary's or an SCP's Allow never counts, since those only limit.
+Below the Deny is the Allow it overrides: `AdministratorAccess` gives the on-call admin role every
+action. An explicit Deny lists each Allow it overrides that would grant the request: an identity
+policy's Allow when the boundary allows too, a bucket policy's grant that needs nothing else, and a
+trust policy's Allow. A boundary's or an SCP's Allow never counts, since those only limit.
 
 The last line says what the request would get with every Deny taken out, checked layer by layer
-as for any request: here, alee could change the bucket policy. When another layer would still stop
-it, the output names that layer instead: the identity policies in the first example, or an SCP
-level with no Allow. When the analyzer would refuse to answer without the Deny, as where AWS's
-docs disagree, it says it can't tell, and why.
+as for any request: here, the on-call admin role could read customer data. When another layer would
+still stop it, the output names that layer instead: the identity policies in the first example, or
+an SCP level with no Allow. When the analyzer would refuse to answer without the Deny, as where
+AWS's docs disagree, it says it can't tell, and why.
 
 The analyzer reads the caller from `aws:PrincipalArn`. With `--account`, the file fills it in,
 which needs the file's `AccountId`. With `--policy`, give it with `--context`, and give the bucket
-policy with `--resource-policy`:
+policy with `--resource-policy`. Support's wildcard covers the customer data bucket, but the bucket
+policy stops the read:
 
 ```sh
 iam-analyzer check \
-  --policy examples/policies/teacher_read_grades.json \
-  --resource-policy examples/policies/student_records_bucket_policy.json \
-  --context aws:PrincipalArn=arn:aws:iam::111122223333:user/kwong \
+  --policy examples/policies/support_access.json \
+  --resource-policy examples/policies/customer_data_bucket_policy.json \
+  --context aws:PrincipalArn=arn:aws:iam::111122223333:user/jsouza \
   --action s3:GetObject \
-  --resource arn:aws:s3:::district-student-records/counseling/2026/notes.pdf
+  --resource arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv
 ```
 
 ```
-ALLOW
-  Allow  teacher_read_grades.json  Sid=ReadStudentRecords
-  Allow  student_records_bucket_policy.json (resource-based policy on arn:aws:s3:::district-student-records, names the user)  Sid=CounselorsReadCounselingNotes
+EXPLICIT_DENY
+  Deny   customer_data_bucket_policy.json (resource-based policy on arn:aws:s3:::anycompany-prod-customer-data, names everyone)  Sid=OnlyTheDataTeam
+         ArnNotLike aws:PrincipalArn: arn:aws:iam::111122223333:user/data/*, arn:aws:iam::111122223333:role/DataPipeline (request: arn:aws:iam::111122223333:user/jsouza)
+  The Deny overrides:
+  Allow  support_access.json  Sid=ReadSupportBuckets
+  Without this Deny, the request would be allowed.
 ```
 
 `Principal` can name `"*"`, accounts, users, roles, role sessions, federated users, services,
@@ -436,17 +503,25 @@ A role's trust policy says who can assume the role. In an account file it is the
 `AssumeRolePolicyDocument`, AWS's own name for it:
 
 ```json
-"ITAdmin": {
-  "Policies": ["ITAdminFullS3", "DenyStudentRecordsDelete"],
+"OnCallAdmin": {
+  "Policies": ["AdministratorAccess"],
   "AssumeRolePolicyDocument": {
     "Version": "2012-10-17",
-    "Statement": [{
-      "Sid": "AccountWithMfa",
-      "Effect": "Allow",
-      "Principal": { "AWS": "arn:aws:iam::111122223333:root" },
-      "Action": "sts:AssumeRole",
-      "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } }
-    }]
+    "Statement": [
+      {
+        "Sid": "OnCallWithMfa",
+        "Effect": "Allow",
+        "Principal": { "AWS": "arn:aws:iam::111122223333:root" },
+        "Action": "sts:AssumeRole",
+        "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "true" } }
+      },
+      {
+        "Sid": "DeployMigrations",
+        "Effect": "Allow",
+        "Principal": { "AWS": "arn:aws:iam::111122223333:role/CIDeploy" },
+        "Action": "sts:AssumeRole"
+      }
+    ]
   }
 }
 ```
@@ -460,29 +535,47 @@ page gives the two ways within one account: "Attach a policy to the user that al
 call AssumeRole (as long as the role's trust policy trusts the account)", or "Add the user as a
 principal directly in the role's trust policy".
 
-The example's `ITAdmin` trusts the account when the caller signed in with MFA, and the ITStaff
-group's `AssumeITAdminRole` policy lets IT staff call `sts:AssumeRole` on it:
+The example's `OnCallAdmin` trusts the account when the caller signed in with MFA, and the OnCall
+group's `AssumeOnCallAdmin` policy lets on-call engineers call `sts:AssumeRole` on it:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/alee \
+  --account examples/accounts/anycompany-production.json \
+  --principal user/mrivera \
   --action sts:AssumeRole \
-  --resource arn:aws:iam::111122223333:role/ITAdmin \
+  --resource arn:aws:iam::111122223333:role/OnCallAdmin \
   --context aws:MultiFactorAuthPresent=true
 ```
 
 ```
 ALLOW
-  Allow  AssumeITAdminRole (via group ITStaff)  Sid=AssumeITAdmin
-  Allow  arn:aws:iam::111122223333:role/ITAdmin (trust policy, names the account)  Sid=AccountWithMfa
+  Allow  AssumeOnCallAdmin (via group OnCall)  Sid=AssumeOnCallAdmin
+  Allow  arn:aws:iam::111122223333:role/OnCallAdmin (trust policy, names the account)  Sid=OnCallWithMfa
          Bool aws:MultiFactorAuthPresent: true (request: true)
 ```
 
 With `--absent aws:MultiFactorAuthPresent` instead, which describes a request made with access
-keys, the answer is `IMPLICIT_DENY`, because the trust policy doesn't allow it. A teacher such as
-`user/jsmith` gets `IMPLICIT_DENY` even with MFA: trusting the account leaves the decision to the
-teacher's identity policies, and none of them allows `sts:AssumeRole`.
+keys, the answer is `IMPLICIT_DENY`, because the trust policy doesn't allow it. An engineer who
+isn't on call, such as `user/psantos`, gets `IMPLICIT_DENY` even with MFA: trusting the account
+leaves the decision to the engineer's identity policies, and none of them allows `sts:AssumeRole`.
+
+`DeployMigrations` is one of the example's deliberate mistakes. It names the CI deploy role
+directly, so that role gets in with no identity policy and no MFA. `--absent` describes the role's
+request, since AWS says a role's credentials carry no MFA information:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/anycompany-production.json \
+  --principal role/CIDeploy \
+  --action sts:AssumeRole \
+  --resource arn:aws:iam::111122223333:role/OnCallAdmin \
+  --absent aws:MultiFactorAuthPresent
+```
+
+```
+ALLOW
+  Allow  arn:aws:iam::111122223333:role/OnCallAdmin (trust policy, names the role)  Sid=DeployMigrations
+```
 
 A role in an account file without an `AssumeRolePolicyDocument` can't be assumed in a check: the
 analyzer says it needs the trust policy. With `--policy`, give one with `--resource-policy`.
@@ -500,27 +593,31 @@ A trust policy can also settle a role's session tags. Passing session tags needs
 in the trust policy. A session made by role chaining "inherits any transitive session tags from
 the calling session", though, and AWS doesn't say whether that needs `sts:TagSession` too. So the
 analyzer counts a role's own tags as complete only when its trust policy allows no
-`sts:TagSession`, and only IAM users and SAML or OIDC providers can assume it. The example's
-`TeacherSignIn` role, assumed through the district's SAML provider and tagged `campus=campus-01`,
-reads its own campus's records with no `--no-session-tags`.
+`sts:TagSession`, and only IAM users and SAML or OIDC providers can assume it. The district
+example's `TeacherSignIn` role, assumed through the district's SAML provider and tagged
+`campus=campus-01`, reads its own campus's records with no `--no-session-tags`.
 
 ### Organizations and SCPs
 
 SCPs go in a separate organization file, because in AWS they belong to the organization, not to any
 one account. The file defines SCPs by name and attaches them to the root, to OUs (which can contain
 more OUs) and to accounts. See
-[`examples/organizations/district.json`](examples/organizations/district.json).
+[`examples/organizations/anycompany.json`](examples/organizations/anycompany.json).
 
 ```json
 {
   "ManagementAccountId": "999988887777",
   "ServiceControlPolicies": { "FullAWSAccess": { "Statement": [ ... ] }, "...": { ... } },
   "Root": {
-    "ServiceControlPolicies": ["FullAWSAccess"],
+    "ServiceControlPolicies": ["FullAWSAccess", "ProtectAuditLogging"],
     "OrganizationalUnits": {
-      "Schools": {
-        "ServiceControlPolicies": ["SchoolServicesOnly", "ProtectStudentRecords"],
+      "Production": {
+        "ServiceControlPolicies": ["ProductionServices"],
         "Accounts": { "111122223333": { "ServiceControlPolicies": ["FullAWSAccess"] } }
+      },
+      "Development": {
+        "ServiceControlPolicies": ["FullAWSAccess"],
+        "Accounts": { "123456789012": { "ServiceControlPolicies": ["FullAWSAccess"] } }
       }
     },
     "Accounts": { "999988887777": { "ServiceControlPolicies": ["FullAWSAccess"] } }
@@ -529,28 +626,28 @@ more OUs) and to accounts. See
 ```
 
 Add `--org FILE` to an `--account` check. The account file's `AccountId` says where the account sits
-in the organization. The IT admin role's own policies allow `s3:*`, but an SCP on the Schools OU
-stops anyone in that OU from changing the student records bucket policy:
+in the organization. The on-call admin role's own policy allows every action, but an SCP on the
+root stops anyone in any member account from turning off CloudTrail:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --org examples/organizations/district.json \
-  --principal role/ITAdmin \
-  --action s3:PutBucketPolicy \
-  --resource arn:aws:s3:::district-student-records
+  --account examples/accounts/anycompany-production.json \
+  --org examples/organizations/anycompany.json \
+  --principal role/OnCallAdmin \
+  --action cloudtrail:StopLogging \
+  --resource arn:aws:cloudtrail:us-east-1:111122223333:trail/prod-audit
 ```
 
 ```
 EXPLICIT_DENY
-  Deny   ProtectStudentRecords (SCP on OU Schools)  Sid=NoDeletesOrPolicyChanges
+  Deny   ProtectAuditLogging (SCP on the root)  Sid=NoAuditLoggingChanges
   The Deny overrides:
-  Allow  ITAdminFullS3  Sid=FullS3Access
+  Allow  AdministratorAccess  Sid=(no Sid)
   Without this Deny, the request would be allowed.
 ```
 
-`FullAWSAccess` and `SchoolServicesOnly` allow the request at their levels, but they aren't
-listed: an SCP only limits.
+`FullAWSAccess` and `ProductionServices` allow the request at their levels, but they aren't listed:
+an SCP only limits.
 
 The rules follow AWS:
 - Every level must allow the request: the root, each OU on the way down, and the account itself.
@@ -562,22 +659,32 @@ The rules follow AWS:
 - A short ARN such as `arn:aws:s3` in an SCP is refused. AWS documents completing one with
   wildcards only in identity-based policies.
 
-The Schools OU's `SchoolServicesOnly` SCP is an allow list that leaves out EC2. So `user/alee` can't
-call `ec2:DescribeInstances` in that account, even though their IAM policy allows it:
+The Production OU's `ProductionServices` SCP is an allow list of the services the app uses: ECS,
+EC2 networking, the load balancer, RDS and the rest. DynamoDB isn't one of them. So the on-call
+admin role can't list DynamoDB tables in production, even though `AdministratorAccess` allows it:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/anycompany-production.json \
+  --org examples/organizations/anycompany.json \
+  --principal role/OnCallAdmin \
+  --action dynamodb:ListTables \
+  --resource '*'
+```
 
 ```
 IMPLICIT_DENY
-  No SCP attached to OU Schools allows this.
+  No SCP attached to OU Production allows this.
 ```
 
 ### Policy variables and the request context
 
 In a policy with `"Version": "2012-10-17"`, AWS fills in policy variables from the request.
-`${aws:username}` is the caller's user name, so one policy can give every teacher their own home
+`${aws:username}` is the caller's user name, so one policy can give every analyst their own scratch
 folder:
 
 ```json
-"Resource": "arn:aws:s3:::district-staff-files/home/${aws:username}/*"
+"Resource": "arn:aws:s3:::anycompany-prod-analytics/scratch/${aws:username}/*"
 ```
 
 The values come from the *request context*: the condition keys a request carries, such as
@@ -590,19 +697,19 @@ The values come from the *request context*: the condition keys a request carries
 
 ```sh
 iam-analyzer check \
-  --policy examples/policies/staff_home_folder.json \
+  --policy examples/policies/analyst_scratch.json \
   --no-resource-policy \
   --action s3:PutObject \
-  --resource arn:aws:s3:::district-staff-files/home/jsmith/lesson-plan.docx
+  --resource arn:aws:s3:::anycompany-prod-analytics/scratch/ssarkar/churn.sql
 ```
 
 ```
 error: the request context says nothing about these condition keys:
-  aws:username, used by staff_home_folder.json statement 0 (Sid=OwnHomeFolder)
+  aws:username, used by analyst_scratch.json statement 0 (Sid=OwnScratchFolder)
 hint: give each key a value with --context KEY=VALUE, or use --absent KEY if the request doesn't include it
 ```
 
-With `--context aws:username=jsmith` the answer is `ALLOW`. With `--context aws:username=mgarcia`
+With `--context aws:username=ssarkar` the answer is `ALLOW`. With `--context aws:username=mjackson`
 it's `IMPLICIT_DENY`, because that folder belongs to someone else.
 
 With `--account`, the account file fills in what it knows about the principal. You can't change
@@ -616,24 +723,23 @@ those keys with `--context` or `--absent`.
 | `aws:PrincipalAccount` | the file's `AccountId` | the file's `AccountId` |
 | `aws:PrincipalTag/KEY` | the user's `Tags`; any other tag is absent | unknown (see below) |
 
-`aws:PrincipalArn` and `aws:PrincipalAccount` need the file's `AccountId`. Registrar `rnguyen`'s
-policy covers `district-student-records/${aws:PrincipalTag/campus}/*`, and their `campus` tag is
-`campus-02`:
+`aws:PrincipalArn` and `aws:PrincipalAccount` need the file's `AccountId`. Engineer `psantos`'s
+policy covers the log groups `/prod/${aws:PrincipalTag/team}/*`, and their `team` tag is `search`:
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/rnguyen \
-  --action s3:GetObject \
-  --resource arn:aws:s3:::district-student-records/campus-02/transcript.pdf
+  --account examples/accounts/anycompany-production.json \
+  --principal user/psantos \
+  --action logs:FilterLogEvents \
+  --resource arn:aws:logs:us-east-1:111122223333:log-group:/prod/search/api
 ```
 
 ```
 ALLOW
-  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords
+  Allow  ProductionReadOnly (via group Engineering)  Sid=ReadOwnTeamLogs
 ```
 
-The same request for `campus-01` gives `IMPLICIT_DENY`.
+The same request for `/prod/payments/api` gives `IMPLICIT_DENY`.
 
 A role's session can carry *session tags*, which override the role's own tags and can add new ones.
 So for a role, every `aws:PrincipalTag/` key is unknown until you give it with `--context` or
@@ -664,42 +770,59 @@ Without `"Version": "2012-10-17"`, AWS treats `${...}` as plain text, and so doe
 ### Conditions
 
 A statement with a `Condition` only applies when every condition holds. Conditions read the request
-context too, so the same three states apply. Registrars may change their campus's records only
-when they signed in with MFA:
+context too, so the same three states apply. AnyCompany's data team is meant to read customer data
+only when they signed in with MFA:
 
 ```json
 {
-  "Sid": "RequireMfaForChanges",
+  "Sid": "DenyCustomerDataWithoutMfa",
   "Effect": "Deny",
-  "Action": "s3:PutObject",
-  "Resource": "arn:aws:s3:::district-student-records/*",
-  "Condition": { "BoolIfExists": { "aws:MultiFactorAuthPresent": "false" } }
+  "Action": "s3:GetObject",
+  "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*",
+  "Condition": { "Bool": { "aws:MultiFactorAuthPresent": "false" } }
 }
 ```
 
 ```sh
 iam-analyzer check \
-  --account examples/accounts/district.json \
-  --principal user/rnguyen \
-  --action s3:PutObject \
-  --resource arn:aws:s3:::district-student-records/campus-02/transcript.pdf \
-  --absent aws:MultiFactorAuthPresent
+  --account examples/accounts/anycompany-production.json \
+  --principal user/ssarkar \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv \
+  --context aws:MultiFactorAuthPresent=false
 ```
 
 ```
 EXPLICIT_DENY
-  Deny   RegistrarCampusRecords (via group Registrars)  Sid=RequireMfaForChanges
-         BoolIfExists aws:MultiFactorAuthPresent: false (request: not present)
+  Deny   RequireMfaForCustomerData (via group Data)  Sid=DenyCustomerDataWithoutMfa
+         Bool aws:MultiFactorAuthPresent: false (request: false)
   The Deny overrides:
-  Allow  RegistrarCampusRecords (via group Registrars)  Sid=ManageOwnCampusRecords
+  Allow  CustomerDataAccess (via group Data)  Sid=ReadCustomerData
   Without this Deny, the request would be allowed.
 ```
 
 The indented line shows each condition, with the value the request had. AWS leaves
-`aws:MultiFactorAuthPresent` out of requests made with access keys, so `--absent` describes such a
-request. `BoolIfExists` treats a missing key as passing, so the Deny applies. With
-`--context aws:MultiFactorAuthPresent=true` the answer is `ALLOW`, and with no flag at all the
-analyzer asks for the key.
+`aws:MultiFactorAuthPresent` out of requests made with access keys, which is how AnyCompany's
+people use the CLI, so `--absent` describes such a request:
+
+```sh
+iam-analyzer check \
+  --account examples/accounts/anycompany-production.json \
+  --principal user/ssarkar \
+  --action s3:GetObject \
+  --resource arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv \
+  --absent aws:MultiFactorAuthPresent
+```
+
+```
+ALLOW
+  Allow  CustomerDataAccess (via group Data)  Sid=ReadCustomerData
+```
+
+`Bool` fails on a missing key, so the Deny doesn't apply: one of the example's deliberate mistakes.
+`BoolIfExists` treats a missing key as passing, so with it the Deny would stop this request too, and
+the report flags the plain `Bool` (see [Policy findings](#policy-findings)). With no flag at all,
+the analyzer asks for the key.
 
 The rules follow AWS:
 - Several conditions, or several keys under one operator: every one must hold.
@@ -742,9 +865,9 @@ can act on:
 
 ```sh
 iam-analyzer report \
-  --account examples/accounts/district.json \
-  --org examples/organizations/district.json \
-  --framework examples/frameworks/district.json \
+  --account examples/accounts/anycompany-production.json \
+  --org examples/organizations/anycompany.json \
+  --framework examples/frameworks/anycompany.json \
   --json report.json
 ```
 
@@ -752,8 +875,9 @@ The Markdown report goes to the screen, and `--json` writes the same report as J
 the SCPs, and `--no-org` says the account isn't in an AWS organization. One of them is required:
 leaving SCPs out without saying so could allow what they deny.
 
-[A report](#a-report), at the top of this page, is part of the district report, and
-[the whole report](tests/golden/district_report.md) is in the tests.
+[A report](#a-report), at the top of this page, is part of AnyCompany's report, and
+[the whole report](tests/golden/anycompany_report.md) is in the tests, next to
+[the district's](tests/golden/district_report.md).
 
 ### Results
 
@@ -762,9 +886,10 @@ Every check gets one of four results:
 - **FAIL:** a principal gets the access a check forbids, or doesn't get the access a check
   expects. Each principal that gets access is listed with every statement that grants it: the
   policy, its Sid (or its position, such as "statement 0"), and how the principal gets it, such as
-  "through group Teachers" or "attached directly". A statement only counts when its way in works
+  "through group Support" or "attached directly". A statement only counts when its way in works
   by itself. An identity policy that the principal's boundary blocks isn't listed, even if a
-  bucket policy lets the principal in anyway.
+  bucket policy lets the principal in anyway, and neither is a trust policy statement that names
+  the account when no identity policy lets the principal use it.
 - **DEPENDS:** only for checks that expect access. The answer depends on a condition key, such as
   `aws:MultiFactorAuthPresent`, and the report lists its values with each answer.
 - **CAN'T TELL:** the analyzer refused, with its reason and what would settle it, such as a
@@ -776,10 +901,11 @@ MFA Deny that skips requests made with access keys fails the check, and the repo
 DEPENDS, then CAN'T TELL, then PASS.
 
 When a Deny is why someone can't, and it overrides an Allow that would grant the request, the line
-names that Allow: "The Deny overrides ITAdminFullS3, Sid FullS3Access, attached directly." Such a
-principal gets a line of its own even when the check passes, so a passing check shows which Denies
-it relies on. In the district, "No one can delete student records" passes, and its lines show the
-Denies overriding alee's and ITAdmin's `ITAdminFullS3`. The line then says what the request would
+names that Allow: "The Deny overrides SupportAccess, Sid ReadSupportBuckets, through group
+Support." Such a principal gets a line of its own even when the check passes, so a passing check
+shows which Denies it relies on. In AnyCompany's report, "Only the data team can read customer
+data" passes, and its lines show the bucket policy's `OnlyTheDataTeam` overriding the Allows of
+support, the on-call admin role and the vendor's role. The line then says what the request would
 get without the Denies: "Without these Denies, the request would be allowed", or the layer that
 would still stop it, or that the analyzer can't tell. The JSON lists those Allows as `overridden`,
 next to `grants`, and that answer as `without_denies`.
@@ -795,11 +921,11 @@ CI can fail on `1`, and decide for itself what `3` means.
 ### Framework files
 
 A framework is a JSON file, so adding one never changes the analyzer. See
-[`examples/frameworks/district.json`](examples/frameworks/district.json).
+[`examples/frameworks/anycompany.json`](examples/frameworks/anycompany.json).
 
 ```json
 {
-  "Framework": { "Id": "district-student-records", "Title": "Texas school district student records" },
+  "Framework": { "Id": "anycompany-production", "Title": "AnyCompany production access" },
   "Requirements": {
     "NIST AC-6": {
       "Framework": "NIST SP 800-53 Rev. 5", "Id": "AC-6", "Title": "Least Privilege",
@@ -807,15 +933,15 @@ A framework is a JSON file, so adding one never changes the analyzer. See
     }
   },
   "Checks": [{
-    "Id": "counseling-notes-counselors-only",
-    "Title": "Only counselors can read counseling notes",
+    "Id": "db-backups-admin-only",
+    "Title": "Only the on-call admin role can read database backups",
     "Severity": "high",
     "Type": "only",
-    "Principals": ["user/kwong"],
+    "Principals": ["role/OnCallAdmin"],
     "Actions": ["s3:GetObject"],
-    "Resources": ["arn:aws:s3:::district-student-records/counseling/2026/notes.pdf"],
-    "Fix": "Narrow TeacherReadGrades from district-student-records/* to the folders teachers need.",
-    "Keep": "Reads of counseling/* only through the counselors' bucket policy grant.",
+    "Resources": ["arn:aws:s3:::anycompany-prod-db-backups/2026-11-12/app.sql.gz"],
+    "Fix": "Narrow SupportAccess from anycompany-prod-* to the buckets support needs.",
+    "Keep": "No identity policy but OnCallAdmin's AdministratorAccess covers the backups.",
     "MapsTo": ["NIST AC-6"]
   }]
 }
@@ -852,10 +978,10 @@ errors.
 A check states only what its question fixes. When a statement needs a condition key the check
 doesn't give, the report tries each value AWS documents for that key:
 `aws:MultiFactorAuthPresent` (true, false or absent), `aws:SecureTransport` and
-`aws:ViaAWSService` (true or false). For example, ITAdmin's trust policy needs MFA, so "can a
-teacher assume ITAdmin?" is asked three times, and the answer is no every time. Any other key, such
-as `aws:SourceIp`, has too many values to try. The report is CAN'T TELL and names the key until the
-check gives it a value in `Context`.
+`aws:ViaAWSService` (true or false). For example, OnCallAdmin's trust policy needs MFA, so "can
+psantos, who isn't on call, assume OnCallAdmin?" is asked three times, and the answer is no every
+time. Any other key, such as `aws:SourceIp`, has too many values to try. The report is CAN'T TELL
+and names the key until the check gives it a value in `Context`.
 
 `aws:MultiFactorAuthPresent` can be absent for any principal. AWS says it's missing for requests
 made with long-term access keys and for federated users. It also says "The temporary credentials
@@ -880,24 +1006,33 @@ The item is also CAN'T TELL when the account file doesn't give the role's trust 
 The second question goes one level deep. A role that can assume the role without MFA counts, even
 if that role needs MFA to be assumed itself. That can only add a false alarm, never hide access.
 
-In the district, ITAdmin passes "Changing student records needs MFA":
+In AnyCompany's report, the CI deploy role can assume OnCallAdmin without MFA, and the role CI uses
+to assume it is in the development account, outside the file. So "Assuming the on-call admin role
+needs MFA" is CAN'T TELL:
 
 ```
-- role/ITAdmin passes: its own policies allow the request, but AWS checks MFA for a role when it's
-  assumed, and no one can assume it without MFA (trust policy Sid AccountWithMfa).
-  - AWS: "The temporary credentials returned by AssumeRole do not include MFA information in the
-    context, so you cannot check individual API operations for MFA."
-    https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_mfa_configure-api-require.html#scenarios
+- role/CIDeploy can. Granted by the trust policy of arn:aws:iam::111122223333:role/OnCallAdmin, Sid
+  DeployMigrations, which names the role.
+  - CAN'T TELL: AWS checks aws:MultiFactorAuthPresent for a role when it's assumed, and the analyzer
+    can't tell whether everyone who can assume role/CIDeploy needs aws:MultiFactorAuthPresent true:
+    - Can't tell for principals outside anycompany-production.json: the trust policy of
+      arn:aws:iam::111122223333:role/CIDeploy, Sid CIRunnerInDevelopment, allows sts:AssumeRole for
+      arn:aws:iam::123456789012:role/CIRunner, and the analyzer doesn't evaluate requests from
+      outside the account file yet.
 ```
 
-When a bucket policy names the role and its own policies don't allow the request, the line says
-"the resource policy on ... allows the request" instead. The check still fails for alee, who has
-`ITAdminFullS3` directly. Taking that policy off alee, as the check's Fix says, makes the check
-pass.
+In the district example, the IT admin role passes the same kind of check instead: no one can
+assume it without MFA, so its line leads with "passes" and says why. When a bucket policy names the
+role and its own policies don't allow the request, that line says "the resource policy on ...
+allows the request" instead.
 
 The report still tries `true` for a role's own requests too. When it's unsure whether a value can
 happen, it tries it: an impossible value can only add a false alarm, while skipping a possible one
-could hide real access.
+could hide real access. That's why AnyCompany's "Only on-call engineers can assume the on-call
+admin role" names `role/OnCallAdmin` among its principals. AWS says "To allow users to assume
+the current role again within a role session, specify the role ARN or AWS account ARN as a
+principal in the role trust policy", so with MFA true the role could assume itself through
+`OnCallWithMfa`, and the check would fail on that false alarm even with every mistake fixed.
 
 ### Who a report can't ask about
 
@@ -915,11 +1050,11 @@ files allow it, while an `only` or `requires` PASS stays true whatever those pol
 Some AWS surprises need no question: they're in the policy text. Every report scans all of the
 account file's policies for them: identity policies and boundaries, bucket policies, trust
 policies, and with `--org`, SCPs. Each finding names the statement and where its policy is used.
-It then says what the mistake does there, such as "The Allow never applies, so it never lets
-group/SummerSchool do s3:GetObject on ...", why it happens, and how to fix it, and cites its
-evidence. That evidence is either answers
-recorded from AWS's IAM policy simulator (in `tests/simulator_fixtures`, and the tests check that
-AWS's recorded answer is the one claimed) or AWS's documentation.
+It then says what the mistake does there, such as "It doesn't stop group/Data from doing
+s3:GetObject on ... in requests made with long-term access keys", why it happens, and how to fix
+it, and cites its evidence. That evidence is either answers recorded from AWS's IAM policy
+simulator (in `tests/simulator_fixtures`, and the tests check that AWS's recorded answer is the one
+claimed) or AWS's documentation.
 
 A finding is high when it can let a request through that the policy's author meant to stop, such
 as a Deny that never applies or an Allow that always applies. It's low when it can only stop a
@@ -943,7 +1078,18 @@ request the author meant to let through.
 | A Deny uses NotPrincipal (medium) | any `NotPrincipal` | the NotPrincipal page, which recommends `aws:PrincipalArn` conditions instead |
 | A NotPrincipal Deny always denies principals with a boundary (low) | a `NotPrincipal` Deny, when users or roles in the file have a permissions boundary | the NotPrincipal page: it "will always deny any IAM principal that has a permissions boundary policy attached" |
 
-The district account has two of these mistakes on purpose:
+The AnyCompany account has two of these mistakes on purpose:
+- `RequireMfaForCustomerData` denies reads of customer data with a plain `Bool`, so requests made
+  with an IAM user's access keys, which carry no MFA key, skip it (high).
+- `VendorMonitoring`'s trust policy lets the vendor's account assume it without an external ID
+  (medium). The CI deploy role's trust policy names a role in the development account, but that
+  account is in the organization, so with `--org` it's no finding.
+
+Its other two mistakes, support's bucket wildcard and the CI deploy role in OnCallAdmin's trust
+policy, do just what they say. They're mistakes because of what they let in, which only a question
+shows, so its checks catch them (see [The examples](#the-examples)).
+
+The district account has two on purpose too:
 - `SummerSchoolRecords` allows reads "until 2027", but `DateLessThan` compares against early 1970,
   so the Allow never applies and `tbrooks` can't read anything.
 - `district-roster-exports` was opened to everyone to share a roster with a vendor. Its
@@ -970,12 +1116,19 @@ A requirement gives the framework, the requirement's ID, a short title and a lin
 - never the framework's own text (the title is at most 60 characters, on one line);
 - never an ID that hasn't been checked against its source.
 
+The AnyCompany framework maps to two:
+- NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables;
+- SOC 2 criteria CC6.1, CC6.3 and CC7.2, checked against AICPA's TSP Section 100, the 2017 Trust
+  Services Criteria with the revised points of focus of 2022. AICPA gives its criteria no titles,
+  so each SOC 2 title is a short label written for this project, and the link is AICPA's download
+  page.
+
 The district framework maps to two:
 - FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy;
 - NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables.
 
-It maps no CIS recommendations, because their IDs change between benchmark versions and their text
-is licensed. It maps no TEA requirements yet, since none has been checked.
+Neither maps CIS recommendations, because their IDs change between benchmark versions and their
+text is licensed. The district maps no TEA requirements yet, since none has been checked.
 
 ## Tests
 
@@ -996,9 +1149,14 @@ resource-based policy, as `--no-resource-policy` does. To add a case, drop in a 
 Recording new answers calls AWS and needs boto3 (`pip install -e ".[dev,simulator]"`). The
 analyzer itself doesn't need boto3. See `simulator_check/__init__.py`.
 
-`tests/golden/district_report.md` is the district report, exactly as `iam-analyzer report` prints
-it, and `tests/test_report.py` checks that the report still matches it. After an intended change
-to the report, regenerate it with the command in that test's docstring and review the diff.
+`tests/golden/anycompany_report.md` and `tests/golden/district_report.md` are the two example
+reports, exactly as `iam-analyzer report` prints them, and `tests/test_report.py` checks that the
+reports still match them. After an intended change to the report, regenerate them with the
+commands in those tests' docstrings and review the diff.
+
+`tests/test_readme.py` runs every `iam-analyzer check` command this README shows with its output,
+and compares what it prints. It also checks that the report excerpt at the top is part of
+AnyCompany's golden report, and that the example files use only AWS's example account IDs.
 
 ## Copyright
 
