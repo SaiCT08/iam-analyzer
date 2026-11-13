@@ -86,7 +86,8 @@ every option.
   analyzer refuses a case that AWS answered, because AWS's documentation doesn't settle it. See
   [the simulator check](docs/simulator-check.md).
 - **Tests.** 1,468 tests, including an offline replay of every simulator fixture and a golden copy
-  of the district report. They run on every push and pull request, without AWS access.
+  of the district report. They run on Python 3.11, 3.12 and 3.13 on every push and pull request,
+  without AWS access.
 - **Where AWS's docs disagree.** The simulator check and a review of AWS's documentation turned up
   15 places where the documentation contradicts itself or doesn't match what the simulator did:
   [AWS doc findings](docs/aws-doc-findings.md).

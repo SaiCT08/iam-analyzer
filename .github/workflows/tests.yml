@@ -10,11 +10,16 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      # Every version reports, even when another one fails.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python-version }}
       # Only the dev extra, pytest. boto3, which only the simulator recorder needs, isn't
       # installed, and the job has no AWS credentials: the tests replay the recorded simulator
       # fixtures offline.
