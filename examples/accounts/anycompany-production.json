@@ -1,0 +1,400 @@
+{
+  "AccountId": "111122223333",
+  "Policies": {
+    "ProductionReadOnly": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DescribeServices",
+          "Effect": "Allow",
+          "Action": [
+            "ec2:Describe*",
+            "ecs:Describe*",
+            "ecs:List*",
+            "cloudwatch:GetMetricData",
+            "cloudwatch:ListMetrics"
+          ],
+          "Resource": "*"
+        },
+        {
+          "Sid": "ReadOwnTeamLogs",
+          "Effect": "Allow",
+          "Action": [
+            "logs:GetLogEvents",
+            "logs:FilterLogEvents"
+          ],
+          "Resource": "arn:aws:logs:us-east-1:111122223333:log-group:/prod/${aws:PrincipalTag/team}/*"
+        }
+      ]
+    },
+    "AssumeOnCallAdmin": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AssumeOnCallAdmin",
+          "Effect": "Allow",
+          "Action": "sts:AssumeRole",
+          "Resource": "arn:aws:iam::111122223333:role/OnCallAdmin"
+        }
+      ]
+    },
+    "CustomerDataAccess": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ListCustomerData",
+          "Effect": "Allow",
+          "Action": "s3:ListBucket",
+          "Resource": "arn:aws:s3:::anycompany-prod-customer-data"
+        },
+        {
+          "Sid": "ReadCustomerData",
+          "Effect": "Allow",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*"
+        }
+      ]
+    },
+    "RequireMfaForCustomerData": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "DenyCustomerDataWithoutMfa",
+          "Effect": "Deny",
+          "Action": "s3:GetObject",
+          "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*",
+          "Condition": {
+            "Bool": {
+              "aws:MultiFactorAuthPresent": "false"
+            }
+          }
+        }
+      ]
+    },
+    "AnalystScratch": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "OwnScratchFolder",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject"
+          ],
+          "Resource": "arn:aws:s3:::anycompany-prod-analytics/scratch/${aws:username}/*"
+        }
+      ]
+    },
+    "ContractorBoundary": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AnalyticsOnly",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::anycompany-prod-analytics",
+            "arn:aws:s3:::anycompany-prod-analytics/*"
+          ]
+        }
+      ]
+    },
+    "SupportAccess": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadSupportBuckets",
+          "Effect": "Allow",
+          "Action": [
+            "s3:GetObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "arn:aws:s3:::anycompany-prod-*",
+            "arn:aws:s3:::anycompany-prod-*/*"
+          ]
+        }
+      ]
+    },
+    "SupportReadOnly": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "SupportIsReadOnly",
+          "Effect": "Deny",
+          "NotAction": [
+            "s3:Get*",
+            "s3:List*"
+          ],
+          "Resource": [
+            "arn:aws:s3:::anycompany-prod-*",
+            "arn:aws:s3:::anycompany-prod-*/*"
+          ]
+        }
+      ]
+    },
+    "AdministratorAccess": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "DeployRelease": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "PublishReleases",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::anycompany-prod-releases/*"
+        },
+        {
+          "Sid": "UpdateAppService",
+          "Effect": "Allow",
+          "Action": [
+            "ecs:UpdateService",
+            "ecs:DescribeServices"
+          ],
+          "Resource": "arn:aws:ecs:us-east-1:111122223333:service/prod/app"
+        }
+      ]
+    },
+    "VendorReadOnly": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "ReadMetricsAndLogs",
+          "Effect": "Allow",
+          "Action": [
+            "cloudwatch:GetMetricData",
+            "cloudwatch:ListMetrics",
+            "s3:GetObject",
+            "s3:ListBucket"
+          ],
+          "Resource": "*"
+        }
+      ]
+    },
+    "PipelineAnalytics": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "WriteAnalytics",
+          "Effect": "Allow",
+          "Action": "s3:PutObject",
+          "Resource": "arn:aws:s3:::anycompany-prod-analytics/pipeline/*"
+        }
+      ]
+    }
+  },
+  "Groups": {
+    "Engineering": {
+      "Policies": [
+        "ProductionReadOnly"
+      ]
+    },
+    "OnCall": {
+      "Policies": [
+        "AssumeOnCallAdmin"
+      ]
+    },
+    "Data": {
+      "Policies": [
+        "CustomerDataAccess",
+        "RequireMfaForCustomerData",
+        "AnalystScratch"
+      ]
+    },
+    "Support": {
+      "Policies": [
+        "SupportAccess",
+        "SupportReadOnly"
+      ]
+    }
+  },
+  "Users": {
+    "mrivera": {
+      "Groups": [
+        "Engineering",
+        "OnCall"
+      ],
+      "Tags": [
+        {
+          "Key": "team",
+          "Value": "payments"
+        }
+      ]
+    },
+    "psantos": {
+      "Groups": [
+        "Engineering"
+      ],
+      "Tags": [
+        {
+          "Key": "team",
+          "Value": "search"
+        }
+      ]
+    },
+    "ssarkar": {
+      "Groups": [
+        "Data"
+      ],
+      "Path": "/data/"
+    },
+    "mjackson": {
+      "Groups": [
+        "Data"
+      ],
+      "Path": "/contractors/",
+      "PermissionsBoundary": "ContractorBoundary"
+    },
+    "jsouza": {
+      "Groups": [
+        "Support"
+      ]
+    },
+    "nwolf": {
+      "Groups": [
+        "Support"
+      ]
+    }
+  },
+  "Roles": {
+    "OnCallAdmin": {
+      "Policies": [
+        "AdministratorAccess"
+      ],
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "OnCallWithMfa",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111122223333:root"
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "Bool": {
+                "aws:MultiFactorAuthPresent": "true"
+              }
+            }
+          },
+          {
+            "Sid": "DeployMigrations",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111122223333:role/CIDeploy"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+    },
+    "CIDeploy": {
+      "Policies": [
+        "DeployRelease"
+      ],
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "CIRunnerInDevelopment",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::123456789012:role/CIRunner"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+    },
+    "VendorMonitoring": {
+      "Policies": [
+        "VendorReadOnly"
+      ],
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "MonitoringVendor",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::444455556666:root"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+    },
+    "DataPipeline": {
+      "Policies": [
+        "PipelineAnalytics"
+      ],
+      "AssumeRolePolicyDocument": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "EcsTasks",
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "ecs-tasks.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+    }
+  },
+  "Resources": {
+    "arn:aws:s3:::anycompany-prod-customer-data": {
+      "Policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Sid": "OnlyTheDataTeam",
+            "Effect": "Deny",
+            "Principal": "*",
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*",
+            "Condition": {
+              "ArnNotLike": {
+                "aws:PrincipalArn": [
+                  "arn:aws:iam::111122223333:user/data/*",
+                  "arn:aws:iam::111122223333:role/DataPipeline"
+                ]
+              }
+            }
+          },
+          {
+            "Sid": "PipelineReadsCustomerData",
+            "Effect": "Allow",
+            "Principal": {
+              "AWS": "arn:aws:iam::111122223333:role/DataPipeline"
+            },
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*"
+          }
+        ]
+      }
+    },
+    "arn:aws:s3:::anycompany-prod-db-backups": {},
+    "arn:aws:s3:::anycompany-prod-analytics": {},
+    "arn:aws:s3:::anycompany-prod-app-logs": {},
+    "arn:aws:s3:::anycompany-prod-releases": {},
+    "arn:aws:cloudtrail:us-east-1:111122223333:trail/prod-audit": {},
+    "arn:aws:logs:us-east-1:111122223333:log-group:/prod/payments/api": {},
+    "arn:aws:logs:us-east-1:111122223333:log-group:/prod/search/api": {}
+  }
+}

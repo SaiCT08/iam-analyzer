@@ -723,3 +723,48 @@ def test_evaluate_skips_scps_for_a_service_linked_role():
     result = acct.evaluate("role/AWSServiceRoleForSupport", request,
                            organization=load_organization_file(ORG))
     assert result.allowed
+
+
+# --- The AnyCompany example ------------------------------------------------------------
+
+ANYCOMPANY = EXAMPLE.parent / "anycompany-production.json"
+POLICY_FILES = EXAMPLE.parent.parent / "policies"
+
+
+def test_anycompany_account_loads():
+    acct = load_account_file(ANYCOMPANY)
+    assert acct.account_id == "111122223333"
+    assert summary(acct.policies_for("user/mrivera")) == [
+        ("ProductionReadOnly", "Engineering"),
+        ("AssumeOnCallAdmin", "OnCall"),
+    ]
+    assert acct.boundary_for("user/mjackson").name == "ContractorBoundary"
+    # The customer data bucket policy spares the data team by its users' path.
+    assert acct.users["ssarkar"].path == "/data/"
+    assert acct.users["mjackson"].path == "/contractors/"
+    assert all(role.trust_policy is not None for role in acct.roles.values())
+
+
+def test_anycompany_describes_its_resources_but_support_uploads():
+    acct = load_account_file(ANYCOMPANY)
+    assert acct.resources["arn:aws:s3:::anycompany-prod-db-backups"].policy is None
+    assert [s.sid for s in acct.resources["arn:aws:s3:::anycompany-prod-customer-data"]
+            .policy.statements] == ["OnlyTheDataTeam", "PipelineReadsCustomerData"]
+    # Left out on purpose: the README shows the analyzer asking for it.
+    assert "arn:aws:s3:::anycompany-prod-support-uploads" not in acct.resources
+
+
+@pytest.mark.parametrize("file, source", [
+    ("support_access.json", "SupportAccess"),
+    ("support_read_only.json", "SupportReadOnly"),
+    ("customer_data_access.json", "CustomerDataAccess"),
+    ("contractor_boundary.json", "ContractorBoundary"),
+    ("analyst_scratch.json", "AnalystScratch"),
+    ("customer_data_bucket_policy.json", "arn:aws:s3:::anycompany-prod-customer-data"),
+])
+def test_anycompany_policy_files_are_the_account_files_policies(file, source):
+    # The README's --policy examples use these files, so they must say what the account says.
+    document = json.loads(ANYCOMPANY.read_text())
+    policy = document["Resources"][source]["Policy"] if source.startswith("arn:") else (
+        document["Policies"][source])
+    assert json.loads((POLICY_FILES / file).read_text()) == policy

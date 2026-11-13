@@ -1,0 +1,99 @@
+{
+  "ManagementAccountId": "999988887777",
+  "ServiceControlPolicies": {
+    "FullAWSAccess": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Action": "*",
+          "Resource": "*"
+        }
+      ]
+    },
+    "ProtectAuditLogging": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "NoAuditLoggingChanges",
+          "Effect": "Deny",
+          "Action": [
+            "cloudtrail:StopLogging",
+            "cloudtrail:DeleteTrail",
+            "cloudtrail:UpdateTrail",
+            "cloudtrail:PutEventSelectors"
+          ],
+          "Resource": "*"
+        }
+      ]
+    },
+    "ProductionServices": {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Sid": "AllowProductionServices",
+          "Effect": "Allow",
+          "Action": [
+            "acm:*",
+            "application-autoscaling:*",
+            "cloudtrail:*",
+            "cloudwatch:*",
+            "ec2:*",
+            "ecr:*",
+            "ecs:*",
+            "elasticloadbalancing:*",
+            "iam:*",
+            "kms:*",
+            "logs:*",
+            "rds:*",
+            "route53:*",
+            "s3:*",
+            "secretsmanager:*",
+            "sns:*",
+            "sts:*"
+          ],
+          "Resource": "*"
+        }
+      ]
+    }
+  },
+  "Root": {
+    "ServiceControlPolicies": [
+      "FullAWSAccess",
+      "ProtectAuditLogging"
+    ],
+    "OrganizationalUnits": {
+      "Production": {
+        "ServiceControlPolicies": [
+          "ProductionServices"
+        ],
+        "Accounts": {
+          "111122223333": {
+            "ServiceControlPolicies": [
+              "FullAWSAccess"
+            ]
+          }
+        }
+      },
+      "Development": {
+        "ServiceControlPolicies": [
+          "FullAWSAccess"
+        ],
+        "Accounts": {
+          "123456789012": {
+            "ServiceControlPolicies": [
+              "FullAWSAccess"
+            ]
+          }
+        }
+      }
+    },
+    "Accounts": {
+      "999988887777": {
+        "ServiceControlPolicies": [
+          "FullAWSAccess"
+        ]
+      }
+    }
+  }
+}

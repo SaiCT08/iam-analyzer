@@ -214,3 +214,18 @@ def test_example_organization():
         (TargetType.ACCOUNT, DISTRICT, ["FullAWSAccess"]),
     ]
     assert org.scp_levels_for(MANAGEMENT) == ()
+
+
+def test_anycompany_organization():
+    org = load_organization_file(EXAMPLE.parent / "anycompany.json")
+    assert summary(org.scp_levels_for("111122223333")) == [
+        (TargetType.ROOT, "Root", ["FullAWSAccess", "ProtectAuditLogging"]),
+        (TargetType.ORGANIZATIONAL_UNIT, "Production", ["ProductionServices"]),
+        (TargetType.ACCOUNT, "111122223333", ["FullAWSAccess"]),
+    ]
+    assert summary(org.scp_levels_for("123456789012")) == [
+        (TargetType.ROOT, "Root", ["FullAWSAccess", "ProtectAuditLogging"]),
+        (TargetType.ORGANIZATIONAL_UNIT, "Development", ["FullAWSAccess"]),
+        (TargetType.ACCOUNT, "123456789012", ["FullAWSAccess"]),
+    ]
+    assert org.scp_levels_for(MANAGEMENT) == ()

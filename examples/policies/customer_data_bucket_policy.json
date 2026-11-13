@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OnlyTheDataTeam",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*",
+      "Condition": {
+        "ArnNotLike": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::111122223333:user/data/*",
+            "arn:aws:iam::111122223333:role/DataPipeline"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PipelineReadsCustomerData",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::111122223333:role/DataPipeline"
+      },
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::anycompany-prod-customer-data/*"
+    }
+  ]
+}

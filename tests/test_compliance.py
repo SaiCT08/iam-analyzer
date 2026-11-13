@@ -6,6 +6,7 @@ import pytest
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.compliance import Result, run, run_check
 from iam_analyzer.errors import AccountError, FrameworkError, OrganizationError
+from iam_analyzer.findings import scan
 from iam_analyzer.framework import load_framework_file, parse_framework
 from iam_analyzer.models import Decision, PolicyType, Principal, PrincipalType
 from iam_analyzer.organization import load_organization_file, parse_organization
@@ -393,6 +394,35 @@ def test_following_the_district_fix_passes_the_mfa_check():
     assert fixed.result is Result.PASS
     admin = by_principal(fixed)["role/ITAdmin"]
     assert admin.result is Result.PASS and admin.note.assume.result is Result.PASS
+
+
+def test_following_the_anycompany_fixes_passes_every_check_that_forbids_access():
+    document = json.loads((EXAMPLES / "accounts" / "anycompany-production.json").read_text())
+    org = load_organization_file(EXAMPLES / "organizations" / "anycompany.json")
+    framework = load_framework_file(EXAMPLES / "frameworks" / "anycompany.json")
+    policies, roles = document["Policies"], document["Roles"]
+    logs = ["arn:aws:s3:::anycompany-prod-app-logs", "arn:aws:s3:::anycompany-prod-app-logs/*"]
+    uploads = ["arn:aws:s3:::anycompany-prod-support-uploads",
+               "arn:aws:s3:::anycompany-prod-support-uploads/*"]
+    # Each check's Fix: narrow the wildcards that reach the backups...
+    policies["SupportAccess"]["Statement"][0]["Resource"] = logs + uploads
+    policies["VendorReadOnly"]["Statement"] = [
+        statement("Allow", ["cloudwatch:GetMetricData", "cloudwatch:ListMetrics"], "*"),
+        statement("Allow", ["s3:GetObject", "s3:ListBucket"], logs)]
+    # ...make the MFA Deny apply to requests made with access keys...
+    policies["RequireMfaForCustomerData"]["Statement"][0]["Condition"] = {
+        "BoolIfExists": {MFA: "false"}}
+    # ...and stop the deploy role from assuming the admin role.
+    trust = roles["OnCallAdmin"]["AssumeRolePolicyDocument"]
+    trust["Statement"] = [s for s in trust["Statement"] if s["Sid"] != "DeployMigrations"]
+    # The external-ID finding's fix.
+    roles["VendorMonitoring"]["AssumeRolePolicyDocument"]["Statement"][0]["Condition"] = {
+        "StringEquals": {"sts:ExternalId": "anycompany-monitoring"}}
+    acct = parse_account(document, name="anycompany-production.json")
+    results = {r.check.id: r.result for r in run(framework, acct, organization=org)}
+    assert results.pop("on-call-can-assume-admin") is Result.DEPENDS  # MFA, by design
+    assert set(results.values()) == {Result.PASS}
+    assert scan(acct, organization=org) == ()
 
 
 def test_only_mfa_checks_have_the_note():

@@ -1,0 +1,174 @@
+{
+  "Framework": {
+    "Id": "anycompany-production",
+    "Title": "AnyCompany production access"
+  },
+  "Requirements": {
+    "NIST AC-3": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-3",
+      "Title": "Access Enforcement",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST AC-6": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-6",
+      "Title": "Least Privilege",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST AC-6(1)": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-6(1)",
+      "Title": "Authorize Access to Security Functions",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST AC-6(5)": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AC-6(5)",
+      "Title": "Privileged Accounts",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST AU-9": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "AU-9",
+      "Title": "Protection of Audit Information",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST CP-9": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "CP-9",
+      "Title": "System Backup",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST IA-2(1)": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "IA-2(1)",
+      "Title": "Multi-factor Authentication to Privileged Accounts",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "NIST IA-2(2)": {
+      "Framework": "NIST SP 800-53 Rev. 5",
+      "Id": "IA-2(2)",
+      "Title": "Multi-factor Authentication to Non-privileged Accounts",
+      "Link": "https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final"
+    },
+    "SOC 2 CC6.1": {
+      "Framework": "SOC 2 (AICPA TSC 2017)",
+      "Id": "CC6.1",
+      "Title": "Logical access controls and authentication",
+      "Link": "https://www.aicpa-cima.com/resources/download/2017-trust-services-criteria-with-revised-points-of-focus-2022"
+    },
+    "SOC 2 CC6.3": {
+      "Framework": "SOC 2 (AICPA TSC 2017)",
+      "Id": "CC6.3",
+      "Title": "Role-based access and least privilege",
+      "Link": "https://www.aicpa-cima.com/resources/download/2017-trust-services-criteria-with-revised-points-of-focus-2022"
+    },
+    "SOC 2 CC7.2": {
+      "Framework": "SOC 2 (AICPA TSC 2017)",
+      "Id": "CC7.2",
+      "Title": "Monitoring systems for anomalies",
+      "Link": "https://www.aicpa-cima.com/resources/download/2017-trust-services-criteria-with-revised-points-of-focus-2022"
+    }
+  },
+  "Checks": [
+    {
+      "Id": "db-backups-admin-only",
+      "Title": "Only the on-call admin role can read database backups",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": ["role/OnCallAdmin"],
+      "Actions": ["s3:GetObject"],
+      "Resources": ["arn:aws:s3:::anycompany-prod-db-backups/2026-11-12/app.sql.gz"],
+      "Fix": "Narrow SupportAccess from anycompany-prod-* to the buckets support needs, anycompany-prod-app-logs and anycompany-prod-support-uploads, and VendorReadOnly's S3 actions from \"*\" to anycompany-prod-app-logs. A bucket policy Deny like the customer data bucket's OnlyTheDataTeam would also stop grants added later.",
+      "Keep": "No identity policy but OnCallAdmin's AdministratorAccess covers s3:GetObject on anycompany-prod-db-backups, and the bucket has no bucket policy.",
+      "MapsTo": ["NIST AC-6", "NIST CP-9", "SOC 2 CC6.1", "SOC 2 CC6.3"]
+    },
+    {
+      "Id": "admin-role-on-call-only",
+      "Title": "Only on-call engineers can assume the on-call admin role",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": ["group/OnCall", "role/OnCallAdmin"],
+      "Actions": ["sts:AssumeRole"],
+      "Resources": ["arn:aws:iam::111122223333:role/OnCallAdmin"],
+      "Fix": "Take DeployMigrations out of OnCallAdmin's trust policy, and give CIDeploy the permissions its migrations need instead, so the deploy pipeline can't become the admin role.",
+      "Keep": "OnCallWithMfa as the only statement in OnCallAdmin's trust policy, and AssumeOnCallAdmin attached only to the OnCall group.",
+      "MapsTo": ["NIST AC-6(5)", "SOC 2 CC6.3"]
+    },
+    {
+      "Id": "customer-data-needs-mfa",
+      "Title": "Reading customer data needs MFA",
+      "Severity": "high",
+      "Type": "requires",
+      "Key": "aws:MultiFactorAuthPresent",
+      "Value": "true",
+      "Except": ["role/DataPipeline"],
+      "Actions": ["s3:GetObject"],
+      "Resources": ["arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv"],
+      "Fix": "Use BoolIfExists instead of Bool in RequireMfaForCustomerData's DenyCustomerDataWithoutMfa, so the Deny also stops requests made with access keys, which carry no MFA key.",
+      "Keep": "BoolIfExists aws:MultiFactorAuthPresent false in RequireMfaForCustomerData's DenyCustomerDataWithoutMfa on the Data group, and OnlyTheDataTeam in the bucket policy for everyone outside the data team.",
+      "MapsTo": ["NIST IA-2(2)", "SOC 2 CC6.1"]
+    },
+    {
+      "Id": "admin-role-needs-mfa",
+      "Title": "Assuming the on-call admin role needs MFA",
+      "Severity": "high",
+      "Type": "requires",
+      "Key": "aws:MultiFactorAuthPresent",
+      "Value": "true",
+      "Actions": ["sts:AssumeRole"],
+      "Resources": ["arn:aws:iam::111122223333:role/OnCallAdmin"],
+      "Fix": "Take DeployMigrations out of OnCallAdmin's trust policy, so only someone who signed in with MFA can assume the role.",
+      "Keep": "Bool aws:MultiFactorAuthPresent true in every statement of OnCallAdmin's trust policy that allows sts:AssumeRole.",
+      "MapsTo": ["NIST IA-2(1)", "SOC 2 CC6.1"]
+    },
+    {
+      "Id": "customer-data-data-team-only",
+      "Title": "Only the data team can read customer data",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": ["group/Data", "role/DataPipeline"],
+      "Actions": ["s3:GetObject"],
+      "Resources": ["arn:aws:s3:::anycompany-prod-customer-data/exports/2026-11/accounts.csv"],
+      "Fix": "Deny s3:GetObject on anycompany-prod-customer-data/* in its bucket policy for every principal but the data team's /data/ users and DataPipeline, using ArnNotLike aws:PrincipalArn as OnlyTheDataTeam does, and narrow the identity policies that reach the bucket.",
+      "Keep": "OnlyTheDataTeam in the customer data bucket's policy. It's all that stops SupportAccess, VendorReadOnly and AdministratorAccess here.",
+      "MapsTo": ["NIST AC-3", "NIST AC-6", "SOC 2 CC6.1", "SOC 2 CC6.3"]
+    },
+    {
+      "Id": "customer-data-policy-admin-only",
+      "Title": "Only the on-call admin role can change the customer data bucket's policy",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": ["role/OnCallAdmin"],
+      "Actions": ["s3:PutBucketPolicy", "s3:DeleteBucketPolicy"],
+      "Resources": ["arn:aws:s3:::anycompany-prod-customer-data"],
+      "Fix": "Take s3:PutBucketPolicy and s3:DeleteBucketPolicy out of every policy but OnCallAdmin's, or add a bucket policy Deny on them for everyone but OnCallAdmin, using ArnNotEquals aws:PrincipalArn.",
+      "Keep": "No policy but OnCallAdmin's AdministratorAccess allows s3:PutBucketPolicy or s3:DeleteBucketPolicy on anycompany-prod-customer-data.",
+      "MapsTo": ["NIST AC-6(1)", "SOC 2 CC6.3"]
+    },
+    {
+      "Id": "audit-logging-stays-on",
+      "Title": "No one can turn off audit logging",
+      "Severity": "high",
+      "Type": "only",
+      "Principals": [],
+      "Actions": ["cloudtrail:StopLogging", "cloudtrail:DeleteTrail"],
+      "Resources": ["arn:aws:cloudtrail:us-east-1:111122223333:trail/prod-audit"],
+      "Fix": "Attach an SCP like ProtectAuditLogging to the organization root, denying cloudtrail:StopLogging and cloudtrail:DeleteTrail.",
+      "Keep": "ProtectAuditLogging on the organization root, which denies cloudtrail:StopLogging and cloudtrail:DeleteTrail in every member account, OnCallAdmin included.",
+      "MapsTo": ["NIST AU-9", "SOC 2 CC7.2"]
+    },
+    {
+      "Id": "on-call-can-assume-admin",
+      "Title": "On-call engineers can assume the on-call admin role",
+      "Severity": "medium",
+      "Type": "can",
+      "Principals": ["group/OnCall"],
+      "Actions": ["sts:AssumeRole"],
+      "Resources": ["arn:aws:iam::111122223333:role/OnCallAdmin"],
+      "Fix": "On-call engineers assume OnCallAdmin with MFA, by design. If they can't even with MFA, check AssumeOnCallAdmin on the OnCall group and OnCallWithMfa in the role's trust policy.",
+      "Keep": "AssumeOnCallAdmin on the OnCall group, and OnCallWithMfa in OnCallAdmin's trust policy, which lets them in with MFA."
+    }
+  ]
+}

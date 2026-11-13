@@ -10,6 +10,7 @@ from iam_analyzer.report import WIDTH, build, to_json, to_markdown
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
 GOLDEN = Path(__file__).parent / "golden" / "district_report.md"
+ANYCOMPANY_GOLDEN = Path(__file__).parent / "golden" / "anycompany_report.md"
 
 BUCKET = "arn:aws:s3:::district-student-records"
 OBJECT = f"{BUCKET}/campus-02/transcript.pdf"
@@ -497,6 +498,39 @@ def test_the_district_report_matches_its_golden_file():
           --framework examples/frameworks/district.json > tests/golden/district_report.md
     """
     assert to_markdown(district_report()) == GOLDEN.read_text()
+
+
+# --- The AnyCompany example ------------------------------------------------------------
+
+
+def anycompany_report():
+    org = load_organization_file(EXAMPLES / "organizations" / "anycompany.json")
+    return build(load_framework_file(EXAMPLES / "frameworks" / "anycompany.json"),
+                 load_account_file(EXAMPLES / "accounts" / "anycompany-production.json"),
+                 organization=org)
+
+
+def test_the_anycompany_framework_gives_every_result():
+    assert {r.check.id: r.result for r in anycompany_report().checks} == {
+        "db-backups-admin-only": Result.FAIL,
+        "admin-role-on-call-only": Result.FAIL,
+        "customer-data-needs-mfa": Result.FAIL,
+        "admin-role-needs-mfa": Result.CANT_TELL,
+        "customer-data-data-team-only": Result.PASS,
+        "customer-data-policy-admin-only": Result.PASS,
+        "audit-logging-stays-on": Result.PASS,
+        "on-call-can-assume-admin": Result.DEPENDS,
+    }
+
+
+def test_the_anycompany_report_matches_its_golden_file():
+    """After an intended change to the report, regenerate the golden file:
+
+        iam-analyzer report --account examples/accounts/anycompany-production.json \\
+          --org examples/organizations/anycompany.json \\
+          --framework examples/frameworks/anycompany.json > tests/golden/anycompany_report.md
+    """
+    assert to_markdown(anycompany_report()) == ANYCOMPANY_GOLDEN.read_text()
 
 
 # --- Findings --------------------------------------------------------------------------

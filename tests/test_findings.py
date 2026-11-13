@@ -6,8 +6,8 @@ import pytest
 from iam_analyzer.account import load_account_file, parse_account
 from iam_analyzer.findings import DATE_NUMBER, TYPES, Use, scan
 from iam_analyzer.framework import Severity
-from iam_analyzer.models import OrgTarget, PolicyType, TargetType
-from iam_analyzer.organization import parse_organization
+from iam_analyzer.models import OrgTarget, PolicyType, Principal, PrincipalType, TargetType
+from iam_analyzer.organization import load_organization_file, parse_organization
 from simulator_check import FIXTURE_DIR, outcomes
 
 EXAMPLES = Path(__file__).parent.parent / "examples"
@@ -157,6 +157,29 @@ def test_the_district_example_has_its_two_mistakes():
     assert (date.type, date.severity, date.policy.name) == (
         DATE_NUMBER, Severity.LOW, "SummerSchoolRecords")
     assert date.uses == (Use(PolicyType.IDENTITY, principal="group/SummerSchool"),)
+
+
+ANYCOMPANY = EXAMPLES / "accounts" / "anycompany-production.json"
+
+
+def test_the_anycompany_example_has_its_two_finding_mistakes():
+    org = load_organization_file(EXAMPLES / "organizations" / "anycompany.json")
+    mfa, vendor = scan(load_account_file(ANYCOMPANY), organization=org)
+    assert (mfa.type.id, mfa.severity, mfa.policy.name, mfa.statement.sid) == (
+        "mfa-deny-skips-access-keys", Severity.HIGH, "RequireMfaForCustomerData",
+        "DenyCustomerDataWithoutMfa")
+    assert mfa.uses == (Use(PolicyType.IDENTITY, principal="group/Data"),)
+    assert (vendor.type.id, vendor.severity, vendor.statement.sid, vendor.principal) == (
+        "cross-account-trust-without-external-id", Severity.MEDIUM, "MonitoringVendor",
+        Principal(PrincipalType.AWS, "arn:aws:iam::444455556666:root"))
+
+
+def test_without_its_organization_the_ci_runner_looks_like_a_third_party():
+    # The development account is in the organization, so trusting its CI runner needs no
+    # external ID. Without the organization file, the analyzer can't know that.
+    trusted = [f.statement.sid for f in scan(load_account_file(ANYCOMPANY), organization=None)
+               if f.type.id == "cross-account-trust-without-external-id"]
+    assert trusted == ["CIRunnerInDevelopment", "MonitoringVendor"]
 
 
 # --- Who policies grant access to ------------------------------------------------------

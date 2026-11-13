@@ -948,6 +948,16 @@ def test_report_a_public_bucket_fails_the_district_report(capsys, tmp_path):
     assert "### HIGH: A bucket policy grants access to everyone" in out
 
 
+def test_report_the_anycompany_example_fails(capsys):
+    examples = Path(__file__).parent.parent / "examples"
+    code = main(["report", "--account", str(examples / "accounts" / "anycompany-production.json"),
+                 "--org", str(examples / "organizations" / "anycompany.json"),
+                 "--framework", str(examples / "frameworks" / "anycompany.json")])
+    out, _ = capsys.readouterr()
+    assert code == EXIT_FAILED
+    assert out.startswith("# Compliance report: AnyCompany production access\n")
+
+
 def test_report_needs_scps_stated(tmp_path):
     framework = framework_file(tmp_path, report_check("only"))
     with pytest.raises(SystemExit) as exc:
