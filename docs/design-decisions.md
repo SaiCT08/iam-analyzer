@@ -371,9 +371,16 @@ other than letters and digits or used twice, or an action without a service pref
 - **`reasons`** lists every statement that matched, from every layer.
 - **`grants`** lists the Allows on a way in that works by itself: an identity policy's Allow when the
   boundary, if any, allows too; a resource-based grant to the user or to everyone, or to the role
-  when its boundary allows; and a trust policy's Allow, which every way into a role needs. A grant to
-  the account only delegates, so it grants nothing itself, and boundary and SCP statements only
-  limit, so they never grant. Which layers a grant needs is AWS's rule, so it lives in the engine.
+  when its boundary allows; and a trust policy's Allow on such a way in, since every way into a role
+  needs one. A grant to the account only delegates, so it grants nothing itself, and boundary and
+  SCP statements only limit, so they never grant. Which layers a grant needs is AWS's rule, so it
+  lives in the engine.
+- **Judgment call: a trust policy's Allow that names the account is part of a grant only when an
+  identity policy grants too.** AWS's AssumeRole page gives the two ways in within one account:
+  "Attach a policy to the user that allows the user to call AssumeRole (as long as the role's trust
+  policy trusts the account)", or "Add the user as a principal directly in the role's trust policy".
+  So for a caller that no identity policy lets in, a statement naming the account isn't a way in,
+  even when it matches, and only the statement naming the caller grants.
 - **`overridden`**, for an explicit Deny, lists the Allows it overrode that would grant the request,
   by the same rules.
 - **`without_denies`**, for an explicit Deny, says what the request would get with every Deny taken

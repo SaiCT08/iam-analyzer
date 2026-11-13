@@ -1160,6 +1160,24 @@ def test_a_trust_policy_is_part_of_every_grant():
     assert granted_by(result) == [("Assume", "Assume"), (ITADMIN, "Account")]
 
 
+DEPLOY = "arn:aws:iam::111122223333:role/Deploy"
+ACCOUNT_AND_ROLE = (trusts({"AWS": "111122223333"}, Sid="Account"),
+                    trusts({"AWS": DEPLOY}, Sid="Deploy"))
+
+
+@pytest.mark.parametrize("identity, granted", [
+    # Naming the account delegates to the identity policies. With none that allows the request,
+    # it isn't a way in, so only the statement that names the caller's role grants.
+    ([], [(ITADMIN, "Deploy")]),
+    ([ASSUME], [("Assume", "Assume"), (ITADMIN, "Account"), (ITADMIN, "Deploy")]),
+])
+def test_a_trust_statement_naming_the_account_grants_only_with_an_identity_allow(
+        identity, granted):
+    result = with_trust_policy(assume_by(DEPLOY), identity, *ACCOUNT_AND_ROLE)
+    assert result.decision is Decision.ALLOW
+    assert granted_by(result) == granted
+
+
 def test_denials_have_no_grants():
     assert check(GET, [policy("p", deny("*", "*"))]).grants == ()
     assert check(GET, []).grants == ()
@@ -1208,6 +1226,18 @@ def test_a_deny_overrides_bucket_policy_and_trust_policy_grants():
     result = with_trust_policy(assume_by(ALEE), [ASSUME, no_assume],
                                trusts({"AWS": "111122223333"}, Sid="Account"))
     assert overridden_by(result) == [("Assume", "Assume"), (ITADMIN, "Account")]
+
+
+@pytest.mark.parametrize("identity, overridden", [
+    ([], [(ITADMIN, "Deploy")]),
+    ([ASSUME], [("Assume", "Assume"), (ITADMIN, "Account"), (ITADMIN, "Deploy")]),
+])
+def test_a_deny_overrides_a_trust_statement_naming_the_account_only_with_an_identity_allow(
+        identity, overridden):
+    no_assume = policy("NoAssume", deny("sts:AssumeRole", "*", sid="NoAssume"))
+    result = with_trust_policy(assume_by(DEPLOY), [*identity, no_assume], *ACCOUNT_AND_ROLE)
+    assert result.decision is Decision.EXPLICIT_DENY
+    assert overridden_by(result) == overridden
 
 
 def test_boundary_and_scp_allows_are_never_overridden():

@@ -33,7 +33,8 @@ The logic, in three steps:
 So boundaries and SCPs never grant anything by themselves; they only limit what identity
 and resource-based policies allow. An allowed result's `grants` are the Allows on a way in that
 works by itself: the identity policies' when the boundary allows too, a resource-based policy's
-grant that needs nothing else, and the trust policy's, which every way into a role needs. An
+grant that needs nothing else, and the trust policy's on such a way in, since every way into a
+role needs it. An
 explicit Deny's result lists the Allows it overrode by the same rules, as `overridden`, so a
 boundary's or an SCP's Allow, which only limits, is never one of them. Its `without_denies` is
 the decision with every Deny left out: allowed, still denied by the layers it names, or unknown
@@ -283,19 +284,34 @@ def _grants(
       caller's role and the boundary allows: AWS says a grant to a role ARN is "limited by an
       implicit deny in a permissions boundary". Naming the caller's account only delegates to
       the identity policies, so it grants nothing itself.
-    - A trust policy's Allow is always part of the grant, because every way into a role needs it.
+    - A trust policy's Allow is part of every way into a role, so it grants on any way that works:
+      by the rules above when it names the caller, and, when it names the caller's account, with
+      an identity policy's Allow that grants. AWS's AssumeRole page gives both ways within one
+      account: an identity policy allowing AssumeRole "as long as the role's trust policy trusts
+      the account", or the caller named in the trust policy.
     Boundaries and SCPs only limit, so none of their statements grant.
     """
     found = {layer.policy_type: statements for layer, statements in matched
              if layer.policy_type is not PolicyType.SCP}
     boundary_allows = not bounded or bool(found.get(PolicyType.PERMISSIONS_BOUNDARY))
-    grants = list(found.get(PolicyType.IDENTITY, [])) if boundary_allows else []
+    identity = list(found.get(PolicyType.IDENTITY, [])) if boundary_allows else []
+    grants = list(identity)
     for statement in found.get(PolicyType.RESOURCE_BASED, []):
-        role = statement.principal_match is PrincipalMatch.ROLE
-        if statement.principal_match.direct or (role and boundary_allows):
+        if _names_the_caller(statement, boundary_allows=boundary_allows):
             grants.append(statement)
-    grants += found.get(PolicyType.TRUST, [])
+    for statement in found.get(PolicyType.TRUST, []):
+        account = statement.principal_match is PrincipalMatch.ACCOUNT
+        if _names_the_caller(statement, boundary_allows=boundary_allows) or (account and identity):
+            grants.append(statement)
     return tuple(grants)
+
+
+def _names_the_caller(statement: MatchedStatement, *, boundary_allows: bool) -> bool:
+    """Whether a resource-based or trust policy's Allow lets the caller in without the identity
+    policies: it names the caller's user or everyone, or the caller's role when the boundary
+    allows the request."""
+    role = statement.principal_match is PrincipalMatch.ROLE
+    return statement.principal_match.direct or (role and boundary_allows)
 
 
 def _not_allowed_by(
