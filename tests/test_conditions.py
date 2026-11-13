@@ -186,7 +186,7 @@ def test_aws_documentation_tables(condition, entries, expected):
 # match, No match). Each row contradicts the set-operator and negated-operator definitions
 # beside it, and the example's own description ("denies access to Amazon S3 actions unless the
 # resource being accessed is in a specific set of organizational units") only works with the
-# definitions. So these tests expect the definitions' results.
+# definitions. So these tests expect the definitions' results. See docs/design-decisions.md.
 OU_BOUNDARY = {"ForAllValues:StringNotLike": {"aws:ResourceOrgPaths": [
     "o-acorg/r-acroot/ou-acroot-mediaou/", "o-acorg/r-acroot/ou-acroot-sportsou/*"]}}
 

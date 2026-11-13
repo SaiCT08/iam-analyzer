@@ -10,8 +10,9 @@ Each entry quotes the "Availability" line that says whether a request can leave 
 aws:MultiFactorAuthPresent can be absent for every principal. AWS says it is missing for
 long-term access keys and for federated identities. Every principal is still tried with true, false
 and absent, roles included: when it's unsure whether a value can happen, the analyzer tries it.
-If AWS's page below is right, true for a role can only add a false alarm. If it's
-wrong, skipping true could let a check that forbids access PASS when it should FAIL.
+If AWS's page below is right, true for a role can only add a false alarm. If it's wrong, skipping
+true could let a check that forbids access PASS when it should FAIL. docs/design-decisions.md
+records this judgment call with AWS's quotes.
 
 AWS also checks MFA for a role when the role is assumed, not on the role's own requests: its
 "Secure API access with MFA" page says "The temporary credentials returned by AssumeRole do not

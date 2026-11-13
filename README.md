@@ -50,7 +50,7 @@ policies (SCPs)**, **S3 bucket policies** and **role trust policies**:
   AWS surprises in the policy text that need no question, and prints Markdown and JSON with exit
   codes for CI. A framework is a data file (see [Compliance reports](#compliance-reports)).
 
-Not supported yet:
+Not supported yet (see [every refusal](docs/design-decisions.md#every-refusal)):
 - `NotPrincipal` is refused, with a clear error, when its statement applies to the request. Other
   requests on the same resource are answered as usual.
 - Resource-based policies other than S3 bucket policies and role trust policies. Another service's
@@ -653,7 +653,8 @@ when it was asked, and refuses otherwise:
   `ForAllValues`, which AWS documents treats it as having none. Where those two rules disagree,
   in `ForAllValues:Null` with `"true"`, the analyzer refuses.
 
-[docs/simulator-check.md](docs/simulator-check.md) has each case with AWS's answer.
+[docs/simulator-check.md](docs/simulator-check.md) has each case with AWS's answer, and
+[docs/design-decisions.md](docs/design-decisions.md#every-refusal) lists every refusal.
 
 Exit codes: `0` = allowed, `1` = denied (explicit or implicit), `2` = input error.
 

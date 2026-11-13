@@ -17,6 +17,8 @@ A statement applies only when every one of its conditions holds. Within one cond
 
 Where AWS's documentation leaves a case open, the analyzer refuses (UnsupportedPolicyFeature)
 instead of guessing, unless AWS's IAM policy simulator answered it (tests/simulator_fixtures).
+docs/design-decisions.md lists those cases, and the judgment calls that the rest of the
+documentation settles.
 """
 
 import base64

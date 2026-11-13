@@ -376,7 +376,8 @@ This section covers every case marked `differs`, `simulator limit` or `analyzer 
 decision for each, made on 2026-10-25 and 2026-10-26. The engine follows a decision once its
 section says "Done".
 
-The decisions follow the project's rule for AWS's docs:
+The decisions follow the project's rule for AWS's docs (see
+[design decisions](design-decisions.md#which-evidence-settles-a-question)):
 - where AWS's docs clearly settle a question, the analyzer follows them, even when the simulator
   disagrees;
 - where they contradict each other or don't say, a recorded simulator answer can settle it.

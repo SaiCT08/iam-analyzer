@@ -773,7 +773,7 @@ def with_bucket_policy(request, policies, *statements, **layers):
         # A grant to the user isn't limited by their identity policies or boundary.
         (KWONG, {"AWS": KWONG}, None, Decision.ALLOW),
         (KWONG, {"AWS": KWONG}, NO_S3, Decision.ALLOW),
-        # Neither is a grant to everyone (a judgment call).
+        # Neither is a grant to everyone (a judgment call; see docs/design-decisions.md).
         (KWONG, "*", NO_S3, Decision.ALLOW),
         (CAMPUS_APP, "*", NO_S3, Decision.ALLOW),
         # A grant to the role needs no identity policy, but the role's boundary limits it.
