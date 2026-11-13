@@ -970,8 +970,7 @@ A requirement gives the framework, the requirement's ID, a short title and a lin
 - never an ID that hasn't been checked against its source.
 
 The district framework maps to two:
-- FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy, since eCFR blocks automated
-  reads;
+- FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy;
 - NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables.
 
 It maps no CIS recommendations, because their IDs change between benchmark versions and their text

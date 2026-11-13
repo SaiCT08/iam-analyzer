@@ -453,8 +453,7 @@ So AWS checks MFA for a role when the role is assumed.
 A requirement is only a framework, an ID, a short title and a link. The title is at most 60
 characters on one line, so it can't hold pasted framework text, and each ID is checked against its
 source before it's added:
-- FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy, because eCFR blocks automated
-  reads;
+- FERPA 34 CFR § 99.31(a)(1)(ii), checked against Cornell LII's copy;
 - NIST SP 800-53 Rev. 5 controls, checked against NIST SP 800-53B's baseline tables.
 
 CIS recommendations aren't mapped, since their IDs change between benchmark versions and their text
