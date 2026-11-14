@@ -199,6 +199,7 @@ Not supported yet (see [every refusal](docs/design-decisions.md#every-refusal)):
 - Resource-based policies other than S3 bucket policies and role trust policies. Another service's
   resource can only be described as having none.
 - Cross-account requests, KMS keys, and requests by SAML or OIDC users are refused.
+- Reading an account straight from AWS. Account files are written by hand.
 
 ## Usage
 
